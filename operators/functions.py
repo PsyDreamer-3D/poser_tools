@@ -78,19 +78,18 @@ def build_fbm_shapekey_list(shapekeys):
     return fbms
 
 
-def is_child_shapekey(sh_name):
-    global is_daz
+def is_child_shapekey(sh_name, _is_daz=False):
     if re.search(r'\.[0-9]{3}', sh_name) is not None:
         return True
 
-    if sh_name[0] == 'p' and is_daz:
+    if sh_name[0] == 'p' and _is_daz:
         return True
 
     return False
 
 
-def get_parent_name(sh_name):
-    has_p = sh_name[0] == 'p' and is_daz
+def get_parent_name(sh_name, _is_daz=False):
+    has_p = sh_name[0] == 'p' and _is_daz
     has_trailing_digits = re.search(r'\.[0-9]{3}', sh_name)
 
     if has_p and not has_trailing_digits:
@@ -111,11 +110,6 @@ def delete_shapekey(obj, sh_name, shapekeys):
 def set_active_shapekey(obj, sh_name, shapekeys):
     index = shapekeys.keys().index(sh_name)
     obj.active_shape_key_index = index
-
-
-def move_active_shapekey_to_bottom(obj, sh_name, shapekeys):
-    set_active_shapekey(obj, sh_name, shapekeys)
-    bpy.ops.object.shape_key_move(type="BOTTOM")
 
 
 def is_shapekey_empty(sh_name, shapekeys):
@@ -173,7 +167,7 @@ def mute_child_shapekeys(fbm_shapekeys, morph, shapekeys):
         shapekeys[child_morph].value = 0
 
 
-def consolidate_poser_shapekeys(obj, shapekeys):
+def consolidate_poser_shapekeys(obj, shapekeys, _is_daz=False):
     fbm_shapekeys = build_fbm_shapekey_list(shapekeys)
     mute_all_shapekeys(shapekeys)
     print(' ')
