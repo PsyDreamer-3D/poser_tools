@@ -1,13 +1,7 @@
 import bpy
 from .functions import consolidate_poser_shapekeys
 
-
-class ConsolidatePoserShapeKeys:
-    def consolidate_poser_shapekeys(self):
-        pass
-
-
-class OT_FixPoserShapekeys_Operator(ConsolidatePoserShapeKeys, bpy.types.Operator):
+class OT_FixPoserShapekeys_Operator(bpy.types.Operator):
     bl_idname = "poser.fix_poser_shapekeys"
     bl_label = "Fix Poser Shapekeys"
     bl_options = {'REGISTER', 'UNDO'}
@@ -21,8 +15,15 @@ class OT_FixPoserShapekeys_Operator(ConsolidatePoserShapeKeys, bpy.types.Operato
 
     def execute(self, context):
         obj = context.active_object
+        if obj["morphs_consolidated"]:
+            print('morphs are already consolidated')
+            return {'CANCELLED'}
+
         shapekeys = obj.data.shape_keys.key_blocks
-        options = context.scene.poser_shapekeys_addon
-        ConsolidatePoserShapeKeys.consolidate_poser_shapekeys()
-        # consolidate_poser_shapekeys(obj, shapekeys)
+        scene = context.scene
+        options = scene.poser_shapekeys_addon
+
+        consolidate_poser_shapekeys(obj, shapekeys, options.is_daz)
+        obj["morphs_consolidated"] = True
+        print('morphs have been consolidated')
         return {'FINISHED'}

@@ -58,7 +58,7 @@ def build_child_shapekey_list(shapekeys):
     return _fbm_shape_keys
 
 
-def build_fbm_shapekey_list(shapekeys):
+def build_fbm_shapekey_list(shapekeys, _is_daz=False):
     parent_shapekeys = build_parent_shapekey_list(shapekeys)
     child_shapekeys = build_child_shapekey_list(shapekeys)
 
@@ -70,7 +70,7 @@ def build_fbm_shapekey_list(shapekeys):
         }
 
         for ch in child_shapekeys:
-            if fbm != get_parent_name(ch):
+            if fbm != get_parent_name(ch, _is_daz):
                 continue
 
             fbms[fbm]["children"][ch] = child_shapekeys[ch]
@@ -168,7 +168,7 @@ def mute_child_shapekeys(fbm_shapekeys, morph, shapekeys):
 
 
 def consolidate_poser_shapekeys(obj, shapekeys, _is_daz=False):
-    fbm_shapekeys = build_fbm_shapekey_list(shapekeys)
+    fbm_shapekeys = build_fbm_shapekey_list(shapekeys, _is_daz)
     mute_all_shapekeys(shapekeys)
     print(' ')
     print('Converting Shapekeys...')
