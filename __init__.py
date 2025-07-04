@@ -1,11 +1,8 @@
 import bpy
 from bpy.props import PointerProperty
-from .module_loader import refresh
 from .panels.fixPoserShapekeys import FixPoserShapekeys_Panel_Main
-from .panels.renameArmatureBones import RenameArmatureBones_Main_Panel
 from .settings.poserToolsAddonSettings import PoserShapeKeysAddon_Settings
 from .operators.fixPoserShapekeys import OT_FixPoserShapekeys_Operator
-from .operators.renameArmatureBones import OT_RenameArmatureBones_Operator
 
 bl_info = {
     "name": "Poser Tools",
@@ -20,10 +17,8 @@ bl_info = {
 
 classes = (
     FixPoserShapekeys_Panel_Main,
-    RenameArmatureBones_Main_Panel,
     PoserShapeKeysAddon_Settings,
-    OT_FixPoserShapekeys_Operator,
-    OT_RenameArmatureBones_Operator
+    OT_FixPoserShapekeys_Operator
 )
 
 

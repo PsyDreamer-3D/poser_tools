@@ -216,5 +216,3 @@ def consolidate_poser_shapekeys(obj, shapekeys, _is_daz=False):
     for morph in shapekeys_processed:
         shapekeys[morph].mute = False
 
-# print(build_fbm_shapekey_list(shapekeys))
-# consolidate_poser_shapekeys(obj, shapekeys)

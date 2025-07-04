@@ -17,6 +17,11 @@ class RenameArmatureBones_Main_Panel(RenameArmatureBonesPanel, bpy.types.Panel):
         layout = self.layout
         layout.row().label(text="Add .L/.R prefixes to symmetrical bones")
 
+        scene = context.scene
+        options = scene.poser_shapekeys_addon
+        text_field_row = layout.row(align=True)
+        text_field_row.prop(options, "bone_prefix")
+
         row = layout.row()
         row.scale_y = 1.5
         row.operator("poser.rename_armature_bones")

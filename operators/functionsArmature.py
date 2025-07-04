@@ -1,4 +1,3 @@
-
 def rename_all_bones(armature):
     bones = armature.data.bones
 
@@ -24,3 +23,12 @@ def rename_bone(name):
         name = name[1:] + '.R'
 
     return name
+
+
+def prefix_bones(armature, prefix="DEF-"):
+    bones = armature.data.bones
+
+    for bone in bones:
+        new_name = rename_bone(bone.name)
+        if new_name is not "":
+            armature.data.bones[bone.name].name = prefix + new_name

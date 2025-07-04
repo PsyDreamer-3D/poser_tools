@@ -1,5 +1,5 @@
 import bpy
-from .shapeKeyFunctions import consolidate_poser_shapekeys
+from .functionsShapeKeys import consolidate_poser_shapekeys
 
 
 class OT_FixPoserShapekeys_Operator(bpy.types.Operator):
@@ -9,7 +9,7 @@ class OT_FixPoserShapekeys_Operator(bpy.types.Operator):
 
     @classmethod
     def poll(cls, context):
-        if context.active_object.type != 'MESH':
+        if context.active_object is None or context.active_object.type != 'MESH':
             return False
 
         return True
