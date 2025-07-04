@@ -88,7 +88,7 @@ def is_child_shapekey(sh_name, _is_daz=False):
     return False
 
 
-def sget_parent_name(sh_name, _is_daz=False):
+def get_parent_name(sh_name, _is_daz=False):
     has_p = sh_name[0] == 'p' and _is_daz
     has_trailing_digits = re.search(r'\.[0-9]{3}', sh_name)
 
@@ -216,5 +216,3 @@ def consolidate_poser_shapekeys(obj, shapekeys, _is_daz=False):
     for morph in shapekeys_processed:
         shapekeys[morph].mute = False
 
-# print(build_fbm_shapekey_list(shapekeys))
-# consolidate_poser_shapekeys(obj, shapekeys)

@@ -1,5 +1,5 @@
 import bpy
-from .armatureFunctions import rename_all_bones
+from functions.armatureFunctions import rename_all_bones
 
 
 class OT_RenameArmatureBones_Operator(bpy.types.Operator):

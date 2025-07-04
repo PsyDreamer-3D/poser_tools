@@ -1,5 +1,5 @@
 import bpy
-from .shapeKeyFunctions import consolidate_poser_shapekeys
+from functions.shapeKeyFunctions import consolidate_poser_shapekeys
 
 
 class OT_FixPoserShapekeys_Operator(bpy.types.Operator):
