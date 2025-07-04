@@ -1,10 +1,11 @@
 import bpy
-from functionsWeightGroups import rename_vertex_groups
+from .functionsWeightGroups import rename_vertex_groups
 
 
 class OT_RenameWeightGroups_Operator(bpy.types.Operator):
     bl_idname = "poser.rename_weight_groups"
-    bl_label = "Rename weight groups to conform to Blender symmetry standards."
+    bl_description = "Rename weight groups to conform to Blender symmetry standards"
+    bl_label = "Rename weight groups"
 
     @classmethod
     def poll(cls, context):

@@ -7,6 +7,7 @@ from .panels.renameWeightGroups import RenameWeightGroups_Panel
 from .settings.poserToolsAddonSettings import PoserShapeKeysAddon_Settings
 from .operators.fixPoserShapekeys import OT_FixPoserShapekeys_Operator
 from .operators.renameArmatureBones import OT_RenameArmatureBones_Operator, OT_PrefixArmatureBones_Operator
+from .operators.renameWeightGroups import OT_RenameWeightGroups_Operator
 
 bl_info = {
     "name": "Poser Tools",
@@ -27,7 +28,8 @@ classes = (
     PoserShapeKeysAddon_Settings,
     OT_FixPoserShapekeys_Operator,
     OT_RenameArmatureBones_Operator,
-    OT_PrefixArmatureBones_Operator
+    OT_PrefixArmatureBones_Operator,
+    OT_RenameWeightGroups_Operator
 )
 
 
