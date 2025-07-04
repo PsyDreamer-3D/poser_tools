@@ -1,5 +1,6 @@
 import bpy
-from .functions import consolidate_poser_shapekeys
+from .shapeKeyFunctions import consolidate_poser_shapekeys
+
 
 class OT_FixPoserShapekeys_Operator(bpy.types.Operator):
     bl_idname = "poser.fix_poser_shapekeys"
