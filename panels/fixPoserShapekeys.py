@@ -2,17 +2,16 @@ import bpy
 import textwrap
 
 
-class FixPoserShapekeysPanel(bpy.types.Panel):
+class FixPoserShapekeys(bpy.types.Panel):
     bl_idname = "VIEW_3D_PT_FixPoserShapekeys"
     bl_label = "Fix Poser Shapekeys"
     bl_category = "Poser"
     bl_space_type = "VIEW_3D"
     bl_region_type = "UI"
-    bl_options = {"DEFAULT_CLOSED"}
 
 
-class FixPoserShapekeys_Panel_Main(FixPoserShapekeysPanel, bpy.types.Panel):
-    bl_idname = "VIEW_3D_PT_FixPoserShapekeys_Panel_Main"
+class FixPoserShapekeys_Panel(FixPoserShapekeys, bpy.types.Panel):
+    bl_idname = "VIEW_3D_PT_FixPoserShapekeys_Panel"
     bl_label = "Fix Poser Shapekeys"
 
     def draw(self, context):
@@ -24,8 +23,8 @@ class FixPoserShapekeys_Panel_Main(FixPoserShapekeysPanel, bpy.types.Panel):
         row.prop(options, "is_daz")
         text = """
         Example of legacy Daz figures:
-        Millennium 4, Millennium 3, etc.
-        But not Genesis or newer.
+        Millennium 4, Millennium 3, etc.,
+        but not Genesis or newer.
         """
         for line in text.splitlines():
             line = line.strip()

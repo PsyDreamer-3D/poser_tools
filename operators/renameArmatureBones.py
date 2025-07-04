@@ -1,5 +1,5 @@
 import bpy
-from functionsArmature import rename_all_bones, prefix_bones
+from .functionsArmature import rename_all_bones
 
 
 class OT_RenameArmatureBones_Operator(bpy.types.Operator):
@@ -8,7 +8,7 @@ class OT_RenameArmatureBones_Operator(bpy.types.Operator):
 
     @classmethod
     def poll(cls, context):
-        if context.scene.armature.type != 'ARMATURE':
+        if context.active_object is None or context.active_object.type != 'ARMATURE':
             return False
 
         return True
@@ -24,7 +24,7 @@ class OT_PrefixArmatureBones_Operator(bpy.types.Operator):
 
     @classmethod
     def poll(cls, context):
-        if context.scene.armature.type != 'ARMATURE':
+        if context.active_object is None or context.active_object != 'ARMATURE':
             return False
 
         return True
