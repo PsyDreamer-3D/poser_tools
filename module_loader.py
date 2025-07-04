@@ -23,5 +23,5 @@ def get_module_names():
 
 
 def refresh():
-    importFiles = get_module_names()
-    reload_modules(importFiles)
+    import_files = get_module_names()
+    reload_modules(import_files)

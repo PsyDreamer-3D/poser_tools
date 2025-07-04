@@ -6,6 +6,7 @@ from .panels.renameArmatureBones import RenameArmatureBones_Main_Panel
 from .settings.poserToolsAddonSettings import PoserShapeKeysAddon_Settings
 from .operators.fixPoserShapekeys import OT_FixPoserShapekeys_Operator
 from .operators.renameArmatureBones import OT_RenameArmatureBones_Operator
+refresh()
 
 bl_info = {
     "name": "Poser Tools",
