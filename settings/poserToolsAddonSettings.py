@@ -20,3 +20,9 @@ class PoserShapeKeysAddon_Settings(bpy.types.PropertyGroup):
         description="Batch-add a prefix to armature bones",
         default="DEF-"
     )
+
+    primary_root_bone: StringProperty(
+        name="Primary Root Bone",
+        description="Name of primary root bone—the root of the bone that controls the main figure",
+        default="Body"
+    )

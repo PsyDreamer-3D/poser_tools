@@ -11,6 +11,7 @@ from .settings.poserToolsAddonSettings import PoserShapeKeysAddon_Settings
 from .operators.fixPoserShapekeys import OT_FixPoserShapekeys_Operator
 from .operators.renameArmatureBones import OT_RenameArmatureBones_Operator, OT_PrefixArmatureBones_Operator
 from .operators.renameWeightGroups import OT_RenameWeightGroups_Operator, OT_PrefixWeightGroups_Operator
+from .operators.importPoserFBX import OT_ImportPoserFBX
 from .operators.setupPoserFigure import OT_SetupPoserFigure_Operator
 
 bl_info = {

@@ -10,6 +10,12 @@ class SetupPoserFigure_Panel(bpy.types.Panel):
 
     def draw(self, context):
         layout = self.layout
+        scene = context.scene
+        options = scene.poser_shapekeys_addon
+
+        text_row = layout.row(align=True)
+        text_row.prop(options, "primary_root_bone")
+
         op_row = layout.row(align=True)
         op_row.scale_y = 1.5
 
