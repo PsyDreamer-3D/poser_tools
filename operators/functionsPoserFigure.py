@@ -58,6 +58,10 @@ def strip_trailing_digits_from_bones(obj):
 
 
 def setup_poser_figure(figure_name, objects):
+    # Before deselecting everything, apply scale/rotation
+    # Poser's scale is 1/100 smaller than Blender, plus rotation is different as well
+    bpy.ops.object.transform_apply(location=False, rotation=True, scale=True)
+
     bpy.ops.object.select_all(action='DESELECT')
 
     for obj in objects:
@@ -75,4 +79,5 @@ def setup_poser_figure(figure_name, objects):
         rename_all_bones(obj)
 
         bpy.ops.object.editmode_toggle()  # we're done here
+
 
