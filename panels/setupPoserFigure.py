@@ -19,4 +19,5 @@ class SetupPoserFigure_Panel(bpy.types.Panel):
         op_row = layout.row(align=True)
         op_row.scale_y = 1.5
 
-        op_row.operator("poser.setup_poser_figure")
+        op = op_row.operator("poser.setup_poser_figure")
+        op.figure_name = options.primary_root_bone
