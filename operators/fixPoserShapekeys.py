@@ -16,7 +16,7 @@ class OT_FixPoserShapekeys_Operator(bpy.types.Operator):
 
     def execute(self, context):
         obj = context.active_object
-        if obj["morphs_consolidated"]:
+        if ("morphs_consolidated" in obj) and obj["morphs_consolidated"] is True:
             print('morphs are already consolidated')
             return {'CANCELLED'}
 

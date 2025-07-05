@@ -1,5 +1,5 @@
 import bpy
-from .functionsArmature import rename_all_bones
+from .functionsArmature import rename_all_bones, prefix_bones
 
 
 class OT_RenameArmatureBones_Operator(bpy.types.Operator):
@@ -14,7 +14,7 @@ class OT_RenameArmatureBones_Operator(bpy.types.Operator):
         return True
 
     def execute(self, context):
-        rename_all_bones(context.scene.armature)
+        rename_all_bones(context.active_object)
         return {'FINISHED'}
 
 
@@ -30,5 +30,5 @@ class OT_PrefixArmatureBones_Operator(bpy.types.Operator):
         return True
 
     def execute(self, context):
-        prefix_bones(context.scene.armature)
+        prefix_bones(context.active_object)
         return {'FINISHED'}

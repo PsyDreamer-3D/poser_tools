@@ -1,13 +1,15 @@
 import bpy
 from bpy.props import PointerProperty
+from .panels.importPoserFBX import ImportPoserFBX_Panel
 from .panels.fixPoserShapekeys import FixPoserShapekeys_Panel
 from .panels.renameArmatureBones import RenameArmatureBones_Panel
 from .panels.prefixArmatureBones import PrefixArmatureBones_Panel
 from .panels.renameWeightGroups import RenameWeightGroups_Panel
+from .panels.prefixWeightGroups import PrefixWeightGroups_Panel
 from .settings.poserToolsAddonSettings import PoserShapeKeysAddon_Settings
 from .operators.fixPoserShapekeys import OT_FixPoserShapekeys_Operator
 from .operators.renameArmatureBones import OT_RenameArmatureBones_Operator, OT_PrefixArmatureBones_Operator
-from .operators.renameWeightGroups import OT_RenameWeightGroups_Operator
+from .operators.renameWeightGroups import OT_RenameWeightGroups_Operator, OT_PrefixWeightGroups_Operator
 
 bl_info = {
     "name": "Poser Tools",
@@ -21,15 +23,18 @@ bl_info = {
 }
 
 classes = (
+    ImportPoserFBX_Panel,
     FixPoserShapekeys_Panel,
     RenameArmatureBones_Panel,
     PrefixArmatureBones_Panel,
     RenameWeightGroups_Panel,
+    PrefixWeightGroups_Panel,
     PoserShapeKeysAddon_Settings,
     OT_FixPoserShapekeys_Operator,
     OT_RenameArmatureBones_Operator,
     OT_PrefixArmatureBones_Operator,
-    OT_RenameWeightGroups_Operator
+    OT_RenameWeightGroups_Operator,
+    OT_PrefixWeightGroups_Operator
 )
 
 

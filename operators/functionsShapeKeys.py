@@ -32,25 +32,27 @@ def unmute_all_shapekeys(shapekeys):
         sh.mute = False
 
 
-def build_parent_shapekey_list(shapekeys):
+def build_parent_shapekey_list(shapekeys, _is_daz=False):
     _fbm_shape_keys = {}
     for sh in shapekeys:
         sh_name = sh.name
         if sh_name == "Basis":
             continue
 
-        if not is_child_shapekey(sh_name):
+        if not is_child_shapekey(sh_name, _is_daz):
+            if sh_name[0] == 'p':
+                print(sh_name, 'is not a child shapekey')
             _fbm_shape_keys[sh_name] = sh.value
 
     return _fbm_shape_keys
 
 
-def build_child_shapekey_list(shapekeys):
+def build_child_shapekey_list(shapekeys, _is_daz=False):
     _fbm_shape_keys = {}
 
     for sh in shapekeys:
         sh_name = sh.name
-        if not is_child_shapekey(sh_name):
+        if not is_child_shapekey(sh_name, _is_daz):
             continue
 
         _fbm_shape_keys[sh_name] = sh.value
@@ -59,8 +61,8 @@ def build_child_shapekey_list(shapekeys):
 
 
 def build_fbm_shapekey_list(shapekeys, _is_daz=False):
-    parent_shapekeys = build_parent_shapekey_list(shapekeys)
-    child_shapekeys = build_child_shapekey_list(shapekeys)
+    parent_shapekeys = build_parent_shapekey_list(shapekeys, _is_daz)
+    child_shapekeys = build_child_shapekey_list(shapekeys, _is_daz)
 
     fbms = {}
     for fbm in parent_shapekeys:
@@ -79,18 +81,24 @@ def build_fbm_shapekey_list(shapekeys, _is_daz=False):
 
 
 def is_child_shapekey(sh_name, _is_daz=False):
-    if re.search(r'\.[0-9]{3}', sh_name) is not None:
+    has_p = sh_name[0] == 'p' and _is_daz
+    has_trailing_digits = re.search(r'\.[0-9]{3}', sh_name) is not None
+
+    if has_p and not has_trailing_digits:
         return True
 
-    if sh_name[0] == 'p' and _is_daz:
+    if has_p and has_trailing_digits:
+        return True
+
+    if has_trailing_digits:
         return True
 
     return False
 
 
-def sget_parent_name(sh_name, _is_daz=False):
+def get_parent_name(sh_name, _is_daz=False):
     has_p = sh_name[0] == 'p' and _is_daz
-    has_trailing_digits = re.search(r'\.[0-9]{3}', sh_name)
+    has_trailing_digits = re.search(r'\.[0-9]{3}', sh_name) is not None
 
     if has_p and not has_trailing_digits:
         return sh_name[1:]  # return the name sans prefix
