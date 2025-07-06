@@ -65,15 +65,27 @@ def setup_poser_figure(figure_name, objects):
     bpy.ops.object.select_all(action='DESELECT')
 
     for obj in objects:
+        bpy.context.view_layer.objects.active = bpy.context.view_layer.objects[obj.name]
+        bpy.context.active_object.select_set(state=True)
+
         if obj.type == 'MESH':
             # check if mesh is parented to an armature
             if obj.parent.type == 'ARMATURE':
                 # go into edit mode, select all loose geometry and delete it
                 bpy.ops.object.editmode_toggle()
+
+                # Poser's FBX export adds loose vertices at the borders between
+                # vertex groups. These will cause problems when it comes time to
+                # adjust weight-maps
                 bpy.ops.mesh.select_loose()
                 bpy.ops.mesh.delete(type='VERT')
+
+                # Also symmetrize geometry to prevent issues with mirroring vertex groups
+                # and manipulating geometry in sculpt-mode
+                bpy.ops.mesh.symmetry_snap()
+                bpy.ops.mesh.symmetry_snap(direction='POSITIVE_X')
+
                 bpy.ops.object.editmode_toggle()
-            continue
 
         if obj.type == 'ARMATURE':
             # maybe we could also change display to b-bone or stick?
@@ -91,6 +103,8 @@ def setup_poser_figure(figure_name, objects):
             rename_all_bones(obj)
 
             bpy.ops.object.editmode_toggle()  # we're done here
-            continue
+
+        bpy.ops.object.select_all(action='DESELECT')
+
 
 
