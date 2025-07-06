@@ -65,19 +65,32 @@ def setup_poser_figure(figure_name, objects):
     bpy.ops.object.select_all(action='DESELECT')
 
     for obj in objects:
-        if obj.type != 'ARMATURE':
+        if obj.type == 'MESH':
+            # check if mesh is parented to an armature
+            if obj.parent.type == 'ARMATURE':
+                # go into edit mode, select all loose geometry and delete it
+                bpy.ops.object.editmode_toggle()
+                bpy.ops.mesh.select_loose()
+                bpy.ops.mesh.delete(type='VERT')
+                bpy.ops.object.editmode_toggle()
             continue
 
-        # maybe we could also change display to b-bone or stick?
-        obj.show_in_front = True
-        obj.display_type = 'WIRE'
+        if obj.type == 'ARMATURE':
+            # maybe we could also change display to b-bone or stick?
+            obj.show_in_front = True
+            obj.display_type = 'WIRE'
 
-        bpy.ops.object.editmode_toggle()  # go into edit mode
+            bpy.ops.object.editmode_toggle()  # go into edit mode
 
-        separate_armatures(figure_name, obj)
-        strip_trailing_digits_from_bones(obj)
-        rename_all_bones(obj)
+            # change bone-roll to Global +Z to prevent issues later on
+            bpy.ops.armature.select_all(action='SELECT')
+            bpy.ops.armature.calculate_roll(type='GLOBAL_POS_Z')
 
-        bpy.ops.object.editmode_toggle()  # we're done here
+            separate_armatures(figure_name, obj)
+            strip_trailing_digits_from_bones(obj)
+            rename_all_bones(obj)
+
+            bpy.ops.object.editmode_toggle()  # we're done here
+            continue
 
 
