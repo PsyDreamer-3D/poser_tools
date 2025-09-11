@@ -98,6 +98,7 @@ def is_child_shapekey(sh_name, _is_daz=False):
 
 def get_parent_name(sh_name, _is_daz=False):
     has_p = sh_name[0] == 'p' and _is_daz
+    has_PBM = sh_name[3] == 'PBM'
     has_trailing_digits = re.search(r'\.[0-9]{3}', sh_name) is not None
 
     if has_p and not has_trailing_digits:
