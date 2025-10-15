@@ -23,7 +23,7 @@ This add-on is a collection of tools designed to make working with rigged models
   edit_bones['Head'].head[0] = 0 # this should also move the tail of the neck bone since they're connected
   ```
 - IMPROVEMENT: Eye bones are too long and could be shortened.
-- BUG: Last digit of each finger bone isn't aligned with the rest of the chain. Selecting the last bone, then bone behind it, and then pressing SHIFT+CTRL+A(is that the short-cut key?) aligns the last with the rest of the chain. The last bone of the thumb chain needs to be handled differently.
+- BUG: Last digit of each finger bone isn't aligned with the rest of the chain. Selecting the last bone, then bone behind it, and then pressing CTRL+ALT+A aligns the last with the rest of the chain. The last bone of the thumb chain needs to be handled differently.
 - BUG: The Shapekey consolidation function sometimes misses shapekeys—this was discovered with certain morphs in the Aiko3 figure.
   - Also related—morphs prefixed with "PBM" also need to be treated as child morphs when dealing with Daz figures (namely Mil 3 or possibly 4). Some work has been started but it needs to be completed.
   - Look at means of improvement performance here—the consolidation process can be slow.
