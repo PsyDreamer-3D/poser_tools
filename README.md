@@ -12,8 +12,20 @@ This add-on is a collection of tools designed to make working with rigged models
   - Replacing `Left_` or `Right_` prefixes with `.R` or `.L` suffixes. This makes it easier to convert the base rig to CloudRig or Rigify
 - Batch fix imported shapekeys so that they're easier to work with.
 
-### Planned features:
-- Fix double material groups imported from Poser.
-
-### Future Ideas:
-- Import Poser CR2 file directly instead of using FBX.
+### Known Issues/Feature Ideas:
+- IMPROVEMENT: Material groups imported from Poser are doubled—with the duplicated group being empty. Currently testing a script that uses the [Bmesh module](https://docs.blender.org/api/current/bmesh.html) to check if the material is empty, and then delete it.
+- IMPROVEMENT: The tail of the neck bone (connected to the root of head bone) is off-center on the x-axis
+  ```python
+  # This should be run before the Global +Z operator
+  # Get the armature object
+  armature = bpy.context.active_object
+  edit_bones = armature.data.edit_bones
+  edit_bones['Head'].head[0] = 0 # this should also move the tail of the neck bone since they're connected
+  ```
+- IMPROVEMENT: Eye bones are too long and could be shortened.
+- BUG: Last digit of each finger bone isn't aligned with the rest of the chain. Selecting the last bone, then bone behind it, and then pressing SHIFT+CTRL+A(is that the short-cut key?) aligns the last with the rest of the chain. The last bone of the thumb chain needs to be handled differently.
+- BUG: The Shapekey consolidation function sometimes misses shapekeys—this was discovered with certain morphs in the Aiko3 figure.
+  - Also related—morphs prefixed with "PBM" also need to be treated as child morphs when dealing with Daz figures (namely Mil 3 or possibly 4). Some work has been started but it needs to be completed.
+  - Look at means of improvement performance here—the consolidation process can be slow.
+- FEATURE: Add an auto-rigging feature specific to Poser figures.
+- FEATURE: Import Poser CR2 file directly instead of using FBX.
