@@ -20,6 +20,7 @@ This add-on is a collection of tools designed to make working with rigged models
 - IMPROVEMENT: Include JCM morphs when consolidating. Currently, the consolidation process ignores these shape-keys but doesn't delete them.
 - IMPROVEMENT: Change shapekey min and max values to -1 and 1.
 - IMPROVEMENT: Material groups imported from Poser are doubled—with the duplicated group being empty. Currently testing a script that uses the [Bmesh module](https://docs.blender.org/api/current/bmesh.html) to check if the material is empty, and then delete it.
+- IMPROVEMENT: Separate non-connected meshes into separate objects (eyebrows, eyelashes, eyes, gums/teeth, tongue, and pubic hair mesh).
 - IMPROVEMENT: The tail of the neck bone (connected to the root of head bone) is off-center on the x-axis
   ```python
   # This should be run before the Global +Z operator
