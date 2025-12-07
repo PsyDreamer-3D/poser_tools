@@ -1,3 +1,7 @@
+# START — workflow remove
+_needs_reload = "bpy" in locals()
+# END — workflow remove
+
 import bpy
 from bpy.props import PointerProperty
 from .panels.importPoserFBX import ImportPoserFBX_Panel
@@ -13,6 +17,31 @@ from .operators.renameArmatureBones import OT_RenameArmatureBones_Operator, OT_P
 from .operators.renameWeightGroups import OT_RenameWeightGroups_Operator, OT_PrefixWeightGroups_Operator
 from .operators.importPoserFBX import OT_ImportPoserFBX
 from .operators.setupPoserFigure import OT_SetupPoserFigure_Operator
+
+# START — workflow remove
+if _needs_reload:
+    import sys, importlib
+    from .panels.importPoserFBX import ImportPoserFBX_Panel
+    from .panels.setupPoserFigure import SetupPoserFigure_Panel
+    from .panels.fixPoserShapekeys import FixPoserShapekeys_Panel
+    from .panels.renameArmatureBones import RenameArmatureBones_Panel
+    from .panels.prefixArmatureBones import PrefixArmatureBones_Panel
+    from .panels.renameWeightGroups import RenameWeightGroups_Panel
+    from .panels.prefixWeightGroups import PrefixWeightGroups_Panel
+    from .settings.poserToolsAddonSettings import PoserShapeKeysAddon_Settings
+    from .operators.fixPoserShapekeys import OT_FixPoserShapekeys_Operator
+    from .operators.renameArmatureBones import OT_RenameArmatureBones_Operator, OT_PrefixArmatureBones_Operator
+    from .operators.renameWeightGroups import OT_RenameWeightGroups_Operator, OT_PrefixWeightGroups_Operator
+    from .operators.importPoserFBX import OT_ImportPoserFBX
+    from .operators.setupPoserFigure import OT_SetupPoserFigure_Operator
+
+    all_modules = sys.modules
+    all_modules = dict(sorted(all_modules.items(), key=lambda x: x[0]))  # sort them
+    # reload modules
+    for k, v in all_modules.items():
+        if k.startswith(__name__):
+            importlib.reload(v)
+# END — workflow remove
 
 bl_info = {
     "name": "Poser Tools",
