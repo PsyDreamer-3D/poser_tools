@@ -16,7 +16,7 @@ This add-on is a collection of tools designed to make working with rigged models
 - CHANGE: Change armature correction—remove Global +Z reset. This is now part of [Poser Autorigger](https://github.com/jesgs/poser_autorigger)
 - CHANGE: Remove bone renaming from armature correction process. This is now part of [Poser Autorigger](https://github.com/jesgs/poser_autorigger)
 - BUG: **This may be resolved by Blender 5.0**. Last digit of each finger bone isn't aligned with the rest of the chain. Selecting the last bone, then bone behind it, and then pressing CTRL+ALT+A aligns the last with the rest of the chain. The last bone of the thumb chain needs to be handled differently.
-- BUG: The Shapekey consolidation function sometimes misses shapekeys—this was discovered with certain morphs in the Aiko3 figure.
+- BUG: The Shapekey consolidation function sometimes misses shapekeys—this was discovered with certain morphs in the Stephanie3-to-Aiko3 figure.
 - BUG: Related to above. Morphs prefixed with "PBM" also need to be treated as child morphs when dealing with Daz figures (namely Mil 3 or possibly 4). Some work has been started but it needs to be completed.
 - BUG: Occasionally, there is no full-body morph for corresponding "p" morphs. This could be the result of user-error when exporting from Poser, but these morphs should be tracked and they need to be treated the same as parent morphs.
 - IMPROVEMENT: Include JCM morphs when consolidating. Currently, the consolidation process ignores these shape-keys but doesn't delete them.
