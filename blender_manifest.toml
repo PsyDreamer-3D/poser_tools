@@ -1,7 +1,7 @@
 schema_version = "1.0.0"
 
 id = "poser_tools"
-version = "1.0.0"
+version = "0.1.0"
 name = "Poser Tools"
 tagline = "A set of tools to make working with Poser figures easier"
 maintainer = "Jess Green <jgreen@psy-dreamer.com>"
