@@ -3,6 +3,22 @@ Poser Tools Blender Add-on
 
 Still in development so use at your own risk!
 
+## Installing via Blender Extensions (self-hosted repository)
+
+This add-on is published as a Blender 4.2+ extension and is available through a self-hosted repository on GitHub Pages.
+
+1. In Blender, open **Edit → Preferences → Get Extensions**.
+2. Click the **▾** menu next to *Repositories* and choose **Add Repository**.
+3. Enter the following URL and click **OK**:
+   ```
+   https://psydreamer-3d.github.io/poser_tools/index.json
+   ```
+4. Search for **Poser Tools** in the Extensions panel and click **Install**.
+
+Blender will check this repository for updates automatically. You can refresh manually from the same panel at any time.
+
+> **Note for repo maintainers:** GitHub Pages must be enabled on this repository and set to serve from the `gh-pages` branch. Go to **Settings → Pages** and set *Source* to the `gh-pages` branch. The release workflow will create that branch on the first tagged push.
+
 This add-on is a collection of tools designed to make working with rigged models exported from Poser as fbx files easier.
 
 ### Features:
