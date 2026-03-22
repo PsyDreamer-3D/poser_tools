@@ -4,7 +4,7 @@ import bpy
 class RenameArmatureBones(bpy.types.Panel):
     bl_idname = "VIEW_3D_PT_RenameArmatureBones"
     bl_label = "Rename Armature Bones"
-    bl_category = "Poser"
+    bl_category = "Poser FBX Importer"
     bl_space_type = "VIEW_3D"
     bl_region_type = "UI"
 

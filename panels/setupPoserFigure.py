@@ -4,7 +4,7 @@ import bpy
 class SetupPoserFigure_Panel(bpy.types.Panel):
     bl_idname = "VIEW_3D_PT_SetupPoserFigurePanel"
     bl_label = "Setup Poser Figure"
-    bl_category = "Poser"
+    bl_category = "Poser FBX Importer"
     bl_space_type = "VIEW_3D"
     bl_region_type = "UI"
 

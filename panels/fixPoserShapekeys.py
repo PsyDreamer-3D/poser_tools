@@ -5,7 +5,7 @@ import textwrap
 class FixPoserShapekeys(bpy.types.Panel):
     bl_idname = "VIEW_3D_PT_FixPoserShapekeys"
     bl_label = "Fix Poser Shapekeys"
-    bl_category = "Poser"
+    bl_category = "Poser FBX Importer"
     bl_space_type = "VIEW_3D"
     bl_region_type = "UI"
 

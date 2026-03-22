@@ -4,7 +4,7 @@ import bpy
 class ImportPoserFBX_Panel(bpy.types.Panel):
     bl_idname = "VIEW_3D_PT_ImportPoserFBXPanel"
     bl_label = "Import Poser FBX"
-    bl_category = "Poser"
+    bl_category = "Poser FBX Importer"
     bl_space_type = "VIEW_3D"
     bl_region_type = "UI"
 
