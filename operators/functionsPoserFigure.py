@@ -99,8 +99,7 @@ def setup_poser_figure(figure_name, objects):
             bpy.ops.armature.calculate_roll(type='GLOBAL_POS_Z')
 
             separate_armatures(figure_name, obj)
-            # strip_trailing_digits_from_bones(obj)
-            # rename_all_bones(obj)
+            strip_trailing_digits_from_bones(obj)
 
             bpy.ops.object.editmode_toggle()  # we're done here
 
