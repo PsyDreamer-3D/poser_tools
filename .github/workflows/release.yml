@@ -1,0 +1,42 @@
+name: Build & Publish Extension
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Blender
+        run: |
+          sudo snap install blender --classic --channel=latest/stable
+
+      - name: Bump version
+        run: |
+          python3 scripts/bump_version.py "${GITHUB_REF_NAME}"
+
+      - name: Strip development-only code blocks
+        run: |
+          python3 scripts/strip_dev_blocks.py
+
+      - name: Build extension
+        run: |
+          mkdir -p dist
+          blender --command extension build --source-dir . --output-dir dist
+
+      - name: Generate index.json
+        run: |
+          python3 scripts/generate_index.py
+
+      - name: Deploy to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./dist
+          keep_files: true
