@@ -21,6 +21,9 @@ from .operators.setupPoserFigure import OT_SetupPoserFigure_Operator
 # START — workflow remove
 if _needs_reload:
     import sys, importlib
+    for k, v in sorted(sys.modules.items()):
+        if k.startswith(__name__ + "."):
+            importlib.reload(v)
     from .panels.importPoserFBX import ImportPoserFBX_Panel
     from .panels.setupPoserFigure import SetupPoserFigure_Panel
     from .panels.fixPoserShapekeys import FixPoserShapekeys_Panel
@@ -34,13 +37,6 @@ if _needs_reload:
     from .operators.renameWeightGroups import OT_RenameWeightGroups_Operator, OT_PrefixWeightGroups_Operator
     from .operators.importPoserFBX import OT_ImportPoserFBX
     from .operators.setupPoserFigure import OT_SetupPoserFigure_Operator
-
-    all_modules = sys.modules
-    all_modules = dict(sorted(all_modules.items(), key=lambda x: x[0]))  # sort them
-    # reload modules
-    for k, v in all_modules.items():
-        if k.startswith(__name__):
-            importlib.reload(v)
 # END — workflow remove
 
 bl_info = {
