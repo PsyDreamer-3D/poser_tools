@@ -11,15 +11,11 @@ class ImportPoserFBX_Panel(bpy.types.Panel):
     def draw(self, context):
         layout = self.layout
 
-        if not hasattr(bpy.types, "IMPORT_SCENE_OT_fbx"):
+        if not hasattr(bpy.types, "POSER_OT_import_poser_fbx"):
             layout.label(text="FBX Importer unavailable", icon="ERROR")
             return
 
         op_row = layout.row(align=True)
         op_row.scale_y = 1.5
-        op = op_row.operator("import_scene.fbx", icon="POSE_HLT")
-        op.use_anim = False
-        op.use_custom_normals = False
-        op.force_connect_children = True
-        op.automatic_bone_orientation = True
+        op_row.operator("poser.import_poser_fbx", icon="POSE_HLT")
 

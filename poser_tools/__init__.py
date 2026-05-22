@@ -55,35 +55,6 @@ bl_info = {
     "type": "extension"
 }
 
-# ---------------------------------------------------------------------------
-# Vendored FBX importer — registered only when the built-in is absent
-# (Blender 5.0+ removed io_scene_fbx from the default install).
-# ---------------------------------------------------------------------------
-
-_registered_bundled_fbx: bool = False
-
-
-def _fbx_importer_available() -> bool:
-    return hasattr(bpy.types, "IMPORT_SCENE_OT_fbx")
-
-
-def _register_bundled_fbx() -> bool:
-    try:
-        from .vendor import io_scene_fbx as _fbx
-        _fbx.register()
-        return True
-    except Exception:
-        # Another add-on registered import_scene.fbx between our check and
-        # this call (e.g. Daz Bridge loading at the same time).
-        return False
-
-
-def _unregister_bundled_fbx() -> None:
-    from .vendor import io_scene_fbx as _fbx
-    _fbx.unregister()
-
-# ---------------------------------------------------------------------------
-
 classes = (
     ImportPoserFBX_Panel,
     SetupPoserFigure_Panel,
@@ -98,18 +69,12 @@ classes = (
     OT_PrefixArmatureBones_Operator,
     OT_RenameWeightGroups_Operator,
     OT_PrefixWeightGroups_Operator,
-    OT_SetupPoserFigure_Operator
+    OT_SetupPoserFigure_Operator,
+    OT_ImportPoserFBX,
 )
 
 
 def register():
-    global _registered_bundled_fbx
-
-    if not _fbx_importer_available():
-        _registered_bundled_fbx = _register_bundled_fbx()
-    else:
-        _registered_bundled_fbx = False
-
     for cls in classes:
         bpy.utils.register_class(cls)
 
@@ -117,13 +82,7 @@ def register():
 
 
 def unregister():
-    global _registered_bundled_fbx
-
     for cls in reversed(classes):
         bpy.utils.unregister_class(cls)
 
     del bpy.types.Scene.poser_shapekeys_addon
-
-    if _registered_bundled_fbx:
-        _unregister_bundled_fbx()
-        _registered_bundled_fbx = False
