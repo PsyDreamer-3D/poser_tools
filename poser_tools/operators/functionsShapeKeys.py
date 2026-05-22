@@ -1,12 +1,13 @@
 import re
 import bpy
 import numpy as np
-import queue
-
 
 # we need to check for existing value, and if it's there, it should be saved
 # Older Daz and other Poser figures append "p" to morphs on body parts that are
 # related to the fbm. If the morph has a lower-case p, it should be treated the same as if it had a number suffix
+
+_TRAILING_DIGITS_RE = re.compile(r'\.[0-9]{3}')
+
 
 def mute_all_shapekeys(shapekeys):
     for sh in shapekeys:
@@ -82,7 +83,7 @@ def build_fbm_shapekey_list(shapekeys, _is_daz=False):
 
 def is_child_shapekey(sh_name, _is_daz=False):
     has_p = sh_name[0] == 'p' and _is_daz
-    has_trailing_digits = re.search(r'\.[0-9]{3}', sh_name) is not None
+    has_trailing_digits = _TRAILING_DIGITS_RE.search(sh_name) is not None
 
     if has_p and not has_trailing_digits:
         return True
@@ -98,130 +99,95 @@ def is_child_shapekey(sh_name, _is_daz=False):
 
 def get_parent_name(sh_name, _is_daz=False):
     has_p = sh_name[0] == 'p' and _is_daz
-    has_PBM = sh_name[3] == 'PBM'
-    has_trailing_digits = re.search(r'\.[0-9]{3}', sh_name) is not None
+    has_trailing_digits = _TRAILING_DIGITS_RE.search(sh_name) is not None
 
     if has_p and not has_trailing_digits:
         return sh_name[1:]  # return the name sans prefix
 
     if has_p and has_trailing_digits:
-        return re.sub(r'\.[0-9]{3}', '', sh_name[1:])
+        return _TRAILING_DIGITS_RE.sub('', sh_name[1:])
 
     if not has_p and has_trailing_digits:
-        return re.sub(r'\.[0-9]{3}', '', sh_name)
+        return _TRAILING_DIGITS_RE.sub('', sh_name)
 
 
-def delete_shapekey(obj, sh_name, shapekeys):
-    set_active_shapekey(obj, sh_name, shapekeys)
-    bpy.ops.object.shape_key_remove()
+def remove_shapekey(obj, key_block):
+    obj.shape_key_remove(key_block)
 
 
-def set_active_shapekey(obj, sh_name, shapekeys):
-    index = shapekeys.keys().index(sh_name)
-    obj.active_shape_key_index = index
+def is_shapekey_empty(sh_name, shapekeys, basis_co):
+    key_co = np.empty(len(basis_co), dtype=np.float32)
+    shapekeys[sh_name].data.foreach_get("co", key_co)
+    return np.array_equal(basis_co, key_co)
 
 
-def is_shapekey_empty(sh_name, shapekeys):
-    # compare with Basis
-    normals_basis = shapekeys["Basis"].normals_vertex_get()
-    normals_selected_shapekey = shapekeys[sh_name].normals_vertex_get()
+def accumulate_fbm_shapekey(master_shapekeys, morph, shapekeys, basis_co, child_coords, fbm_has_data):
+    fbm_key = shapekeys[morph]
+    n = len(basis_co)
 
-    return normals_basis == normals_selected_shapekey
+    if fbm_has_data:
+        # Start from FBM's own coords, then add each child's displacement on top
+        result_co = np.empty(n, dtype=np.float32)
+        fbm_key.data.foreach_get("co", result_co)
+        # result = FBM_co + sum(child_co - basis_co)
+    else:
+        result_co = basis_co.copy()
+        # result = basis_co + sum(child_co - basis_co)
 
+    for child_co in child_coords.values():
+        result_co += child_co - basis_co
 
-def create_fbm_shapekey(master_shapekeys, morph, obj, shapekeys):
-    tmp_morph_name = 'TMP_' + morph
-    # create new fbm
-    obj.shape_key_add(name=tmp_morph_name, from_mix=True)
-
-    # set min and max values to Poser defaults
-    shapekeys[morph].slider_max = 10.0
-    shapekeys[morph].slider_min = -10.0
-
-    # set newly created fbm back to its original value
-    shapekeys[morph].value = master_shapekeys[morph]['value']
-    shapekeys[morph].mute = True  # mute new shapekey
-
-    move_shape_key(obj, tmp_morph_name, morph)
-    delete_shapekey(obj, tmp_morph_name, shapekeys)
-
-
-def move_shape_key(obj, key_name, key_name_to_swap):
-    me = obj.data
-    verts = me.vertices
-    c = len(verts)
-
-    key1 = me.shape_keys.key_blocks[key_name]
-    key2 = me.shape_keys.key_blocks[key_name_to_swap]
-
-    key1_data = np.zeros(c * 3, dtype=np.float32)
-    key1.data.foreach_get("co", key1_data.ravel())
-
-    key2_data = np.zeros(c * 3, dtype=np.float32)
-    key2.data.foreach_get("co", key2_data.ravel())
-
-    key1.data.foreach_set("co", key2_data)
-    key2.data.foreach_set("co", key1_data)
-
-
-def activate_child_shapekeys(fbm_shapekeys, morph, shapekeys):
-    for child_shapekey in fbm_shapekeys[morph]['children']:
-        shapekeys[child_shapekey].mute = False
-        shapekeys[child_shapekey].value = 1
-
-
-def mute_child_shapekeys(fbm_shapekeys, morph, shapekeys):
-    for child_morph in fbm_shapekeys[morph]['children']:
-        shapekeys[child_morph].mute = True
-        shapekeys[child_morph].value = 0
+    fbm_key.data.foreach_set("co", result_co)
+    fbm_key.slider_max = 1.0
+    fbm_key.slider_min = -1.0
+    fbm_key.value = master_shapekeys[morph]['value']
+    fbm_key.mute = True
 
 
 def consolidate_poser_shapekeys(obj, shapekeys, _is_daz=False):
     fbm_shapekeys = build_fbm_shapekey_list(shapekeys, _is_daz)
     mute_all_shapekeys(shapekeys)
-    print(' ')
-    print('Converting Shapekeys...')
-    shapekeys_processed = []
-    for morph in fbm_shapekeys:
-        if morph.find('JCM') != -1:  # skip JCMs, we don't need these in Blender
-            print(morph, 'is a JCM. Skip for deletion later')
-            shapekeys[morph].mute = True
-            continue
 
-        if len(fbm_shapekeys[morph]['children']) == 0 and is_shapekey_empty(morph, shapekeys):
+    n = len(obj.data.vertices) * 3
+    basis_co = np.empty(n, dtype=np.float32)
+    shapekeys["Basis"].data.foreach_get("co", basis_co)
+
+    # Pre-read all child coords before any deletions
+    all_child_coords = {}
+    for morph_data in fbm_shapekeys.values():
+        for child_name in morph_data['children']:
+            buf = np.empty(n, dtype=np.float32)
+            shapekeys[child_name].data.foreach_get("co", buf)
+            all_child_coords[child_name] = buf
+
+    print('\nConverting Shapekeys...')
+    shapekeys_processed = []
+
+    for morph in fbm_shapekeys:
+        has_children = len(fbm_shapekeys[morph]['children']) > 0
+        fbm_empty = is_shapekey_empty(morph, shapekeys, basis_co)
+
+        if not has_children and fbm_empty:
             print('---', morph, 'is empty and has no children...skipping...')
             shapekeys[morph].mute = True
             continue
 
-        # if there's no children and the shapekey isn't empty, continue on as this is a working shapekey
-        if len(fbm_shapekeys[morph]['children']) == 0 and not is_shapekey_empty(morph, shapekeys):
-            print('--- ', morph, 'is a working shapekey...skipping...')
+        if not has_children and not fbm_empty:
+            print('---', morph, 'is a working shapekey...skipping...')
             shapekeys_processed.append(morph)
             continue
 
-        # we have a situation where the fbm shapekey isn't empty AND has children. We need a different approach
-        if len(fbm_shapekeys[morph]['children']) >= 1 and not is_shapekey_empty(morph, shapekeys):
-            print('--- ', morph, 'is a working shapekey but has children...processing...')
-            # we know that the existing fbm has children but isn't empty
-            # we turn all them on, create a new shapekey like normal, but give it a slightly different name
-            # turn on existing shape key
-            shapekeys[morph].value = 1
-            shapekeys[morph].mute = False
+        # has_children is True from here
+        child_coords = {ch: all_child_coords[ch] for ch in fbm_shapekeys[morph]['children']}
+        accumulate_fbm_shapekey(fbm_shapekeys, morph, shapekeys, basis_co, child_coords, not fbm_empty)
 
-        activate_child_shapekeys(fbm_shapekeys, morph, shapekeys)
-        create_fbm_shapekey(fbm_shapekeys, morph, obj, shapekeys)
-        mute_child_shapekeys(fbm_shapekeys, morph, shapekeys)
-
-        print('....... ', morph, ' converted!')
+        print('.......', morph, 'converted!')
         shapekeys_processed.append(morph)
 
-        # delete all child keys
         for child_key in fbm_shapekeys[morph]['children']:
             print('--- deleting child shapekey', child_key)
-            delete_shapekey(obj, child_key, shapekeys)
+            remove_shapekey(obj, shapekeys[child_key])
         print(' ')
 
-    # unmute our master keys
     for morph in shapekeys_processed:
         shapekeys[morph].mute = False
-
