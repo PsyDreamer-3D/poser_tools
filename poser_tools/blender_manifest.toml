@@ -18,6 +18,7 @@ license = [
 ]
 copyright = [
   "2025 Jess Green",
+  "2011-2023 Blender Foundation (vendored io_scene_fbx)",
 ]
 
 [build]
