@@ -79,7 +79,9 @@ class OT_ImportPoserFBX(bpy.types.Operator):
 
     def execute(self, context):
         from ..vendor.io_scene_fbx import import_fbx
-        return import_fbx.load(
+        from .functionsArmature import center_neck_bone_tail
+
+        result = import_fbx.load(
             self, context,
             filepath=self.filepath,
             use_anim=self.use_anim,
@@ -95,3 +97,18 @@ class OT_ImportPoserFBX(bpy.types.Operator):
             use_custom_props=True,
             use_prepost_rot=True,
         )
+
+        if 'FINISHED' not in result:
+            return result
+
+        armature = next(
+            (obj for obj in context.selected_objects if obj.type == 'ARMATURE'),
+            None
+        )
+        if armature is not None:
+            context.view_layer.objects.active = armature
+            bpy.ops.object.mode_set(mode='EDIT')
+            center_neck_bone_tail(armature)
+            bpy.ops.object.mode_set(mode='OBJECT')
+
+        return result
