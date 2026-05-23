@@ -115,6 +115,91 @@ def _get_side(name):
 
 
 _SPINE_KEYWORDS = ('head', 'neck', 'chest', 'abdomen', 'hip')
+_THUMB_KEYWORDS = ('thumb',)
+
+
+def compute_vertex_group_centroids(armature, mesh_objects):
+    """Return weighted vertex-group centroids in armature local space.
+
+    Call while in Object Mode before entering Edit Mode. Used to determine the
+    correct tail direction for terminal bones whose geometry doesn't follow the
+    parent bone's direction (e.g. thumb tips).
+    Returns {group_name: centroid_vector}.
+    """
+    from mathutils import Vector
+    arm_mat_inv = armature.matrix_world.inverted_safe()
+    centroids = {}
+
+    for mesh_obj in mesh_objects:
+        if mesh_obj.type != 'MESH':
+            continue
+        mesh = mesh_obj.data
+        to_arm = arm_mat_inv @ mesh_obj.matrix_world
+        group_names = {vg.index: vg.name for vg in mesh_obj.vertex_groups}
+
+        weighted_pos = {}
+        for vert in mesh.vertices:
+            v_pos = to_arm @ vert.co
+            for vge in vert.groups:
+                if vge.weight < 0.1:
+                    continue
+                name = group_names.get(vge.group)
+                if name is None:
+                    continue
+                if name not in weighted_pos:
+                    weighted_pos[name] = [Vector((0.0, 0.0, 0.0)), 0.0]
+                weighted_pos[name][0] += v_pos * vge.weight
+                weighted_pos[name][1] += vge.weight
+
+        for name, (pos_sum, total_w) in weighted_pos.items():
+            if total_w < 1e-6:
+                continue
+            centroid = pos_sum / total_w
+            if name in centroids:
+                centroids[name] = (centroids[name] + centroid) * 0.5
+            else:
+                centroids[name] = centroid
+
+    return centroids
+
+
+def align_terminal_bones_to_parent(armature, centroids=None):
+    """Point terminal bones in the same direction as their parent.
+
+    automatic_bone_orientation assigns terminal bones the same correction matrix as
+    their parent, but force_connect_children then repositions parent tails based on
+    averaged children heads — changing parent direction without updating terminal bone
+    tails. This post-import pass corrects that. Call before recalculate_bone_rolls
+    so roll recalculation can work from the corrected directions.
+    Must be called while the armature is in Edit Mode.
+
+    For thumb terminal bones, aims toward the weighted geometry centroid (from
+    centroids dict) instead of the parent direction, since thumb tips curl
+    independently of the thumb chain.
+    """
+    for bone in armature.data.edit_bones:
+        if bone.children:
+            continue
+        if not bone.parent:
+            continue
+
+        bone_length = (bone.tail - bone.head).magnitude
+        is_thumb = any(kw in bone.name.lower() for kw in _THUMB_KEYWORDS)
+
+        if is_thumb and centroids and bone.name in centroids:
+            direction = centroids[bone.name] - bone.head
+            if direction.magnitude > 1e-6:
+                if bone_length < 1e-6:
+                    bone_length = direction.magnitude
+                bone.tail = bone.head + direction.normalized() * bone_length
+                continue
+
+        parent_dir = bone.parent.tail - bone.parent.head
+        if parent_dir.magnitude < 1e-6:
+            continue
+        if bone_length < 1e-6:
+            bone_length = parent_dir.magnitude
+        bone.tail = bone.head + parent_dir.normalized() * bone_length
 
 
 def recalculate_bone_rolls(armature):

@@ -91,6 +91,8 @@ class OT_ImportPoserFBX(bpy.types.Operator):
             center_neck_bone_tail,
             delete_body_bone,
             recalculate_bone_rolls,
+            align_terminal_bones_to_parent,
+            compute_vertex_group_centroids,
         )
         from .functionsMesh import (
             remove_loose_verts,
@@ -145,11 +147,15 @@ class OT_ImportPoserFBX(bpy.types.Operator):
             # Detect primary root before entering Edit Mode so Body* bones are still present.
             figure_name = suggest_primary_root(armature)
 
+            # Compute thumb-tip centroids while still in Object Mode (mesh data accessible).
+            centroids = compute_vertex_group_centroids(armature, mesh_objects)
+
             context.view_layer.objects.active = armature
             bpy.ops.object.mode_set(mode='EDIT')
 
             fix_camera_target_bones(armature)
             center_neck_bone_tail(armature)
+            align_terminal_bones_to_parent(armature, centroids)
             recalculate_bone_rolls(armature)
 
             armatures_before = {o.name for o in bpy.data.objects if o.type == 'ARMATURE'}
