@@ -183,8 +183,12 @@ def align_terminal_bones_to_parent(armature, centroids=None):
         if not bone.parent:
             continue
 
+        name_lower = bone.name.lower()
+        if 'eye' in name_lower or 'toe' in name_lower:
+            continue
+
         bone_length = (bone.tail - bone.head).magnitude
-        is_thumb = any(kw in bone.name.lower() for kw in _THUMB_KEYWORDS)
+        is_thumb = any(kw in name_lower for kw in _THUMB_KEYWORDS)
 
         if is_thumb and centroids and bone.name in centroids:
             direction = centroids[bone.name] - bone.head
