@@ -86,6 +86,7 @@ class OT_ImportPoserFBX(bpy.types.Operator):
         from .functionsMesh import (
             remove_loose_verts,
             remove_unused_material_slots,
+            sort_material_slots_by_face_order,
         )
 
         result = import_fbx.load(
@@ -116,6 +117,7 @@ class OT_ImportPoserFBX(bpy.types.Operator):
         for obj in mesh_objects:
             remove_loose_verts(obj)
             remove_unused_material_slots(context, obj)
+            sort_material_slots_by_face_order(obj)
 
         # --- Armature corrections (single Edit Mode session) ---
         if armature is not None:
@@ -124,6 +126,6 @@ class OT_ImportPoserFBX(bpy.types.Operator):
             center_neck_bone_tail(armature)
             delete_body_bone(armature)
             recalculate_bone_rolls(armature)
-            bpy.ops.objeclct.mode_set(mode='OBJECT')
+            bpy.ops.object.mode_set(mode='OBJECT')
 
         return result
