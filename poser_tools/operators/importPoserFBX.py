@@ -56,7 +56,6 @@ class OT_ImportPoserFBX(bpy.types.Operator):
         items=_BONE_AXES,
         default='X',
     )
-
     def draw(self, context):
         layout = self.layout
         layout.use_property_split = True
@@ -79,7 +78,15 @@ class OT_ImportPoserFBX(bpy.types.Operator):
 
     def execute(self, context):
         from ..vendor.io_scene_fbx import import_fbx
-        from .functionsArmature import center_neck_bone_tail
+        from .functionsArmature import (
+            center_neck_bone_tail,
+            delete_body_bone,
+            recalculate_bone_rolls,
+        )
+        from .functionsMesh import (
+            remove_loose_verts,
+            remove_unused_material_slots,
+        )
 
         result = import_fbx.load(
             self, context,
@@ -101,14 +108,22 @@ class OT_ImportPoserFBX(bpy.types.Operator):
         if 'FINISHED' not in result:
             return result
 
-        armature = next(
-            (obj for obj in context.selected_objects if obj.type == 'ARMATURE'),
-            None
-        )
+        imported = list(context.selected_objects)
+        armature = next((obj for obj in imported if obj.type == 'ARMATURE'), None)
+        mesh_objects = [obj for obj in imported if obj.type == 'MESH']
+
+        # --- Mesh corrections ---
+        for obj in mesh_objects:
+            remove_loose_verts(obj)
+            remove_unused_material_slots(context, obj)
+
+        # --- Armature corrections (single Edit Mode session) ---
         if armature is not None:
             context.view_layer.objects.active = armature
             bpy.ops.object.mode_set(mode='EDIT')
             center_neck_bone_tail(armature)
-            bpy.ops.object.mode_set(mode='OBJECT')
+            delete_body_bone(armature)
+            recalculate_bone_rolls(armature)
+            bpy.ops.objeclct.mode_set(mode='OBJECT')
 
         return result
