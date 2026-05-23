@@ -17,7 +17,7 @@ This add-on is a collection of tools designed to make working with rigged models
 - BUG: The Shapekey consolidation function sometimes misses shapekeys—this was discovered with certain morphs in the Stephanie3-to-Aiko3 figure.
 - BUG: Related to above. Morphs prefixed with "PBM" also need to be treated as child morphs when dealing with Daz figures (namely Mil 3 or possibly 4). Some work has been started but it needs to be completed.
 - BUG: Occasionally, there is no full-body morph for corresponding "p" morphs. This could be the result of user-error when exporting from Poser, but these morphs should be tracked and they need to be treated the same as parent morphs.
-- IMPROVEMENT: In FBX files that have multiple figures (figure with conforming hair and conforming clothing), rename the weight-groups in the additional figures to match the main armature.
+- ~~IMPROVEMENT: In FBX files that have multiple figures (figure with conforming hair and conforming clothing), rename the weight-groups in the additional figures to match the main armature.~~
 - ~~IMPROVEMENT: Include JCM morphs when consolidating. Currently, the consolidation process ignores these shape-keys but doesn't delete them.~~
 - ~~IMPROVEMENT: Change shapekey min and max values to -1 and 1.~~
 - ~~IMPROVEMENT: Material groups imported from Poser are doubled—with the duplicated group being empty. Currently testing a script that uses the [Bmesh module](https://docs.blender.org/api/current/bmesh.html) to check if the material is empty, and then delete it.~~

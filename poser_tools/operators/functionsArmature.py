@@ -37,6 +37,51 @@ def prefix_bones(armature, prefix="DEF-"):
             armature.data.bones[bone.name].name = prefix + new_name
 
 
+def fix_camera_target_bones(armature):
+    """
+    Remove Poser camera-target bones and fix the bones they distorted.
+
+    Poser's FBX export includes a Face_Camera LimbNode positioned at world origin
+    (a Poser camera-aim target that has no deformation role).  Blender's
+    force_connect_children averages ALL children when computing a parent's tail
+    position and bone_size, so Face_Camera distorts:
+      - Head bone tail  (averaged toward world origin)
+      - Eye bone tails  (inflated because they inherit the wrong bone_size)
+    Must be called while the armature is in Edit Mode.
+    """
+    edit_bones = armature.data.edit_bones
+
+    parents_to_fix = set()
+    for b in list(edit_bones):
+        if 'camera' in b.name.lower():
+            if b.parent:
+                parents_to_fix.add(b.parent.name)
+            edit_bones.remove(b)
+
+    for pname in parents_to_fix:
+        bone = edit_bones.get(pname)
+        if bone is None or not bone.children:
+            continue
+        child_heads = [c.head.copy() for c in bone.children]
+        new_tail = child_heads[0].copy()
+        for h in child_heads[1:]:
+            new_tail += h
+        new_tail /= len(child_heads)
+        if (new_tail - bone.head).magnitude > 1e-4:
+            bone.tail = new_tail
+
+        correct_size = sum(
+            (c.head - bone.head).magnitude for c in bone.children
+        ) / len(bone.children)
+        for child in bone.children:
+            if child.children:
+                continue
+            direction = child.tail - child.head
+            length = direction.magnitude
+            if length > correct_size * 1.5 and length > 1e-4:
+                child.tail = child.head + direction.normalized() * correct_size
+
+
 def center_neck_bone_tail(armature):
     """Set the neck bone's tail X to 0. Must be called while the armature is in Edit Mode."""
     for bone in armature.data.edit_bones:

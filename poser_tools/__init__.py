@@ -5,7 +5,6 @@ _needs_reload = "bpy" in locals()
 import bpy
 from bpy.props import PointerProperty
 from .panels.importPoserFBX import ImportPoserFBX_Panel
-from .panels.setupPoserFigure import SetupPoserFigure_Panel
 from .panels.fixPoserShapekeys import FixPoserShapekeys_Panel
 from .panels.renameArmatureBones import RenameArmatureBones_Panel
 from .panels.prefixArmatureBones import PrefixArmatureBones_Panel
@@ -16,7 +15,6 @@ from .operators.fixPoserShapekeys import OT_FixPoserShapekeys_Operator
 from .operators.renameArmatureBones import OT_RenameArmatureBones_Operator, OT_PrefixArmatureBones_Operator
 from .operators.renameWeightGroups import OT_RenameWeightGroups_Operator, OT_PrefixWeightGroups_Operator
 from .operators.importPoserFBX import OT_ImportPoserFBX
-from .operators.setupPoserFigure import OT_SetupPoserFigure_Operator
 
 # START — workflow remove
 if _needs_reload:
@@ -25,7 +23,6 @@ if _needs_reload:
         if k.startswith(__name__ + "."):
             importlib.reload(v)
     from .panels.importPoserFBX import ImportPoserFBX_Panel
-    from .panels.setupPoserFigure import SetupPoserFigure_Panel
     from .panels.fixPoserShapekeys import FixPoserShapekeys_Panel
     from .panels.renameArmatureBones import RenameArmatureBones_Panel
     from .panels.prefixArmatureBones import PrefixArmatureBones_Panel
@@ -36,7 +33,6 @@ if _needs_reload:
     from .operators.renameArmatureBones import OT_RenameArmatureBones_Operator, OT_PrefixArmatureBones_Operator
     from .operators.renameWeightGroups import OT_RenameWeightGroups_Operator, OT_PrefixWeightGroups_Operator
     from .operators.importPoserFBX import OT_ImportPoserFBX
-    from .operators.setupPoserFigure import OT_SetupPoserFigure_Operator
 # END — workflow remove
 
 bl_info = {
@@ -53,7 +49,6 @@ bl_info = {
 
 classes = (
     ImportPoserFBX_Panel,
-    SetupPoserFigure_Panel,
     FixPoserShapekeys_Panel,
     RenameArmatureBones_Panel,
     PrefixArmatureBones_Panel,
@@ -65,7 +60,6 @@ classes = (
     OT_PrefixArmatureBones_Operator,
     OT_RenameWeightGroups_Operator,
     OT_PrefixWeightGroups_Operator,
-    OT_SetupPoserFigure_Operator,
     OT_ImportPoserFBX,
 )
 

@@ -56,6 +56,13 @@ class OT_ImportPoserFBX(bpy.types.Operator):
         items=_BONE_AXES,
         default='X',
     )
+    separate_figures: BoolProperty(
+        name="Separate Figures",
+        description="Separate conforming figures (hair, clothing) into their own armatures "
+                    "and rename vertex groups to match the primary armature",
+        default=True,
+    )
+
     def draw(self, context):
         layout = self.layout
         layout.use_property_split = True
@@ -71,6 +78,7 @@ class OT_ImportPoserFBX(bpy.types.Operator):
         col.prop(self, "automatic_bone_orientation")
         col.prop(self, "primary_bone_axis")
         col.prop(self, "secondary_bone_axis")
+        col.prop(self, "separate_figures")
 
     def invoke(self, context, event):
         context.window_manager.fileselect_add(self)
@@ -79,6 +87,7 @@ class OT_ImportPoserFBX(bpy.types.Operator):
     def execute(self, context):
         from ..vendor.io_scene_fbx import import_fbx
         from .functionsArmature import (
+            fix_camera_target_bones,
             center_neck_bone_tail,
             delete_body_bone,
             recalculate_bone_rolls,
@@ -87,6 +96,12 @@ class OT_ImportPoserFBX(bpy.types.Operator):
             remove_loose_verts,
             remove_unused_material_slots,
             sort_material_slots_by_face_order,
+        )
+        from .functionsPoserFigure import (
+            suggest_primary_root,
+            separate_armatures,
+            strip_trailing_digits_from_bones,
+            rename_conforming_vertex_groups,
         )
 
         result = import_fbx.load(
@@ -113,19 +128,53 @@ class OT_ImportPoserFBX(bpy.types.Operator):
         armature = next((obj for obj in imported if obj.type == 'ARMATURE'), None)
         mesh_objects = [obj for obj in imported if obj.type == 'MESH']
 
+        # Apply Poser's 1/100 scale and axis rotation while everything is still selected.
+        bpy.ops.object.transform_apply(location=False, rotation=True, scale=True)
+
         # --- Mesh corrections ---
         for obj in mesh_objects:
             remove_loose_verts(obj)
             remove_unused_material_slots(context, obj)
             sort_material_slots_by_face_order(obj)
 
-        # --- Armature corrections (single Edit Mode session) ---
+        # --- Armature corrections ---
         if armature is not None:
+            armature.show_in_front = True
+            armature.display_type = 'WIRE'
+
+            # Detect primary root before entering Edit Mode so Body* bones are still present.
+            figure_name = suggest_primary_root(armature)
+
             context.view_layer.objects.active = armature
             bpy.ops.object.mode_set(mode='EDIT')
+
+            fix_camera_target_bones(armature)
             center_neck_bone_tail(armature)
-            delete_body_bone(armature)
             recalculate_bone_rolls(armature)
+
+            armatures_before = {o.name for o in bpy.data.objects if o.type == 'ARMATURE'}
+
+            if figure_name is not None and self.separate_figures:
+                # separate_armatures() exits with armature active in Edit Mode.
+                separate_armatures(figure_name, armature)
+
+            # Delete non-deforming Body root from primary (still in Edit Mode).
+            delete_body_bone(armature)
+            strip_trailing_digits_from_bones(armature)
+
             bpy.ops.object.mode_set(mode='OBJECT')
+
+            armatures_after = {o.name for o in bpy.data.objects if o.type == 'ARMATURE'}
+            conforming_armatures = [
+                bpy.data.objects[n] for n in (armatures_after - armatures_before)
+            ]
+            if conforming_armatures:
+                rename_conforming_vertex_groups(
+                    conforming_armatures,
+                    context.view_layer.objects,
+                )
+                for arm_obj in conforming_armatures:
+                    arm_obj.hide_viewport = True
+                context.view_layer.objects.active = armature
 
         return result

@@ -1,6 +1,6 @@
 import bpy
 import re
-from .functionsArmature import rename_all_bones, rename_bone
+from .functionsArmature import rename_all_bones, rename_bone, delete_body_bone
 from .functionsWeightGroups import strip_trailing_digits
 
 
@@ -13,6 +13,27 @@ def get_top_level_bones(bones):
             top_level_bones.append(bone.name)
 
     return top_level_bones
+
+
+def suggest_primary_root(armature):
+    """Return the name of the most likely primary root bone, or None."""
+    bones = armature.data.bones
+    body_roots = get_top_level_bones(bones)
+
+    if not body_roots:
+        return None
+    if len(body_roots) == 1:
+        return body_roots[0]
+
+    # Heuristic 1: prefer the bone with no numeric suffix.
+    # Blender appends .001, .002 to later duplicates, so the un-suffixed name
+    # is almost always the first-imported (main) figure.
+    no_suffix = [n for n in body_roots if not re.search(r'\.[0-9]{3}$', n)]
+    if len(no_suffix) == 1:
+        return no_suffix[0]
+
+    # Heuristic 2: most descendants → most complex skeleton → main figure.
+    return max(body_roots, key=lambda n: len(bones[n].children_recursive))
 
 
 def select_bone(obj, name):
@@ -28,25 +49,29 @@ def deselect_bone(_obj, name):
 
 
 def separate_armatures(figure_name, _obj):
-    bones = _obj.data.bones
-    parents = get_top_level_bones(bones)
+    # Caller must have _obj active and in Edit Mode.
+    # Exits with _obj active in Edit Mode.
+    while True:
+        bones = _obj.data.bones
+        parents = get_top_level_bones(bones)
+        remaining = [p for p in parents if p != figure_name]
+        if not remaining:
+            break
 
-    # this is dumb and I shouldn't have to do this
-    for bone in bones:
-        deselect_bone(_obj, bone.name)
+        target = remaining[0]
 
-    for parent in parents:
-        if parent == figure_name:
-            continue
+        for bone in list(_obj.data.edit_bones):
+            deselect_bone(_obj, bone.name)
 
-        select_bone(_obj, parent)
+        select_bone(_obj, target)
+        for child in _obj.data.bones[target].children_recursive:
+            select_bone(_obj, child.name)
 
-        if len(_obj.data.bones[parent].children_recursive) > 0:
-            for child in _obj.data.bones[parent].children_recursive:
-                select_bone(_obj, child.name)
-
-        # separate into new armature here
         bpy.ops.armature.separate()
+        # After separate(): new armature is active, Object Mode.
+        # Restore _obj in Edit Mode for the next iteration.
+        bpy.context.view_layer.objects.active = _obj
+        bpy.ops.object.mode_set(mode='EDIT')
 
 
 def strip_trailing_digits_from_bones(obj):
@@ -57,53 +82,31 @@ def strip_trailing_digits_from_bones(obj):
             obj.data.bones[bone.name].name = new_name
 
 
-def setup_poser_figure(figure_name, objects):
-    # Before deselecting everything, apply scale/rotation
-    # Poser's scale is 1/100 smaller than Blender, plus rotation is different as well
-    bpy.ops.object.transform_apply(location=False, rotation=True, scale=True)
+def rename_conforming_vertex_groups(conforming_armatures, scene_objects):
+    """
+    For each separated conforming armature:
+      - Strip trailing numeric suffixes from all mesh vertex groups in the scene.
+        Primary meshes are unaffected (their groups have no suffix).
+      - Strip suffixes from the conforming armature's bone names.
+      - Delete the non-deforming Body root bone from the conforming armature.
+    Conforming armature objects are kept in the scene.
+    """
+    for obj in scene_objects:
+        if obj.type != 'MESH':
+            continue
+        for vg in obj.vertex_groups:
+            new_name = strip_trailing_digits(vg.name)
+            if new_name != vg.name:
+                vg.name = new_name
 
-    bpy.ops.object.select_all(action='DESELECT')
+    for arm_obj in conforming_armatures:
+        strip_trailing_digits_from_bones(arm_obj)
 
-    for obj in objects:
-        bpy.context.view_layer.objects.active = bpy.context.view_layer.objects[obj.name]
-        bpy.context.active_object.select_set(state=True)
-
-        if obj.type == 'MESH':
-            # check if mesh is parented to an armature
-            if obj.parent.type == 'ARMATURE':
-                # go into edit mode, select all loose geometry and delete it
-                bpy.ops.object.editmode_toggle()
-
-                # Poser's FBX export adds loose vertices at the borders between
-                # vertex groups. These will cause problems when it comes time to
-                # adjust weight-maps
-                bpy.ops.mesh.select_loose()
-                bpy.ops.mesh.delete(type='VERT')
-
-                # Also symmetrize geometry to prevent issues with mirroring vertex groups
-                # and manipulating geometry in sculpt-mode
-                bpy.ops.mesh.symmetry_snap()
-                bpy.ops.mesh.symmetry_snap(direction='POSITIVE_X')
-
-                bpy.ops.object.editmode_toggle()
-
-        if obj.type == 'ARMATURE':
-            # maybe we could also change display to b-bone or stick?
-            obj.show_in_front = True
-            obj.display_type = 'WIRE'
-
-            bpy.ops.object.editmode_toggle()  # go into edit mode
-
-            # change bone-roll to Global +Z to prevent issues later on
-            bpy.ops.armature.select_all(action='SELECT')
-            bpy.ops.armature.calculate_roll(type='GLOBAL_POS_Z')
-
-            separate_armatures(figure_name, obj)
-            strip_trailing_digits_from_bones(obj)
-
-            bpy.ops.object.editmode_toggle()  # we're done here
-
-        bpy.ops.object.select_all(action='DESELECT')
+        # delete_body_bone() requires Edit Mode with arm_obj as active.
+        bpy.context.view_layer.objects.active = arm_obj
+        bpy.ops.object.mode_set(mode='EDIT')
+        delete_body_bone(arm_obj)
+        bpy.ops.object.mode_set(mode='OBJECT')
 
 
 
