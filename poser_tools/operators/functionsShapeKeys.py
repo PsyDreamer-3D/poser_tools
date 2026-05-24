@@ -172,7 +172,15 @@ def accumulate_fbm_shapekey(master_shapekeys, morph, shapekeys, basis_co, child_
     fbm_key.mute = True
 
 
-def consolidate_poser_shapekeys(obj, shapekeys, _is_daz=False):
+def consolidation_steps(obj, shapekeys, _is_daz=False):
+    """Generator that performs shapekey consolidation one step at a time.
+
+    The first value yielded is the total step count so the caller can size a
+    progress bar before work begins.  Every subsequent yield marks the
+    completion of one unit of work (one child-coord pre-read or one morph
+    processed).  This drives both the modal path (fixPoserShapekeys) and the
+    synchronous fallback (consolidate_poser_shapekeys).
+    """
     fbm_shapekeys = build_fbm_shapekey_list(shapekeys, _is_daz)
     mute_all_shapekeys(shapekeys)
 
@@ -180,69 +188,72 @@ def consolidate_poser_shapekeys(obj, shapekeys, _is_daz=False):
     basis_co = np.empty(n, dtype=np.float32)
     shapekeys["Basis"].data.foreach_get("co", basis_co)
 
-    # Build a flat list of child names so we know the total work upfront.
     all_child_names = [
         ch
         for morph_data in fbm_shapekeys.values()
         for ch in morph_data['children']
     ]
-    total_steps = len(all_child_names) + len(fbm_shapekeys)
+    yield len(all_child_names) + len(fbm_shapekeys)  # total — must be first
 
+    # Phase 1: pre-read child coords before any deletions.
+    all_child_coords = {}
+    for child_name in all_child_names:
+        buf = np.empty(n, dtype=np.float32)
+        shapekeys[child_name].data.foreach_get("co", buf)
+        all_child_coords[child_name] = buf
+        yield
+
+    # Phase 2: process each parent morph.
+    print('\nConverting Shapekeys...')
+    shapekeys_processed = []
+
+    for morph in fbm_shapekeys:
+        has_children = len(fbm_shapekeys[morph]['children']) > 0
+        fbm_empty = is_shapekey_empty(morph, shapekeys, basis_co)
+
+        if not has_children and fbm_empty:
+            print('---', morph, 'is empty and has no children...skipping...')
+            shapekeys[morph].mute = True
+        elif not has_children and not fbm_empty:
+            print('---', morph, 'is a working shapekey...skipping...')
+            shapekeys_processed.append(morph)
+        else:
+            child_coords = {ch: all_child_coords[ch] for ch in fbm_shapekeys[morph]['children']}
+            accumulate_fbm_shapekey(fbm_shapekeys, morph, shapekeys, basis_co, child_coords, not fbm_empty)
+            print('.......', morph, 'converted!')
+            shapekeys_processed.append(morph)
+            for child_key in fbm_shapekeys[morph]['children']:
+                print('--- deleting child shapekey', child_key)
+                remove_shapekey(obj, shapekeys[child_key])
+            print(' ')
+
+        yield
+
+    # Phase 3: final cleanup — fast, no yields needed.
+    for morph in shapekeys_processed:
+        shapekeys[morph].mute = False
+
+    for morph in shapekeys_processed:
+        if not fbm_shapekeys[morph].get('is_promoted_orphan'):
+            continue
+        new_name = get_parent_name(morph, _is_daz)
+        if new_name and new_name not in shapekeys:
+            print(f'--- renaming "{morph}" → "{new_name}"')
+            shapekeys[morph].name = new_name
+
+
+def consolidate_poser_shapekeys(obj, shapekeys, _is_daz=False):
+    """Synchronous wrapper — drives consolidation_steps() without modal overhead.
+    Used by the redo system and any non-interactive callers.
+    """
+    gen = consolidation_steps(obj, shapekeys, _is_daz)
+    total = next(gen)
     wm = bpy.context.window_manager
-    wm.progress_begin(0, max(total_steps, 1))
-    step = 0
-
+    wm.progress_begin(0, max(total, 1))
     try:
-        # Pre-read all child coords before any deletions.
-        all_child_coords = {}
-        for child_name in all_child_names:
-            buf = np.empty(n, dtype=np.float32)
-            shapekeys[child_name].data.foreach_get("co", buf)
-            all_child_coords[child_name] = buf
+        step = 0
+        for _ in gen:
             step += 1
             wm.progress_update(step)
-
-        print('\nConverting Shapekeys...')
-        shapekeys_processed = []
-
-        for morph in fbm_shapekeys:
-            has_children = len(fbm_shapekeys[morph]['children']) > 0
-            fbm_empty = is_shapekey_empty(morph, shapekeys, basis_co)
-
-            if not has_children and fbm_empty:
-                print('---', morph, 'is empty and has no children...skipping...')
-                shapekeys[morph].mute = True
-            elif not has_children and not fbm_empty:
-                print('---', morph, 'is a working shapekey...skipping...')
-                shapekeys_processed.append(morph)
-            else:
-                # has_children is True from here
-                child_coords = {ch: all_child_coords[ch] for ch in fbm_shapekeys[morph]['children']}
-                accumulate_fbm_shapekey(fbm_shapekeys, morph, shapekeys, basis_co, child_coords, not fbm_empty)
-
-                print('.......', morph, 'converted!')
-                shapekeys_processed.append(morph)
-
-                for child_key in fbm_shapekeys[morph]['children']:
-                    print('--- deleting child shapekey', child_key)
-                    remove_shapekey(obj, shapekeys[child_key])
-                print(' ')
-
-            step += 1
-            wm.progress_update(step)
-
-        for morph in shapekeys_processed:
-            shapekeys[morph].mute = False
-
-        # Rename promoted orphan morphs: strip the child prefix so they read as
-        # full-body morphs (e.g. pPregnant → Pregnant).
-        for morph in shapekeys_processed:
-            if not fbm_shapekeys[morph].get('is_promoted_orphan'):
-                continue
-            new_name = get_parent_name(morph, _is_daz)
-            if new_name and new_name not in shapekeys:
-                print(f'--- renaming "{morph}" → "{new_name}"')
-                shapekeys[morph].name = new_name
-
     finally:
         wm.progress_end()
