@@ -1,10 +1,10 @@
 schema_version = "1.0.0"
 
 id = "poser_tools"
-version = "0.1.0"
+version = "1.0.0"
 name = "Poser Tools"
 tagline = "A set of tools to make working with Poser figures easier."
-maintainer = "Jess G <ardath@psy-dreamer.com>"
+maintainer = "Jess G."
 type = "add-on"
 
 # Optional list defined by Blender and server, see:
@@ -17,7 +17,8 @@ license = [
   "SPDX:GPL-3.0-or-later",
 ]
 copyright = [
-  "2025 Jess G",
+  "2025 Jess Green",
+  "2011-2023 Blender Foundation (vendored io_scene_fbx)",
 ]
 
 [build]

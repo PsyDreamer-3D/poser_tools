@@ -1,7 +1,7 @@
 import bpy
 
 
-class RenameWeightGroups(bpy.types.Panel):
+class RenameWeightGroups:
     bl_label = "Rename Weight Groups"
     bl_idname = "VIEW_3D_PT_RenameWeightGroups"
     bl_space_type = 'VIEW_3D'
