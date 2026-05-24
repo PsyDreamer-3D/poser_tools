@@ -1,27 +1,88 @@
-Poser Tools Blender Add-on
+# Poser Tools Blender Add-on
+
+A collection of tools to make working with rigged figures exported from Poser as FBX files easier in Blender.
+
 ---
 
-Still in development so use at your own risk!
+## Requirements
 
-This add-on is a collection of tools designed to make working with rigged models exported from Poser as fbx files easier.
+- Blender 4.4.0 or later
+- Licensed under [GPL-3.0-or-later](https://spdx.org/licenses/GPL-3.0-or-later.html)
 
-### Features:
-- FBX importer that automatically aligns bones and connect children on import.
-- One-click setup that aligns the bones to the Global +Z axis and sets the armature to x-ray and In Front.
-- Batch renaming bones and vertex groups to fix Blender's naming conventions
-  - Replacing `Left_` or `Right_` prefixes with `.R` or `.L` suffixes. This makes it easier to convert the base rig to CloudRig or Rigify
-- Batch fix imported shapekeys so that they're easier to work with.
+---
 
-### Known Issues/Feature Ideas:
-- ~~BUG: Last digit of each finger bone isn't aligned with the rest of the chain. Selecting the last bone, then bone behind it, and then pressing CTRL+ALT+A aligns the last with the rest of the chain. The last bone of the thumb chain needs to be handled differently.~~
-- ~~BUG: The Shapekey consolidation function sometimes misses shapekeys—this was discovered with certain morphs in the Stephanie3-to-Aiko3 figure.~~
-- ~~BUG: Related to above. Morphs prefixed with "PBM" also need to be treated as child morphs when dealing with Daz figures (namely Mil 3 or possibly 4). Some work has been started but it needs to be completed.~~
-- ~~BUG: Occasionally, there is no full-body morph for corresponding "p" morphs. This could be the result of user-error when exporting from Poser, but these morphs should be tracked and they need to be treated the same as parent morphs.~~
-- ~~IMPROVEMENT: In FBX files that have multiple figures (figure with conforming hair and conforming clothing), rename the weight-groups in the additional figures to match the main armature.~~
-- ~~IMPROVEMENT: Include JCM morphs when consolidating. Currently, the consolidation process ignores these shape-keys but doesn't delete them.~~
-- ~~IMPROVEMENT: Change shapekey min and max values to -1 and 1.~~
-- ~~IMPROVEMENT: Material groups imported from Poser are doubled—with the duplicated group being empty. Currently testing a script that uses the [Bmesh module](https://docs.blender.org/api/current/bmesh.html) to check if the material is empty, and then delete it.~~
-- ~~IMPROVEMENT: The tail of the neck bone (connected to the root of head bone) is off-center on the x-axis~~
-- ~~IMPROVEMENT: Improve speed of shapekey consolidation.~~
-- ~~FEATURE: Add an auto-rigging feature specific to Poser figures—this will be a separate add-on.~~ See [Poser Autorigger](https://github.com/jesgs/poser_autorigger)
-- ~~FEATURE: Import Poser CR2 file directly instead of using FBX.~~ This is currently being developed as a separate add-on.
+## Installation
+
+1. Download the latest release `.zip` from the Releases page.
+2. In Blender, go to **Edit → Preferences → Add-ons**.
+3. Click **Install from Disk…** and select the downloaded `.zip`.
+4. Enable the **Poser Tools** add-on from the list.
+
+Alternatively, drag-and-drop the `.zip` directly into the Blender window.
+
+---
+
+## How to Use
+
+All tools are found in the **3D Viewport sidebar** (press `N` to open it) under the **Poser FBX Importer** tab.
+
+The recommended workflow, in order:
+
+### 1. Import Poser FBX
+
+Click **Import Poser FBX** and select your `.fbx` file. The importer is based on Blender's legacy FBX import implementation and applies a series of Poser-specific corrections automatically:
+
+- Fixes the `Face_Camera` camera-target bone that Poser generates
+- Centers the neck bone on the X axis
+- Aligns terminal bones (fingertips, toe tips, thumbs) to their parent chain
+- Recalculates bone rolls toward Global +Z
+- Removes loose (seam) vertices left over from Poser's geometry
+- Removes unused material slots and restores Poser's original body-part material order
+- Detects conforming figures (hair, clothing) and separates them into their own armatures, with their meshes re-parented to the main armature
+
+### 2. Fix Poser Shapekeys
+
+With the imported mesh selected as the active object, click **Fix Poser Shapekeys**.
+
+This consolidates Poser's parent/child morph pairs into single, usable shapekeys in Blender.
+
+> **Legacy Daz3D figures (Millennium 3 / 4):** Enable the **Legacy Daz3D Figure** checkbox before clicking the button. This activates handling for `p`-prefixed child morphs that these figures use.
+
+### 3. Rename Armature Bones
+
+With the armature selected as the active object, click **Rename Armature Bones**.
+
+This converts Poser's `Left_`/`Right_` prefixes and `lBone`/`rBone` camelCase prefixes to Blender's `.L`/`.R` suffix convention, which is required for mirroring and compatibility with Rigify and CloudRig.
+
+### 4. Prefix Armature Bones *(optional)*
+
+Enter a prefix in the text field (default: `DEF-`) and click **Prefix Armature Bones** to batch-add it to every bone in the active armature.
+
+### 5. Rename Weight Groups
+
+With a mesh selected as the active object, click **Rename Weight Groups**.
+
+Applies the same `Left_`/`Right_` → `.L`/`.R` renaming to vertex groups, keeping them in sync with the renamed bones.
+
+### 6. Prefix Weight Groups *(optional)*
+
+Enter a prefix and click **Prefix Weight Groups** to batch-add it to every vertex group on the active mesh.
+
+---
+
+## Features
+
+- **Custom FBX importer** with Poser-specific post-import corrections baked in
+- **Conforming figure separation** — hair and clothing figures are split into their own armatures automatically, with meshes re-parented to the main figure's armature
+- **Shapekey consolidation** — merges Poser's split parent/child morphs into single shapekeys; supports both standard Poser figures and legacy Daz3D Millennium 3/4 figures
+- **Bone renaming** — converts Poser naming conventions to Blender's `.L`/`.R` symmetry standard
+- **Weight group renaming** — keeps vertex groups in sync with renamed bones
+- **Batch prefixing** — add a prefix (e.g. `DEF-`) to all bones or vertex groups in one click
+
+---
+
+## Notes
+
+This add-on is still in active development — use at your own risk.
+
+For auto-rigging Poser figures in Blender, see the companion add-on [Poser Autorigger](https://github.com/jesgs/poser_autorigger).
