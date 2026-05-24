@@ -82,6 +82,25 @@ def strip_trailing_digits_from_bones(obj):
             obj.data.bones[bone.name].name = new_name
 
 
+def reparent_conforming_meshes(main_armature, conforming_armatures):
+    """Re-parent mesh children of conforming armatures to the main armature.
+
+    After bpy.ops.armature.separate() splits off a conforming figure's bones,
+    any mesh objects parented to the resulting armature are moved to the main
+    armature and their Armature modifiers are redirected accordingly.
+    """
+    for conf_arm in conforming_armatures:
+        for obj in list(conf_arm.children):
+            if obj.type != 'MESH':
+                continue
+            world_matrix = obj.matrix_world.copy()
+            obj.parent = main_armature
+            obj.matrix_world = world_matrix
+            for mod in obj.modifiers:
+                if mod.type == 'ARMATURE' and mod.object == conf_arm:
+                    mod.object = main_armature
+
+
 def rename_conforming_vertex_groups(conforming_armatures, scene_objects):
     """
     For each separated conforming armature:

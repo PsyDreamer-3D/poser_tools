@@ -104,6 +104,7 @@ class OT_ImportPoserFBX(bpy.types.Operator):
             separate_armatures,
             strip_trailing_digits_from_bones,
             rename_conforming_vertex_groups,
+            reparent_conforming_meshes,
         )
 
         result = import_fbx.load(
@@ -144,6 +145,12 @@ class OT_ImportPoserFBX(bpy.types.Operator):
             armature.show_in_front = True
             armature.display_type = 'WIRE'
 
+            # Hide any extra armatures that arrived directly from the FBX
+            # (e.g. a conforming figure already stored as its own armature object).
+            for obj in imported:
+                if obj.type == 'ARMATURE' and obj is not armature:
+                    obj.hide_viewport = True
+
             # Detect primary root before entering Edit Mode so Body* bones are still present.
             figure_name = suggest_primary_root(armature)
 
@@ -179,8 +186,11 @@ class OT_ImportPoserFBX(bpy.types.Operator):
                     conforming_armatures,
                     context.view_layer.objects,
                 )
+                reparent_conforming_meshes(armature, conforming_armatures)
                 for arm_obj in conforming_armatures:
                     arm_obj.hide_viewport = True
                 context.view_layer.objects.active = armature
+
+            armature.name = "Armature"
 
         return result
