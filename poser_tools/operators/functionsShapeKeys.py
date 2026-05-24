@@ -1,4 +1,5 @@
 import re
+from collections import defaultdict
 import bpy
 import numpy as np
 
@@ -7,6 +8,7 @@ import numpy as np
 # related to the fbm. If the morph has a lower-case p, it should be treated the same as if it had a number suffix
 
 _TRAILING_DIGITS_RE = re.compile(r'\.[0-9]{3}')
+_PBM_RE = re.compile(r'^PBM')
 
 
 def mute_all_shapekeys(shapekeys):
@@ -78,36 +80,62 @@ def build_fbm_shapekey_list(shapekeys, _is_daz=False):
 
             fbms[fbm]["children"][ch] = child_shapekeys[ch]
 
+    # Promote orphaned children (no matching parent) to standalone parents.
+    # Group siblings by their shared missing parent name so that the un-numbered
+    # variant (e.g. pPregnant) becomes the promoted parent and its numbered
+    # siblings (pPregnant.001, pPregnant.002, …) become its children —
+    # matching the normal consolidation flow.
+    orphan_groups = defaultdict(list)
+    for ch in child_shapekeys:
+        parent_name = get_parent_name(ch, _is_daz)
+        if parent_name not in fbms:
+            orphan_groups[parent_name].append(ch)
+
+    for missing_parent, orphans in orphan_groups.items():
+        base = [o for o in orphans if not _TRAILING_DIGITS_RE.search(o)]
+        numbered = [o for o in orphans if _TRAILING_DIGITS_RE.search(o)]
+
+        if base:
+            promoted = base[0]
+            # Any extra base morphs (shouldn't happen) fall back to numbered.
+            extra = base[1:]
+            children = extra + numbered
+            print(f'Warning: no full-body morph for "{missing_parent}" — '
+                  f'promoting "{promoted}" as standalone with {len(children)} child(ren).')
+            fbms[promoted] = {
+                "value": child_shapekeys[promoted],
+                "children": {ch: child_shapekeys[ch] for ch in children},
+                "is_promoted_orphan": True,
+            }
+        else:
+            # All orphans are numbered; promote each independently.
+            for orphan in numbered:
+                print(f'Warning: no full-body morph for "{missing_parent}" — '
+                      f'promoting "{orphan}" as standalone.')
+                fbms[orphan] = {"value": child_shapekeys[orphan], "children": {}}
+
     return fbms
 
 
 def is_child_shapekey(sh_name, _is_daz=False):
-    has_p = sh_name[0] == 'p' and _is_daz
-    has_trailing_digits = _TRAILING_DIGITS_RE.search(sh_name) is not None
-
-    if has_p and not has_trailing_digits:
+    if _is_daz and (sh_name[0] == 'p' or _PBM_RE.match(sh_name)):
         return True
-
-    if has_p and has_trailing_digits:
+    if _TRAILING_DIGITS_RE.search(sh_name):
         return True
-
-    if has_trailing_digits:
-        return True
-
     return False
 
 
 def get_parent_name(sh_name, _is_daz=False):
-    has_p = sh_name[0] == 'p' and _is_daz
     has_trailing_digits = _TRAILING_DIGITS_RE.search(sh_name) is not None
 
-    if has_p and not has_trailing_digits:
-        return sh_name[1:]  # return the name sans prefix
+    if _is_daz and _PBM_RE.match(sh_name):
+        base = _PBM_RE.sub('', sh_name)
+        return _TRAILING_DIGITS_RE.sub('', base)
 
-    if has_p and has_trailing_digits:
+    if _is_daz and sh_name[0] == 'p':
         return _TRAILING_DIGITS_RE.sub('', sh_name[1:])
 
-    if not has_p and has_trailing_digits:
+    if has_trailing_digits:
         return _TRAILING_DIGITS_RE.sub('', sh_name)
 
 
@@ -191,3 +219,13 @@ def consolidate_poser_shapekeys(obj, shapekeys, _is_daz=False):
 
     for morph in shapekeys_processed:
         shapekeys[morph].mute = False
+
+    # Rename promoted orphan morphs: strip the child prefix so they read as
+    # full-body morphs (e.g. pPregnant → Pregnant).
+    for morph in shapekeys_processed:
+        if not fbm_shapekeys[morph].get('is_promoted_orphan'):
+            continue
+        new_name = get_parent_name(morph, _is_daz)
+        if new_name and new_name not in shapekeys:
+            print(f'--- renaming "{morph}" → "{new_name}"')
+            shapekeys[morph].name = new_name
