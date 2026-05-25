@@ -18,8 +18,8 @@ import re
 import sys
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-MANIFEST_PATH = os.path.join(REPO_ROOT, "blender_manifest.toml")
-INIT_PATH = os.path.join(REPO_ROOT, "__init__.py")
+MANIFEST_PATH = os.path.join(REPO_ROOT, "poser_tools/blender_manifest.toml")
+INIT_PATH = os.path.join(REPO_ROOT, "poser_tools/__init__.py")
 
 
 def parse_version(raw: str) -> tuple[int, int, int]:

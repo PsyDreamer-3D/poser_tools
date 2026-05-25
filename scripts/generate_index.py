@@ -18,7 +18,7 @@ except ImportError:
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DIST_DIR = os.path.join(REPO_ROOT, "dist")
-MANIFEST_PATH = os.path.join(REPO_ROOT, "blender_manifest.toml")
+MANIFEST_PATH = os.path.join(REPO_ROOT, "poser_tools/blender_manifest.toml")
 INDEX_PATH = os.path.join(DIST_DIR, "index.json")
 
 

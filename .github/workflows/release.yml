@@ -15,8 +15,21 @@ jobs:
 
       - name: Install Blender
         run: |
-          sudo snap install blender --classic --channel=latest/stable
-
+            # Install dependencies required by Blender binaries
+            # sudo apt update && sudo apt install -y wget tar xz-utils libxrender1 libxi6 libgconf-2-4 libgl1            
+            
+            # Download Blender 5.0.1 Linux binary from official mirrors
+            wget https://download.blender.org/release/Blender5.0/blender-5.0.1-linux-x64.tar.xz
+            
+            # Extract the tarball
+            tar -xf blender-5.0.1-linux-x64.tar.xz
+            
+            # Move to a standard system directory and create a symlink
+            sudo mv blender-5.0.1-linux-x64 /opt/blender
+            sudo ln -s /opt/blender/blender /usr/local/bin/blender
+            
+            # Verify installation
+            blender --version
       - name: Bump version
         run: |
           python3 scripts/bump_version.py "${GITHUB_REF_NAME}"
@@ -28,7 +41,7 @@ jobs:
       - name: Build extension
         run: |
           mkdir -p dist
-          blender --command extension build --source-dir . --output-dir dist
+          blender --command extension build --source-dir poser_tools --output-dir dist
 
       - name: Generate index.json
         run: |
