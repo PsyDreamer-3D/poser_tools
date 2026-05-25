@@ -1,0 +1,58 @@
+name: Build & Publish Extension
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Blender
+        run: |
+            # Install dependencies required by Blender binaries
+            # sudo apt update && sudo apt install -y wget tar xz-utils libxrender1 libxi6 libgconf-2-4 libgl1            
+            
+            # Download Blender 5.0.1 Linux binary from official mirrors
+            wget https://download.blender.org/release/Blender5.0/blender-5.0.1-linux-x64.tar.xz
+            
+            # Extract the tarball
+            tar -xf blender-5.0.1-linux-x64.tar.xz
+            
+            # Move to a standard system directory and create a symlink
+            sudo mv blender-5.0.1-linux-x64 /opt/blender
+            sudo ln -s /opt/blender/blender /usr/local/bin/blender
+            
+            # Verify installation
+            blender --version
+      - name: Bump version
+        run: |
+          python3 scripts/bump_version.py "${GITHUB_REF_NAME}"
+
+      - name: Strip development-only code blocks
+        run: |
+          python3 scripts/strip_dev_blocks.py
+
+      - name: Build extension
+        run: |
+          mkdir -p dist
+          blender --command extension build --source-dir poser_tools --output-dir dist
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          generate_release_notes: true
+          draft: false
+          prerelease: false
+
+      - name: Upload extension zip to release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          files: dist/*.zip
