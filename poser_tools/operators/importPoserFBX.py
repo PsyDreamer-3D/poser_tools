@@ -138,7 +138,7 @@ class OT_ImportPoserFBX(bpy.types.Operator):
             mesh_objects = [obj for obj in imported if obj.type == 'MESH']
 
             # Apply Poser's 1/100 scale and axis rotation while everything is still selected.
-            bpy.ops.object.transform_apply(location=False, rotation=True, scale=True)
+            bpy.ops.object.transform_apply(location=True, rotation=True, scale=True)
 
             # --- Mesh corrections ---
             n_meshes = max(len(mesh_objects), 1)
