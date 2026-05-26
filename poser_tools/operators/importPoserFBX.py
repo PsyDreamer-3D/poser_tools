@@ -189,10 +189,13 @@ class OT_ImportPoserFBX(bpy.types.Operator):
                 bpy.ops.object.mode_set(mode='OBJECT')
                 wm.progress_update(90)
 
+                # Armatures split out by separate_armatures().
                 armatures_after = {o.name for o in bpy.data.objects if o.type == 'ARMATURE'}
-                conforming_armatures = [
-                    bpy.data.objects[n] for n in (armatures_after - armatures_before)
-                ]
+                new_from_separate = [bpy.data.objects[n] for n in (armatures_after - armatures_before)]
+                # Armatures that arrived as separate objects in the FBX (not the primary).
+                fbx_conforming = [obj for obj in imported if obj.type == 'ARMATURE' and obj is not armature]
+                seen = {arm.name for arm in new_from_separate}
+                conforming_armatures = new_from_separate + [a for a in fbx_conforming if a.name not in seen]
                 if conforming_armatures:
                     rename_conforming_vertex_groups(
                         conforming_armatures,

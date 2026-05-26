@@ -181,7 +181,8 @@ def elem_props_find_first(elem, elem_prop_id):
         return None
     # support for templates (tuple of elems)
     if type(elem) is not FBXElem:
-        assert(type(elem) is tuple)
+        if type(elem) is not tuple:
+            return None  # unexpected type under Blender 5.0 extension loading
         for e in elem:
             result = elem_props_find_first(e, elem_prop_id)
             if result is not None:

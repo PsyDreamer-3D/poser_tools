@@ -83,22 +83,23 @@ def strip_trailing_digits_from_bones(obj):
 
 
 def reparent_conforming_meshes(main_armature, conforming_armatures):
-    """Re-parent mesh children of conforming armatures to the main armature.
+    """Re-parent conforming-figure meshes to the main armature.
 
-    After bpy.ops.armature.separate() splits off a conforming figure's bones,
-    any mesh objects parented to the resulting armature are moved to the main
-    armature and their Armature modifiers are redirected accordingly.
+    Searches all scene objects rather than relying on obj.parent being
+    set correctly after armature.separate(), which varies by Blender version.
     """
-    for conf_arm in conforming_armatures:
-        for obj in list(conf_arm.children):
-            if obj.type != 'MESH':
-                continue
+    conf_arm_set = set(conforming_armatures)
+    for obj in bpy.data.objects:
+        if obj.type != 'MESH':
+            continue
+        if obj.parent in conf_arm_set:
             world_matrix = obj.matrix_world.copy()
             obj.parent = main_armature
+            obj.matrix_parent_inverse = main_armature.matrix_world.inverted()
             obj.matrix_world = world_matrix
-            for mod in obj.modifiers:
-                if mod.type == 'ARMATURE' and mod.object == conf_arm:
-                    mod.object = main_armature
+        for mod in obj.modifiers:
+            if mod.type == 'ARMATURE' and mod.object in conf_arm_set:
+                mod.object = main_armature
 
 
 def rename_conforming_vertex_groups(conforming_armatures, scene_objects):
@@ -122,10 +123,14 @@ def rename_conforming_vertex_groups(conforming_armatures, scene_objects):
         strip_trailing_digits_from_bones(arm_obj)
 
         # delete_body_bone() requires Edit Mode with arm_obj as active.
+        # Temporarily unhide in case it was hidden before processing.
+        was_hidden = arm_obj.hide_viewport
+        arm_obj.hide_viewport = False
         bpy.context.view_layer.objects.active = arm_obj
         bpy.ops.object.mode_set(mode='EDIT')
         delete_body_bone(arm_obj)
         bpy.ops.object.mode_set(mode='OBJECT')
+        arm_obj.hide_viewport = was_hidden
 
 
 
