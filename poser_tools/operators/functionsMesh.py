@@ -1,17 +1,37 @@
 import bpy
-import bmesh
 
 
 def remove_loose_verts(obj):
     """Remove vertices not connected to any edge (Poser seam vertices)."""
-    bm = bmesh.new()
-    bm.from_mesh(obj.data)
-    loose = [v for v in bm.verts if not v.link_edges]
-    if loose:
-        bmesh.ops.delete(bm, geom=loose, context='VERTS')
-        bm.to_mesh(obj.data)
-        obj.data.update()
-    bm.free()
+    # Blender 5.1.2 bug #156097: BM_mesh_bm_from_me crashes when active_uv_map_name()
+    # returns a name not found in the BMesh's CustomData. This happens when a mesh has
+    # UV layers but active_uv_map_attribute is NULL (e.g. after bm.to_mesh() on a BMesh
+    # whose UV layer was never assigned as active). Fix: ensure the active UV layer is set
+    # before any operation that creates a BMesh (bm.from_mesh OR mode_set to EDIT).
+    mesh = obj.data
+    if mesh.uv_layers and mesh.uv_layers.active is None:
+        mesh.uv_layers.active = mesh.uv_layers[0]
+
+    ctx = bpy.context
+    prev_active = ctx.view_layer.objects.active
+
+    # Isolate obj before entering edit mode. mode_set enters edit mode for ALL selected
+    # objects (multi-object editing), so other meshes with the UV bug would also crash.
+    prev_selected = list(ctx.selected_objects)
+    for o in prev_selected:
+        o.select_set(False)
+    obj.select_set(True)
+    ctx.view_layer.objects.active = obj
+
+    bpy.ops.object.mode_set(mode='EDIT')
+    bpy.ops.mesh.select_all(action='SELECT')
+    bpy.ops.mesh.delete_loose(use_verts=True, use_edges=False, use_faces=False)
+    bpy.ops.object.mode_set(mode='OBJECT')
+
+    obj.select_set(False)
+    for o in prev_selected:
+        o.select_set(True)
+    ctx.view_layer.objects.active = prev_active
 
 
 def remove_unused_material_slots(context, obj):
@@ -29,6 +49,8 @@ def sort_material_slots_by_face_order(obj):
     mesh = obj.data
     n_mats = len(mesh.materials)
     if n_mats <= 1:
+        return
+    if 'material_index' not in mesh.attributes:
         return
 
     mat_attr = mesh.attributes['material_index'].data
