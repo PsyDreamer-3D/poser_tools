@@ -9,6 +9,21 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [1.0.2] - 2026-05-30
+
+### Fixed
+- Blender 5.1.2 crash when importing a multi-figure FBX file. Caused by a bug in `BM_mesh_bm_from_me()` ([PR #156302](https://projects.blender.org/blender/blender/pulls/156302)) that was not backported to 5.1.2; a fix is included in the upcoming 5.2 LTS release
+- Location transform was not being applied after import (only rotation and scale were)
+
+---
+
+## [1.0.1] - 2026-05-26
+
+### Fixed
+- Multi-figure FBX import: conforming figures (hair, clothing) could fail to separate correctly in certain file layouts
+
+---
+
 ## [1.0.0] - 2026-05-26
 
 ### Added
