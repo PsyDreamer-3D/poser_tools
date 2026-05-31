@@ -1,33 +1,56 @@
 import bpy
+import numpy as np
+from contextlib import contextmanager
+
+
+@contextmanager
+def _uv_stripped(mesh):
+    """Blender 5.1.2 bug #156097 workaround: temporarily remove all UV layers
+    so BM_mesh_bm_from_me() has no UV data to mishandle. Remove this function
+    (and its callsite) once minimum Blender version is bumped to 5.2."""
+    saved_uvs = []
+    active_uv_name = None
+
+    if mesh.uv_layers:
+        n_loops = len(mesh.loops)
+        active = mesh.uv_layers.active
+        active_uv_name = active.name if active else None
+        for layer in mesh.uv_layers:
+            buf = np.empty(n_loops * 2, dtype=np.float32)
+            layer.uv.foreach_get("vector", buf)
+            saved_uvs.append((layer.name, buf, layer.active_render))
+        while mesh.uv_layers:
+            mesh.uv_layers.remove(mesh.uv_layers[0])
+
+    try:
+        yield
+    finally:
+        for name, buf, is_render_active in saved_uvs:
+            layer = mesh.uv_layers.new(name=name, do_init=False)
+            layer.uv.foreach_set("vector", buf)
+            if is_render_active:
+                layer.active_render = True
+        if active_uv_name:
+            uv = mesh.uv_layers.get(active_uv_name)
+            if uv:
+                mesh.uv_layers.active = uv
 
 
 def remove_loose_verts(obj):
     """Remove vertices not connected to any edge (Poser seam vertices)."""
-    # Blender 5.1.2 bug #156097: BM_mesh_bm_from_me crashes when
-    # active_uv_map_name() or default_uv_map_name() returns "" (NULL attribute
-    # pointer). Fix both UV map attributes before entering edit mode.
-    mesh = obj.data
-    if mesh.uv_layers:
-        if mesh.uv_layers.active is None:
-            mesh.uv_layers.active = mesh.uv_layers[0]
-        if not any(l.active_render for l in mesh.uv_layers):
-            mesh.uv_layers[0].active_render = True
-
     ctx = bpy.context
     prev_active = ctx.view_layer.objects.active
-
-    # Isolate obj before entering edit mode. mode_set enters edit mode for ALL selected
-    # objects (multi-object editing), so other meshes with the UV bug would also crash.
     prev_selected = list(ctx.selected_objects)
     for o in prev_selected:
         o.select_set(False)
     obj.select_set(True)
     ctx.view_layer.objects.active = obj
 
-    bpy.ops.object.mode_set(mode='EDIT')
-    bpy.ops.mesh.select_all(action='SELECT')
-    bpy.ops.mesh.delete_loose(use_verts=True, use_edges=False, use_faces=False)
-    bpy.ops.object.mode_set(mode='OBJECT')
+    with _uv_stripped(obj.data):  # bug #156097 workaround, remove for Blender 5.2+
+        bpy.ops.object.mode_set(mode='EDIT')
+        bpy.ops.mesh.select_all(action='SELECT')
+        bpy.ops.mesh.delete_loose(use_verts=True, use_edges=False, use_faces=False)
+        bpy.ops.object.mode_set(mode='OBJECT')
 
     obj.select_set(False)
     for o in prev_selected:
@@ -82,5 +105,3 @@ def sort_material_slots_by_face_order(obj):
         mesh.materials[new_idx] = old_mats[old_idx]
 
     mesh.update()
-
-
