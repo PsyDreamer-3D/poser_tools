@@ -9,6 +9,13 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [1.0.3] - 2026-05-31
+
+### Fixed
+- Blender 5.1.2 crash (bug #156097) when importing a multi-figure FBX: the previous fix only patched the active UV map attribute (`active_uv_map_attribute`) but not the render UV map attribute (`default_uv_map_attribute`). Both are read by `BM_mesh_bm_from_me()` and both can trigger the crash. Fixed by patching both attributes upfront on every mesh before the corrections loop, in addition to the per-mesh guard already present in `remove_loose_verts`
+
+---
+
 ## [1.0.2] - 2026-05-30
 
 ### Fixed
