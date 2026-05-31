@@ -3,14 +3,15 @@ import bpy
 
 def remove_loose_verts(obj):
     """Remove vertices not connected to any edge (Poser seam vertices)."""
-    # Blender 5.1.2 bug #156097: BM_mesh_bm_from_me crashes when active_uv_map_name()
-    # returns a name not found in the BMesh's CustomData. This happens when a mesh has
-    # UV layers but active_uv_map_attribute is NULL (e.g. after bm.to_mesh() on a BMesh
-    # whose UV layer was never assigned as active). Fix: ensure the active UV layer is set
-    # before any operation that creates a BMesh (bm.from_mesh OR mode_set to EDIT).
+    # Blender 5.1.2 bug #156097: BM_mesh_bm_from_me crashes when
+    # active_uv_map_name() or default_uv_map_name() returns "" (NULL attribute
+    # pointer). Fix both UV map attributes before entering edit mode.
     mesh = obj.data
-    if mesh.uv_layers and mesh.uv_layers.active is None:
-        mesh.uv_layers.active = mesh.uv_layers[0]
+    if mesh.uv_layers:
+        if mesh.uv_layers.active is None:
+            mesh.uv_layers.active = mesh.uv_layers[0]
+        if not any(l.active_render for l in mesh.uv_layers):
+            mesh.uv_layers[0].active_render = True
 
     ctx = bpy.context
     prev_active = ctx.view_layer.objects.active

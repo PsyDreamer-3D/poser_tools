@@ -141,6 +141,18 @@ class OT_ImportPoserFBX(bpy.types.Operator):
             bpy.ops.object.transform_apply(location=True, rotation=True, scale=True)
 
             # --- Mesh corrections ---
+            # Blender 5.1.2 bug #156097: pre-fix UV attributes on every mesh so
+            # that multi-object operators (e.g. material_slot_remove_unused) can
+            # safely create a BMesh for any of them, not just the one currently
+            # being processed.
+            for obj in mesh_objects:
+                m = obj.data
+                if m.uv_layers:
+                    if m.uv_layers.active is None:
+                        m.uv_layers.active = m.uv_layers[0]
+                    if not any(l.active_render for l in m.uv_layers):
+                        m.uv_layers[0].active_render = True
+
             n_meshes = max(len(mesh_objects), 1)
             for i, obj in enumerate(mesh_objects):
                 wm.progress_update(40 + int(20 * i / n_meshes))
