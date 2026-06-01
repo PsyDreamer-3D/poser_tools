@@ -9,6 +9,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [1.0.1] - 2026-05-26
+### Fixed
+- Imported multi-figure FBX files with conforming hair and/or clothing now correctly handle the separated hair/clothing armatures, preventing errors during import and ensuring proper bone alignment and vertex group assignment.
+
 ## [1.0.0] - 2026-05-26
 
 ### Added
