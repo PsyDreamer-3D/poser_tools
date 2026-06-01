@@ -12,7 +12,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [1.0.3] - 2026-05-31
 
 ### Fixed
-- Blender 5.1.2 crash (bug #156097) when importing a multi-figure FBX on a fresh Blender session after a previous successful import. Previous fixes patched the `active_uv_map_attribute` and `default_uv_map_attribute` pointers before entering edit mode, but `bm_to_me()` (exit from edit mode) can leave those pointers in an internally inconsistent state, causing the crash on the *next* `BM_mesh_bm_from_me()` call. Fixed by removing all UV layers from each mesh before entering edit mode — making the BMesh UV-free so the entire UV section of `BM_mesh_bm_from_me()` becomes a no-op — and fully restoring the saved UV data afterward
+- Blender 5.1.2 crash (bug #156097) on multi-figure FBX import, occurring on the second or third mesh in the corrections loop. Two crash paths are addressed together:
+  - **UV CustomData crash**: `BM_mesh_bm_from_me()` uses a buggy global-vs-per-type index when looking up the active/render UV layer names. Prior edit-mode passes from the FBX importer corrupt the UV `CustomData` structure internally; simply resetting the attribute strings is not sufficient to recover. Fixed by stripping all UV layers before each edit-mode entry and installing a sentinel layer (`__b156097__`) that both attribute strings point to, then fully restoring the original UV data after edit mode exits.
+  - **Shape key crash**: `BM_mesh_bm_from_me()` also crashes in its shape key `CustomData` setup on meshes with many shape keys processed after another mesh in the same session. Fixed by temporarily stripping all shape keys before entering edit mode and fully restoring them (with loose-vertex remapping) after exit.
+  - The UV strip is the *outer* wrapper and the shape-key strip is the *inner* wrapper so the sentinel is installed before `shape_key_remove(all=True)` fires its depsgraph flush — that flush calls `BM_mesh_bm_from_me` and would crash if the sentinel were not yet in place.
 
 ---
 
