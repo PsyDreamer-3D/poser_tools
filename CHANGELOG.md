@@ -7,6 +7,9 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+- **Prefix Armature Bones** button is no longer permanently greyed out — its `poll()` compared the active object to a string instead of checking `.type == 'ARMATURE'`.
+
 ### Changed
 - Repository restructured to match the `blender-addon-scaffold` conventions: shared helpers moved to a `core/` package, `panels/` → `ui/` and `settings/` → `properties/`, each subpackage owns its own `register()`/`unregister()`, and the top-level `__init__.py` is orchestration only. SPDX headers on every source file; LF line endings throughout. No user-facing behavior change.
 - `recalculate_bone_rolls` and `remove_unused_material_slots` now use the direct data API instead of `bpy.ops`.
