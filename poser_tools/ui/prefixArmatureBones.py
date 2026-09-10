@@ -2,11 +2,13 @@
 
 import bpy
 
+from ..core.utils import _TAB
 
-class PrefixWeightGroups_Panel(bpy.types.Panel):
-    bl_label = "Prefix Weight Groups"
-    bl_idname = "VIEW_3D_PT_PrefixWeightGroups"
-    bl_category = "Poser FBX Importer"
+
+class PrefixArmatureBones_Panel(bpy.types.Panel):
+    bl_label = "Prefix Armature Bones"
+    bl_idname = "VIEW_3D_PT_PrefixArmatureBones"
+    bl_category = _TAB
     bl_space_type = "VIEW_3D"
     bl_region_type = "UI"
 
@@ -16,8 +18,8 @@ class PrefixWeightGroups_Panel(bpy.types.Panel):
         scene = context.scene
         options = scene.poser_shapekeys_addon
         text_field_row = layout.row(align=True)
-        text_field_row.prop(options, "weight_group_prefix")
+        text_field_row.prop(options, "bone_prefix")
 
         button_row = layout.row()
         button_row.scale_y = 1.5
-        button_row.operator("poser.prefix_weight_groups")
+        button_row.operator("poser.prefix_armature_bones")

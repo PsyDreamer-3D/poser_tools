@@ -1,13 +1,15 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 
 import bpy
+
+from ..core.utils import _TAB
 import textwrap
 
 
 class FixPoserShapekeys:
     bl_idname = "VIEW_3D_PT_FixPoserShapekeys"
     bl_label = "Fix Poser Shapekeys"
-    bl_category = "Poser FBX Importer"
+    bl_category = _TAB
     bl_space_type = "VIEW_3D"
     bl_region_type = "UI"
 

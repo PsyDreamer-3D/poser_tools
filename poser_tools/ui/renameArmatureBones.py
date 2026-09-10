@@ -2,11 +2,13 @@
 
 import bpy
 
+from ..core.utils import _TAB
+
 
 class RenameArmatureBones:
     bl_idname = "VIEW_3D_PT_RenameArmatureBones"
     bl_label = "Rename Armature Bones"
-    bl_category = "Poser FBX Importer"
+    bl_category = _TAB
     bl_space_type = "VIEW_3D"
     bl_region_type = "UI"
 
