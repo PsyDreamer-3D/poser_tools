@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-import bpy
+from mathutils import Vector
 
 
 def rename_all_bones(armature):
@@ -209,9 +209,16 @@ def align_terminal_bones_to_parent(armature, centroids=None):
 
 
 def recalculate_bone_rolls(armature):
-    """Recalculate roll for all bones toward Global +Z, then zero-out spine bones."""
-    bpy.ops.armature.select_all(action='SELECT')
-    bpy.ops.armature.calculate_roll(type='GLOBAL_POS_Z')
+    """Align every bone's roll toward global +Z, then zero-out spine bones.
+
+    Direct-API equivalent of bpy.ops.armature.calculate_roll(type='GLOBAL_POS_Z').
+    EditBone.align_roll() takes a vector in armature space; the importer applies
+    the armature's object transform (importPoserFBX.execute) before this runs, so
+    armature space coincides with world space and +Z is the correct target.
+    Must be called while the armature is in Edit Mode.
+    """
+    up = Vector((0.0, 0.0, 1.0))
     for bone in armature.data.edit_bones:
+        bone.align_roll(up)
         if any(kw in bone.name.lower() for kw in _SPINE_KEYWORDS):
             bone.roll = 0.0

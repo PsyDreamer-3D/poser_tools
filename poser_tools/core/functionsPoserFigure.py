@@ -53,6 +53,11 @@ def deselect_bone(_obj, name):
 def separate_armatures(figure_name, _obj):
     # Caller must have _obj active and in Edit Mode.
     # Exits with _obj active in Edit Mode.
+    #
+    # bpy.ops.armature.separate() is kept as an operator: splitting an armature
+    # (moving a bone subtree into a new armature object, migrating pose data,
+    # vertex groups and modifier targets) has no bpy.data-level equivalent, and
+    # edit_bones access requires Edit Mode either way.
     while True:
         bones = _obj.data.bones
         parents = get_top_level_bones(bones)

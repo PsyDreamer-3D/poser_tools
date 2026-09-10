@@ -140,6 +140,8 @@ class OT_ImportPoserFBX(bpy.types.Operator):
             mesh_objects = [obj for obj in imported if obj.type == 'MESH']
 
             # Apply Poser's 1/100 scale and axis rotation while everything is still selected.
+            # Kept as bpy.ops: a correct multi-object apply across the freshly imported
+            # armature + parented meshes has no concise bpy.data equivalent.
             bpy.ops.object.transform_apply(location=True, rotation=True, scale=True)
 
             # --- Mesh corrections ---
@@ -147,7 +149,7 @@ class OT_ImportPoserFBX(bpy.types.Operator):
             for i, obj in enumerate(mesh_objects):
                 wm.progress_update(40 + int(20 * i / n_meshes))
                 remove_loose_verts(obj)
-                remove_unused_material_slots(context, obj)
+                remove_unused_material_slots(obj)
                 sort_material_slots_by_face_order(obj)
             wm.progress_update(60)
 
@@ -170,6 +172,8 @@ class OT_ImportPoserFBX(bpy.types.Operator):
                 wm.progress_update(70)
 
                 context.view_layer.objects.active = armature
+                # Edit-mode toggles stay as bpy.ops: armature.edit_bones only
+                # exists in Edit Mode and has no bpy.data-level accessor.
                 bpy.ops.object.mode_set(mode='EDIT')
 
                 fix_camera_target_bones(armature)
