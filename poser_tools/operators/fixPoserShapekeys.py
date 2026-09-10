@@ -2,6 +2,9 @@
 
 import bpy
 from ..core.functionsShapeKeys import consolidate_poser_shapekeys
+from ..core.utils import _write_report
+
+_REPORT_TEXT = "Poser Shapekey Report"
 
 
 class OT_FixPoserShapekeys_Operator(bpy.types.Operator):
@@ -18,15 +21,29 @@ class OT_FixPoserShapekeys_Operator(bpy.types.Operator):
 
     def execute(self, context):
         obj = context.active_object
+
         if ("morphs_consolidated" in obj) and obj["morphs_consolidated"] is True:
-            print('morphs are already consolidated')
+            self.report({'INFO'}, "Morphs already consolidated on this mesh.")
+            return {'CANCELLED'}
+
+        if obj.data.shape_keys is None:
+            self.report({'ERROR'}, "Active mesh has no shape keys.")
             return {'CANCELLED'}
 
         shapekeys = obj.data.shape_keys.key_blocks
-        scene = context.scene
-        options = scene.poser_shapekeys_addon
+        options = context.scene.poser_shapekeys_addon
 
-        consolidate_poser_shapekeys(obj, shapekeys, options.is_daz)
+        report = consolidate_poser_shapekeys(obj, shapekeys, options.is_daz)
         obj["morphs_consolidated"] = True
-        print('morphs have been consolidated')
+
+        summary = (
+            f"Consolidated {len(report['consolidated'])} morph(s), "
+            f"kept {len(report['working_kept'])} working, "
+            f"skipped {len(report['empty_skipped'])} empty"
+        )
+        if report['promoted']:
+            summary += f", promoted {len(report['promoted'])} orphan(s)"
+        self.report({'INFO'}, summary)
+
+        _write_report(context, _REPORT_TEXT, [summary, ""] + report['log'])
         return {'FINISHED'}

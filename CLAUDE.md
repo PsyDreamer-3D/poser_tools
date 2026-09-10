@@ -38,6 +38,9 @@ Standard scaffold layout. Two things worth knowing:
   equivalent), `armature.separate` (no way to split an armature via `bpy.data`), and one
   `object.transform_apply` on the fresh multi-object import selection. Each is commented in place.
   Everything else that mutates data uses `bpy.data`/`bmesh` directly.
+- **Shape-key consolidation diagnostics** go to the `"Poser Shapekey Report"` `bpy.data.texts`
+  block (full itemized log) plus a one-line `self.report({'INFO'}, …)` summary — never `print()`.
+  `consolidate_poser_shapekeys()` returns a summary dict carrying that `log`.
 
 ## Out of scope (permanent)
 

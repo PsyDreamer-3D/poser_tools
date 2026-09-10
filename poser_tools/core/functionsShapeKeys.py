@@ -37,7 +37,7 @@ def unmute_all_shapekeys(shapekeys):
         sh.mute = False
 
 
-def build_parent_shapekey_list(shapekeys, _is_daz=False):
+def build_parent_shapekey_list(shapekeys, _is_daz=False, log=None):
     _fbm_shape_keys = {}
     for sh in shapekeys:
         sh_name = sh.name
@@ -45,8 +45,8 @@ def build_parent_shapekey_list(shapekeys, _is_daz=False):
             continue
 
         if not is_child_shapekey(sh_name, _is_daz):
-            if sh_name[0] == 'p':
-                print(sh_name, 'is not a child shapekey')
+            if log is not None and sh_name[:1] == 'p':
+                log.append(f'note: "{sh_name}" is p-prefixed but treated as a full-body morph')
             _fbm_shape_keys[sh_name] = sh.value
 
     return _fbm_shape_keys
@@ -65,8 +65,8 @@ def build_child_shapekey_list(shapekeys, _is_daz=False):
     return _fbm_shape_keys
 
 
-def build_fbm_shapekey_list(shapekeys, _is_daz=False):
-    parent_shapekeys = build_parent_shapekey_list(shapekeys, _is_daz)
+def build_fbm_shapekey_list(shapekeys, _is_daz=False, log=None):
+    parent_shapekeys = build_parent_shapekey_list(shapekeys, _is_daz, log)
     child_shapekeys = build_child_shapekey_list(shapekeys, _is_daz)
 
     fbms = {}
@@ -102,8 +102,11 @@ def build_fbm_shapekey_list(shapekeys, _is_daz=False):
             # Any extra base morphs (shouldn't happen) fall back to numbered.
             extra = base[1:]
             children = extra + numbered
-            print(f'Warning: no full-body morph for "{missing_parent}" — '
-                  f'promoting "{promoted}" as standalone with {len(children)} child(ren).')
+            if log is not None:
+                log.append(
+                    f'warning: no full-body morph for "{missing_parent}" — '
+                    f'promoting "{promoted}" as standalone with {len(children)} child(ren)'
+                )
             fbms[promoted] = {
                 "value": child_shapekeys[promoted],
                 "children": {ch: child_shapekeys[ch] for ch in children},
@@ -112,8 +115,11 @@ def build_fbm_shapekey_list(shapekeys, _is_daz=False):
         else:
             # All orphans are numbered; promote each independently.
             for orphan in numbered:
-                print(f'Warning: no full-body morph for "{missing_parent}" — '
-                      f'promoting "{orphan}" as standalone.')
+                if log is not None:
+                    log.append(
+                        f'warning: no full-body morph for "{missing_parent}" — '
+                        f'promoting "{orphan}" as standalone'
+                    )
                 fbms[orphan] = {"value": child_shapekeys[orphan], "children": {}}
 
     return fbms
@@ -175,7 +181,31 @@ def accumulate_fbm_shapekey(master_shapekeys, morph, shapekeys, basis_co, child_
 
 
 def consolidate_poser_shapekeys(obj, shapekeys, _is_daz=False):
-    fbm_shapekeys = build_fbm_shapekey_list(shapekeys, _is_daz)
+    """Merge Poser's split parent/child morphs into single shape keys.
+
+    Returns a summary dict:
+        consolidated      – FBM names that absorbed one or more children
+        working_kept      – childless non-empty keys left untouched
+        empty_skipped     – childless empty keys that were muted
+        promoted          – orphan children promoted to standalone parents
+        renamed           – {old_name: new_name} for promoted-orphan prefix strips
+        children_deleted  – child key names removed after merging
+        log               – full itemized text, one entry per line, for _write_report()
+    """
+    log = []
+    result = {
+        "consolidated": [],
+        "working_kept": [],
+        "empty_skipped": [],
+        "promoted": [],
+        "renamed": {},
+        "children_deleted": [],
+        "log": log,
+    }
+
+    fbm_shapekeys = build_fbm_shapekey_list(shapekeys, _is_daz, log)
+    result["promoted"] = [m for m, d in fbm_shapekeys.items() if d.get("is_promoted_orphan")]
+
     mute_all_shapekeys(shapekeys)
 
     n = len(obj.data.vertices) * 3
@@ -204,7 +234,7 @@ def consolidate_poser_shapekeys(obj, shapekeys, _is_daz=False):
             step += 1
             wm.progress_update(step)
 
-        print('\nConverting Shapekeys...')
+        log.append("Converting shape keys...")
         shapekeys_processed = []
 
         for morph in fbm_shapekeys:
@@ -212,23 +242,27 @@ def consolidate_poser_shapekeys(obj, shapekeys, _is_daz=False):
             fbm_empty = is_shapekey_empty(morph, shapekeys, basis_co)
 
             if not has_children and fbm_empty:
-                print('---', morph, 'is empty and has no children...skipping...')
+                log.append(f'  {morph}: empty and childless — muted')
+                result["empty_skipped"].append(morph)
                 shapekeys[morph].mute = True
             elif not has_children and not fbm_empty:
-                print('---', morph, 'is a working shapekey...skipping...')
+                log.append(f'  {morph}: working shape key — kept as-is')
+                result["working_kept"].append(morph)
                 shapekeys_processed.append(morph)
             else:
                 # has_children is True from here
                 child_coords = {ch: all_child_coords[ch] for ch in fbm_shapekeys[morph]['children']}
                 accumulate_fbm_shapekey(fbm_shapekeys, morph, shapekeys, basis_co, child_coords, not fbm_empty)
 
-                print('.......', morph, 'converted!')
+                child_names = list(fbm_shapekeys[morph]['children'])
+                log.append(f'  {morph}: converted ({len(child_names)} child(ren) merged)')
+                result["consolidated"].append(morph)
                 shapekeys_processed.append(morph)
 
-                for child_key in fbm_shapekeys[morph]['children']:
-                    print('--- deleting child shapekey', child_key)
+                for child_key in child_names:
+                    log.append(f'      deleted child shape key {child_key}')
+                    result["children_deleted"].append(child_key)
                     remove_shapekey(obj, shapekeys[child_key])
-                print(' ')
 
             step += 1
             wm.progress_update(step)
@@ -243,8 +277,11 @@ def consolidate_poser_shapekeys(obj, shapekeys, _is_daz=False):
                 continue
             new_name = get_parent_name(morph, _is_daz)
             if new_name and new_name not in shapekeys:
-                print(f'--- renaming "{morph}" → "{new_name}"')
+                log.append(f'  renamed "{morph}" → "{new_name}"')
+                result["renamed"][morph] = new_name
                 shapekeys[morph].name = new_name
 
     finally:
         wm.progress_end()
+
+    return result
