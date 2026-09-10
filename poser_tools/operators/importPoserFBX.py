@@ -88,7 +88,7 @@ class OT_ImportPoserFBX(bpy.types.Operator):
 
     def execute(self, context):
         from ..vendor.io_scene_fbx import import_fbx
-        from .functionsArmature import (
+        from ..core.functionsArmature import (
             fix_camera_target_bones,
             center_neck_bone_tail,
             delete_body_bone,
@@ -96,12 +96,12 @@ class OT_ImportPoserFBX(bpy.types.Operator):
             align_terminal_bones_to_parent,
             compute_vertex_group_centroids,
         )
-        from .functionsMesh import (
+        from ..core.functionsMesh import (
             remove_loose_verts,
             remove_unused_material_slots,
             sort_material_slots_by_face_order,
         )
-        from .functionsPoserFigure import (
+        from ..core.functionsPoserFigure import (
             suggest_primary_root,
             separate_armatures,
             strip_trailing_digits_from_bones,
