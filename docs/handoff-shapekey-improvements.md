@@ -1,10 +1,10 @@
 # Handoff: Shape-Key Handling Improvements
 
-Written for a fresh session with no prior context. Read `../CLAUDE.md` first for repo structure notes, then this document for the actual work.
+Written for a fresh session with no prior context. Read `../CLAUDE.md` first for layout and design notes, then this document for the actual work.
 
 ## Why this exists
 
-`poser_tools`' FBX importer consolidates Poser's split parent/child morphs (a full-body morph plus per-body-part deltas that FBX export leaves as separate shape keys) into single usable shapekeys — see `poser_tools/operators/functionsShapeKeys.py`, driven by `poser_tools/operators/fixPoserShapekeys.py`.
+`poser_tools`' FBX importer consolidates Poser's split parent/child morphs (a full-body morph plus per-body-part deltas that FBX export leaves as separate shape keys) into single usable shapekeys — see `poser_tools/core/functionsShapeKeys.py`, driven by `poser_tools/operators/fixPoserShapekeys.py`.
 
 A sibling private repo, `cr2_importer` (a.k.a. "Poser Bridge", `PsyDreamer-3D/cr2_importer`), solves a related problem from a stronger position: it parses Poser's `.cr2` files directly, so it has access to the actual authored channel relationships (ERC / `valueOpDeltaAdd` links) that FBX export discards. Comparing the two surfaced five concrete improvements for `poser_tools`, agreed with the project owner in priority order:
 
@@ -19,15 +19,16 @@ Each phase is independently shippable. Follow this repo's phased-work discipline
 ## Current code map
 
 - `poser_tools/operators/fixPoserShapekeys.py` — `OT_FixPoserShapekeys_Operator`. Guards against re-running via `obj["morphs_consolidated"]`, calls `consolidate_poser_shapekeys()`, reports via bare `print()`.
-- `poser_tools/operators/functionsShapeKeys.py` — all the actual logic:
+- `poser_tools/core/functionsShapeKeys.py` — all the actual logic:
   - `_TRAILING_DIGITS_RE = re.compile(r'\.[0-9]{3}')`, `_PBM_RE = re.compile(r'^PBM')`
   - `is_child_shapekey(sh_name, _is_daz)` — trailing-digit or (if `_is_daz`) `p`/`PBM`-prefix detection
   - `get_parent_name(sh_name, _is_daz)` — strips the child marker; **can return `None` silently** if neither condition matches
   - `build_parent_shapekey_list()` / `build_child_shapekey_list()` / `build_fbm_shapekey_list()` — group children under parents; promotes orphaned numbered children with no parent present
   - `accumulate_fbm_shapekey()` — sums each child's delta (`child_co - basis_co`) onto the FBM, unconditionally, no overlap check
   - `consolidate_poser_shapekeys()` — orchestrates: mute all, read basis, pre-read all child coords, accumulate per FBM, delete merged children, unmute processed, rename promoted orphans
-- `poser_tools/settings/poserToolsAddonSettings.py` — `PoserShapeKeysAddon_Settings(bpy.types.PropertyGroup)`, currently has `is_daz`, `weight_group_prefix`, `bone_prefix`.
-- `poser_tools/panels/fixPoserShapekeys.py` — `FixPoserShapekeys_Panel`, draws the `is_daz` checkbox and the operator button.
+- `poser_tools/properties/poserToolsAddonSettings.py` — `PoserShapeKeysAddon_Settings(bpy.types.PropertyGroup)`, currently has `is_daz`, `weight_group_prefix`, `bone_prefix`.
+- `poser_tools/ui/fixPoserShapekeys.py` — `FixPoserShapekeys_Panel`, draws the `is_daz` checkbox and the operator button.
+- `poser_tools/core/utils.py` — `_write_report(context, text_name, lines)` (the scaffold's text-block diagnostics helper) and the shared `_TAB` panel-category constant. Already present; Phase 2 wires it in.
 
 ## Reference material from `cr2_importer` (private repo — patterns only, not code to copy verbatim; the data model is different: CR2 channels vs. baked FBX shape keys)
 
@@ -74,9 +75,9 @@ def _write_report(context, text_name: str, lines: list[str]) -> None:
 **Open sub-question to resolve before writing the regex:** the exact naming convention Poser's FBX exporter uses for JCM channels hasn't been verified against real exported data in this project — `cr2_importer` only had to match its own internal CR2 channel names (`internal_name.startswith('JCM')`), which is a different string than whatever survives FBX export/Blender's shape-key naming. **First step: get one real Poser FBX export containing known JCM morphs and inspect the actual shape-key names** before hardcoding a pattern. Don't assume `startswith('JCM')` transfers unchanged.
 
 **Files to touch:**
-- `functionsShapeKeys.py`: add `is_jcm_shapekey(sh_name) -> bool` near `is_child_shapekey()`. Wire it into `build_parent_shapekey_list()` and `build_child_shapekey_list()` so JCM matches are skipped from both, not just one (a JCM key could otherwise slip in as an unclaimed "parent").
-- `settings/poserToolsAddonSettings.py`: add `exclude_jcm: BoolProperty(name="Exclude JCM Morphs", description="Skip joint-corrective (JCM) morphs during consolidation", default=True)`.
-- `panels/fixPoserShapekeys.py`: add `row.prop(options, "exclude_jcm")` alongside the existing `is_daz` row.
+- `core/functionsShapeKeys.py`: add `is_jcm_shapekey(sh_name) -> bool` near `is_child_shapekey()`. Wire it into `build_parent_shapekey_list()` and `build_child_shapekey_list()` so JCM matches are skipped from both, not just one (a JCM key could otherwise slip in as an unclaimed "parent").
+- `properties/poserToolsAddonSettings.py`: add `exclude_jcm: BoolProperty(name="Exclude JCM Morphs", description="Skip joint-corrective (JCM) morphs during consolidation", default=True)`.
+- `ui/fixPoserShapekeys.py`: add `row.prop(options, "exclude_jcm")` alongside the existing `is_daz` row.
 - `operators/fixPoserShapekeys.py`: pass `options.exclude_jcm` through to `consolidate_poser_shapekeys()`.
 
 **Acceptance test:** import an FBX with known JCM morphs, run Fix Poser Shapekeys with the new option on (default). JCM keys should remain untouched (not merged, not deleted, not renamed) and should be visible in whatever Phase 2 reporting produces as "excluded — JCM."
@@ -85,13 +86,9 @@ def _write_report(context, text_name: str, lines: list[str]) -> None:
 
 ## Phase 2 — Diagnostics via `self.report()` + text block
 
-**Goal:** Replace every `print()` in `fixPoserShapekeys.py` and `functionsShapeKeys.py` with the scaffold's reporting convention.
+**Goal:** Replace every `print()` in `operators/fixPoserShapekeys.py` and `core/functionsShapeKeys.py` with the scaffold's reporting convention.
 
-**Open decision — resolve with the project owner before starting:** this repo has no `core/` package (see `CLAUDE.md` structure notes). Two options:
-- (a) Add `_write_report()` as a new function directly in `functionsShapeKeys.py` — smaller diff, keeps the existing flat structure.
-- (b) Introduce `poser_tools/core/utils.py` now, matching scaffold convention, and move shared report logic there for future operators to reuse too.
-
-Default to (a) unless told otherwise — this phase shouldn't turn into an unplanned repo restructure.
+**Resolved:** the repo now has a `core/` package, and `core/utils.py` already carries `_write_report(context, text_name, lines)` (the scaffold helper) — use it directly, no bespoke copy. (This was an open decision when the handoff was written; the scaffold-alignment restructure settled it.)
 
 **Behavior split:**
 - Short outcome summary → `self.report({'INFO'}, ...)` on `OT_FixPoserShapekeys_Operator` (e.g. `"Consolidated 12 morph(s), excluded 4 JCM, promoted 1 orphan"`).
@@ -151,6 +148,6 @@ Do not start implementation on this phase without both unknowns resolved and a p
 
 ## Summary of open decisions for the project owner
 
-- Phase 2: `core/` package now, or keep `functionsShapeKeys.py` flat?
+- ~~Phase 2: `core/` package now, or keep `functionsShapeKeys.py` flat?~~ Resolved — `core/` exists; `core/utils._write_report()` is ready to use.
 - Phase 5: vendor a trimmed CR2 parser into `poser_tools`, or extract a shared library both add-ons depend on?
 - Phase 5: needs one real `.cr2` + matching `.fbx` pair to verify naming correspondence — who can provide these?

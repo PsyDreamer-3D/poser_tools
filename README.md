@@ -81,6 +81,12 @@ Enter a prefix and click **Prefix Weight Groups** to batch-add it to every verte
 
 ---
 
+## Out of scope
+
+Weight-mapped / TriAx rigging support is permanently out of scope. The Poser/DAZ ecosystem already
+solves that problem, and reimplementing it here would be a worse version of existing tooling. This
+add-on stays focused on cleaning up FBX-imported figures (bones, weight groups, shape keys, materials).
+
 ## Notes
 
 This add-on is still in active development — use at your own risk.
