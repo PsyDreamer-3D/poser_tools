@@ -10,9 +10,9 @@ A sibling private repo, `cr2_importer` (a.k.a. "Poser Bridge", `PsyDreamer-3D/cr
 JCM-first, but the work order was changed to put diagnostics first — Phases 1, 3 and 4 all report
 through the same channel, and diagnostics is the only phase not blocked on real Poser test data:
 
-1. **Diagnostics** via `self.report()` + a `bpy.data.texts` block, replacing `print()` — **done** (branch `feature/shapekey-diagnostics`)
-2. JCM detection/exclusion
-3. Overlap-safe delta accumulation
+1. **Diagnostics** via `self.report()` + a `bpy.data.texts` block, replacing `print()` — **done** (`feature/shapekey-diagnostics`)
+2. **JCM detection/exclusion** — **done** (`feature/jcm-exclusion`)
+3. Overlap-safe delta accumulation ← next
 4. Round-trip merge metadata
 5. (Longer-term, spike first) Optional CR2 cross-reference for ground-truth canonical naming
 
@@ -70,20 +70,45 @@ def _write_report(context, text_name: str, lines: list[str]) -> None:
 
 ---
 
-## Phase 1 — JCM detection/exclusion
+## Phase 1 — JCM detection/exclusion — **DONE**
 
-**Goal:** JCM (joint-corrective) shape keys are excluded from consolidation entirely, mirroring `cr2_importer`.
+Branch `feature/jcm-exclusion`.
 
-**Decided:** always skip JCM keys — no UI toggle. `cr2_importer`'s `skip_jcm` param exists but every call site hardcodes `True`; matching that keeps the surface small. The report still lists what was excluded.
+**Naming — investigated, resolved.** Parsed the `Shape` geometry names out of three real binary-FBX
+exports (`~/Desktop/LaFemme.fbx`, `Aiko3.fbx`, `Kira.fbx`) the same way
+`vendor/io_scene_fbx/import_fbx.py:blen_read_shapes()` derives shape-key names, then applied
+Blender's `.NNN` dedup. `name.startswith('JCM')` is the right matcher:
 
-**Open sub-question — needs real data before writing the matcher:** the exact naming Poser's FBX exporter uses for JCM channels hasn't been verified in this project. `cr2_importer` matches its own CR2 channel names (`internal_name.startswith('JCM')`), a different string than whatever survives FBX export + Blender shape-key naming. **First step: inspect actual shape-key names from a real Poser FBX with known JCM morphs** before hardcoding a pattern. Owner has generated test files with morph data; there are also sample pairs in `../FBX_Weightmap_Tests/` (`Legacy-Michael4.fbx`, `Legacy-Vicky4.fbx`, `Legacy-Hiro3.fbx`, …) but not all contain morphs — verify first. The vendored `vendor/io_scene_fbx/parse_fbx.py` can dump blend-shape channel names without a full Blender import.
+| | LaFemme | Aiko3 | Kira |
+|---|--:|--:|--:|
+| shape keys | 300 | 638 | 169 |
+| `startswith('JCM')` | 156 | 18 | 6 |
+| spaced `"JCM Left Knee Bend 90"` | 33 | 0 | 0 |
+| camelCase `"JCMrElbowBend130"` | 123 | 18 | 6 |
+| JCM keys with a `.NNN` dedup suffix | 89 | 8 | 2 |
 
-**Files to touch:**
-- `core/functionsShapeKeys.py`: add `is_jcm_shapekey(sh_name) -> bool` near `is_child_shapekey()`. Call it in `build_parent_shapekey_list()` **and** `build_child_shapekey_list()` so a JCM key can't slip in as an unclaimed "parent". Add the excluded names to the summary dict (`"jcm_excluded"`) and the log.
-- `operators/fixPoserShapekeys.py`: fold the JCM count into the `self.report` summary line.
-- No `properties/` or `ui/` change (no toggle).
+- Both naming forms, and the `.NNN`-suffixed duplicates, are caught by `startswith`.
+- Must be `startswith`, **not** `'JCM' in name` — LaFemme ships a real control morph
+  `"ON <- Use JCM -> OFF"` that a substring test would wrongly exclude.
 
-**Acceptance test:** run Fix Poser Shapekeys on a figure with known JCM morphs. JCM keys stay untouched (not merged, not deleted, not renamed) and appear in the `"Poser Shapekey Report"` text block as `excluded (JCM)`.
+**JCM keys are deleted, not preserved.** First cut left them in place ("exclude from
+consolidation"); the owner reviewed real output and wanted them gone. FBX export bakes the JCM
+*shape* but discards the ERC/driver relationship that fires it, so a JCM key on the imported mesh
+can never function — it's dead weight (156 of LaFemme's 196 keys). `cr2_importer`, working from the
+`.cr2`, never creates them; deleting matches that end state.
+
+**Implemented:**
+- `core/functionsShapeKeys.py`: `is_jcm_shapekey(sh_name)` (= `sh_name.startswith('JCM')`).
+- `consolidate_poser_shapekeys()`: deletes every JCM key up front (`obj.shape_key_remove`), before
+  `build_fbm_shapekey_list()` / `mute_all_shapekeys()` — so no interaction with the rest of the
+  flow. Records names in `"jcm_removed"` and the log.
+- `operators/fixPoserShapekeys.py`: `", removed N JCM"` appended to the `self.report` summary.
+- Always delete — no UI toggle.
+
+**Verified end-to-end in headless Blender** (fresh `import_scene.fbx` → `poser.fix_poser_shapekeys`):
+- LaFemme: 301 → 40 keys, all 156 JCM removed, 0 `.NNN` leftovers, `"ON <- Use JCM -> OFF"` kept.
+- Aiko3 (`is_daz=True`): 639 → 202 keys, all 18 JCM removed, 0 `.NNN` leftovers — consolidation
+  counts (84 / 116 / 1) match the owner's earlier manual run.
 
 ---
 
@@ -100,7 +125,7 @@ Branch `feature/shapekey-diagnostics`. Implemented:
   `AttributeError`); `self.report({'INFO'}, …)` on the already-consolidated no-op.
 - No behavior change to the consolidation math or grouping. The summary-dict keys
   (`consolidated` / `working_kept` / `empty_skipped` / `promoted` / `renamed` / `children_deleted` /
-  `log`) are the extension point for Phases 1, 3, 4 — add keys, don't change the signature.
+  `jcm_removed` / `log`) are the extension point for Phases 3, 4 — add keys, don't change the signature.
 
 ---
 
@@ -153,7 +178,8 @@ Do not start implementation on this phase without both unknowns resolved and a p
 
 ## Summary of open decisions for the project owner
 
-- ~~Phase 2 (diagnostics): `core/` package now, or keep flat?~~ Done — `core/` exists, Phase 2 shipped on `feature/shapekey-diagnostics`.
-- ~~Phase 1: user-facing JCM toggle or always-skip?~~ Decided — always skip, no toggle.
+- ~~Phase 2 (diagnostics): `core/` package now, or keep flat?~~ Done — shipped on `feature/shapekey-diagnostics`.
+- ~~Phase 1: user-facing JCM toggle or always-skip?~~ Done — always skip, no toggle; `feature/jcm-exclusion`.
+- ~~Phase 1: does `startswith('JCM')` survive FBX export?~~ Yes — verified against LaFemme / Aiko3 / Kira.
 - Phase 5: vendor a trimmed CR2 parser into `poser_tools`, or extract a shared library both add-ons depend on?
-- Phase 5: needs one real `.cr2` + matching `.fbx` pair to verify naming correspondence — who can provide these?
+- Phase 5: `.cr2` + matching `.fbx` pairs — owner has generated files; `~/Desktop/{LaFemme,Aiko3,Kira}.fbx` have morphs (binary FBX 7500), `../FBX_Weightmap_Tests/*.cr2` are the CR2 sources for the Legacy set (but those FBX exports carry no morphs).
