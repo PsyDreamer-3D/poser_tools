@@ -26,7 +26,7 @@ class OT_PrefixArmatureBones_Operator(bpy.types.Operator):
 
     @classmethod
     def poll(cls, context):
-        if context.active_object is None or context.active_object != 'ARMATURE':
+        if context.active_object is None or context.active_object.type != 'ARMATURE':
             return False
 
         return True
