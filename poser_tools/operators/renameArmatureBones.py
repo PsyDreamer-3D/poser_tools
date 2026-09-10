@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 import bpy
 from .functionsArmature import rename_all_bones, prefix_bones
 

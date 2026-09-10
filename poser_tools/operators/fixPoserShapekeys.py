@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 import bpy
 from .functionsShapeKeys import consolidate_poser_shapekeys
 

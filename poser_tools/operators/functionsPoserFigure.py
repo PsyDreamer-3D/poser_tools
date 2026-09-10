@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 import bpy
 import re
 from .functionsArmature import rename_all_bones, rename_bone, delete_body_bone

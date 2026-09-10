@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 import bpy
 from .functionsWeightGroups import rename_vertex_groups, prefix_vertex_groups
 

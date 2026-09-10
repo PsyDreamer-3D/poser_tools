@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 # START — workflow remove
 _needs_reload = "bpy" in locals()
 # END — workflow remove
