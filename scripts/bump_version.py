@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Bump the add-on version in blender_manifest.toml and __init__.py.
+"""Bump the add-on version in blender_manifest.toml (and a legacy bl_info
+tuple in __init__.py, if one is still present).
 
 Usage:
     python3 scripts/bump_version.py <version>
@@ -9,8 +10,18 @@ A leading "v" is accepted and stripped automatically.
 
 Files updated
 -------------
-blender_manifest.toml   version = "<major>.<minor>.<patch>"
-__init__.py             "version": (<major>, <minor>, <patch>)
+<package>/blender_manifest.toml   version = "<major>.<minor>.<patch>"
+<package>/__init__.py             "version": (<major>, <minor>, <patch>)
+                                   — only if a bl_info dict with a version
+                                   tuple is found. Add-ons built purely on
+                                   blender_manifest.toml (no bl_info) don't
+                                   need this, so a miss here is informational,
+                                   not an error.
+
+<package> is auto-detected as the only first-level subdirectory of the repo
+root that contains a blender_manifest.toml (one add-on per repo — see
+../AGENTS.md section 2). This means this script needs zero edits when
+copied into a new project.
 """
 
 import os
@@ -18,8 +29,30 @@ import re
 import sys
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-MANIFEST_PATH = os.path.join(REPO_ROOT, "poser_tools/blender_manifest.toml")
-INIT_PATH = os.path.join(REPO_ROOT, "poser_tools/__init__.py")
+
+
+def find_package_dir() -> str:
+    """Return the path to the single subdirectory containing blender_manifest.toml."""
+    candidates = []
+    for entry in sorted(os.listdir(REPO_ROOT)):
+        path = os.path.join(REPO_ROOT, entry)
+        if os.path.isdir(path) and os.path.isfile(os.path.join(path, "blender_manifest.toml")):
+            candidates.append(path)
+
+    if not candidates:
+        raise SystemExit("Error: no subdirectory containing blender_manifest.toml was found.")
+    if len(candidates) > 1:
+        names = ", ".join(os.path.basename(c) for c in candidates)
+        raise SystemExit(
+            f"Error: multiple blender_manifest.toml files found ({names}). "
+            "This repo layout assumes one add-on per repo."
+        )
+    return candidates[0]
+
+
+PACKAGE_DIR = find_package_dir()
+MANIFEST_PATH = os.path.join(PACKAGE_DIR, "blender_manifest.toml")
+INIT_PATH = os.path.join(PACKAGE_DIR, "__init__.py")
 
 
 def parse_version(raw: str) -> tuple[int, int, int]:
@@ -49,11 +82,15 @@ def update_manifest(version_str: str) -> None:
 
     with open(MANIFEST_PATH, "w", encoding="utf-8") as f:
         f.write(updated)
-    print(f"blender_manifest.toml → version = \"{version_str}\"")
+    print(f"blender_manifest.toml -> version = \"{version_str}\"")
 
 
 def update_init(major: int, minor: int, patch: int) -> None:
-    """Replace the version tuple in the bl_info dict inside __init__.py."""
+    """Replace a legacy bl_info version tuple in __init__.py, if present.
+
+    Modern (manifest-only) add-ons have no bl_info dict at all — that's
+    expected, not an error, so a miss here only prints a note.
+    """
     with open(INIT_PATH, "r", encoding="utf-8") as f:
         content = f.read()
 
@@ -63,11 +100,12 @@ def update_init(major: int, minor: int, patch: int) -> None:
         content,
     )
     if count == 0:
-        raise SystemExit('Error: could not find "version": (...) in __init__.py')
+        print("__init__.py           -> no bl_info version tuple found (skipped; manifest-only add-on)")
+        return
 
     with open(INIT_PATH, "w", encoding="utf-8") as f:
         f.write(updated)
-    print(f"__init__.py          → \"version\": ({major}, {minor}, {patch})")
+    print(f"__init__.py           -> \"version\": ({major}, {minor}, {patch})")
 
 
 def main() -> None:
