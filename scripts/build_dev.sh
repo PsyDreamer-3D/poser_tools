@@ -6,6 +6,18 @@ set -euo pipefail
 # ─── Error trap ───────────────────────────────────────────────────────────────
 trap 'echo "Error: build_dev.sh failed on line $LINENO." >&2' ERR
 
+# ─── 0. Locate the add-on package directory ──────────────────────────────────
+#   One add-on per repo: the package dir is whichever top-level folder
+#   contains blender_manifest.toml. This means this script needs zero edits
+#   when copied into a new project (see ../AGENTS.md section 2).
+package_dir="$(dirname "$(find . -maxdepth 2 -name blender_manifest.toml -print -quit)")"
+if [[ -z "$package_dir" || "$package_dir" == "." ]]; then
+  echo "Error: no blender_manifest.toml found under any top-level folder." >&2
+  exit 1
+fi
+package_dir="${package_dir#./}"
+echo "Package dir: $package_dir"
+
 # ─── 1. Detect current position ───────────────────────────────────────────────
 #   git rev-parse --abbrev-ref HEAD returns "HEAD" when in detached-HEAD state
 #   (i.e. already checked out a tag), and the branch name otherwise.
@@ -71,6 +83,6 @@ python3 scripts/strip_dev_blocks.py
 
 echo "Building Blender add-on with version: $semver..."
 mkdir -p dist
-blender --command extension build --source-dir poser_tools --output-dir dist
+blender --command extension build --source-dir "$package_dir" --output-dir dist
 
 echo "Built Blender add-on with version: $semver"

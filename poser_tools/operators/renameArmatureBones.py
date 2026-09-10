@@ -1,5 +1,7 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 import bpy
-from .functionsArmature import rename_all_bones, prefix_bones
+from ..core.functionsArmature import rename_all_bones, prefix_bones
 
 
 class OT_RenameArmatureBones_Operator(bpy.types.Operator):

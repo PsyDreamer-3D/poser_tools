@@ -1,10 +1,14 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 import bpy
+
+from ..core.utils import _TAB
 
 
 class PrefixWeightGroups_Panel(bpy.types.Panel):
     bl_label = "Prefix Weight Groups"
     bl_idname = "VIEW_3D_PT_PrefixWeightGroups"
-    bl_category = "Poser FBX Importer"
+    bl_category = _TAB
     bl_space_type = "VIEW_3D"
     bl_region_type = "UI"
 

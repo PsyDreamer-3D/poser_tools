@@ -1,4 +1,5 @@
-import bpy
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 import bmesh
 
 
@@ -14,10 +15,27 @@ def remove_loose_verts(obj):
     bm.free()
 
 
-def remove_unused_material_slots(context, obj):
-    """Remove material slots not referenced by any face."""
-    context.view_layer.objects.active = obj
-    bpy.ops.object.material_slot_remove_unused()
+def remove_unused_material_slots(obj):
+    """Remove material slots not referenced by any polygon.
+
+    Direct-API equivalent of bpy.ops.object.material_slot_remove_unused().
+    mesh.materials.pop(index=i) shifts down the material_index of every polygon
+    pointing past slot i, so popping the unused slots from the highest index
+    down leaves the remaining face assignments correct.
+    """
+    mesh = obj.data
+    n_mats = len(mesh.materials)
+    if n_mats <= 1:
+        return
+
+    face_mat = [0] * len(mesh.polygons)
+    mesh.attributes['material_index'].data.foreach_get('value', face_mat)
+    used = set(face_mat)
+
+    for i in reversed(range(n_mats)):
+        if i not in used:
+            mesh.materials.pop(index=i)
+    mesh.update()
 
 
 def sort_material_slots_by_face_order(obj):

@@ -1,5 +1,12 @@
 #!/usr/bin/env python3
-"""Generate a Blender extension repository index.json from blender_manifest.toml."""
+"""Generate a Blender extension repository index.json from blender_manifest.toml.
+
+Run after scripts/build_dev.sh (or the release workflow) has produced a zip
+in dist/. This is only needed if you're hosting a self-managed extensions
+repository (index.json + zips) for Blender's "Custom Repository" feature —
+plain GitHub Releases don't require it, and the standard release.yml in
+this scaffold does not call it.
+"""
 
 import glob
 import hashlib
@@ -18,8 +25,29 @@ except ImportError:
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DIST_DIR = os.path.join(REPO_ROOT, "dist")
-MANIFEST_PATH = os.path.join(REPO_ROOT, "poser_tools/blender_manifest.toml")
 INDEX_PATH = os.path.join(DIST_DIR, "index.json")
+
+
+def find_package_dir() -> str:
+    """Return the path to the single subdirectory containing blender_manifest.toml."""
+    candidates = []
+    for entry in sorted(os.listdir(REPO_ROOT)):
+        path = os.path.join(REPO_ROOT, entry)
+        if os.path.isdir(path) and os.path.isfile(os.path.join(path, "blender_manifest.toml")):
+            candidates.append(path)
+
+    if not candidates:
+        raise SystemExit("Error: no subdirectory containing blender_manifest.toml was found.")
+    if len(candidates) > 1:
+        names = ", ".join(os.path.basename(c) for c in candidates)
+        raise SystemExit(
+            f"Error: multiple blender_manifest.toml files found ({names}). "
+            "This repo layout assumes one add-on per repo."
+        )
+    return candidates[0]
+
+
+MANIFEST_PATH = os.path.join(find_package_dir(), "blender_manifest.toml")
 
 
 def sha256_of_file(path: str) -> str:
@@ -64,9 +92,13 @@ def main() -> None:
         "archive_hash": archive_hash,
         "blender_version_min": manifest["blender_version_min"],
         "license": manifest["license"],
-        "tags": manifest["tags"],
+        # .get(), not [...]: "tags" is optional in the manifest schema and
+        # has been omitted in some projects in this workspace.
+        "tags": manifest.get("tags", []),
         "maintainer": manifest["maintainer"],
     }
+    if "category" in manifest:
+        entry["category"] = manifest["category"]
 
     index: dict = {"version": "v1", "blocklist": [], "data": []}
     if os.path.isfile(INDEX_PATH):

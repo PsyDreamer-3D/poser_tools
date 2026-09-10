@@ -1,5 +1,7 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 import bpy
-from .functionsShapeKeys import consolidate_poser_shapekeys
+from ..core.functionsShapeKeys import consolidate_poser_shapekeys
 
 
 class OT_FixPoserShapekeys_Operator(bpy.types.Operator):

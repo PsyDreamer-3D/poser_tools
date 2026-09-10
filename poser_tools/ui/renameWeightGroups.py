@@ -1,4 +1,8 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 import bpy
+
+from ..core.utils import _TAB
 
 
 class RenameWeightGroups:
@@ -6,7 +10,7 @@ class RenameWeightGroups:
     bl_idname = "VIEW_3D_PT_RenameWeightGroups"
     bl_space_type = 'VIEW_3D'
     bl_region_type = 'UI'
-    bl_category = "Poser FBX Importer"
+    bl_category = _TAB
 
 
 class RenameWeightGroups_Panel(RenameWeightGroups, bpy.types.Panel):

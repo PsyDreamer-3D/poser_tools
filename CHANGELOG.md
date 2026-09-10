@@ -7,6 +7,11 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+- Repository restructured to match the `blender-addon-scaffold` conventions: shared helpers moved to a `core/` package, `panels/` → `ui/` and `settings/` → `properties/`, each subpackage owns its own `register()`/`unregister()`, and the top-level `__init__.py` is orchestration only. SPDX headers on every source file; LF line endings throughout. No user-facing behavior change.
+- `recalculate_bone_rolls` and `remove_unused_material_slots` now use the direct data API instead of `bpy.ops`.
+- Release scripts and the GitHub Actions workflow re-synced with the scaffold template (package directory auto-detected; `BLENDER_VERSION` pinned in one place).
+
 ---
 
 ## [1.0.1] - 2026-05-26
