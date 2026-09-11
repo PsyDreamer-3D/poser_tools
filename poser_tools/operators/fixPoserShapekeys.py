@@ -43,6 +43,8 @@ class OT_FixPoserShapekeys_Operator(bpy.types.Operator):
         )
         if report['promoted']:
             summary += f", promoted {len(report['promoted'])} orphan(s)"
+        if report['jcm_removed']:
+            summary += f", removed {len(report['jcm_removed'])} JCM"
         self.report({'INFO'}, summary)
 
         _write_report(context, _REPORT_TEXT, [summary, ""] + report['log'])

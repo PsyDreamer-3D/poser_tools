@@ -125,6 +125,18 @@ def build_fbm_shapekey_list(shapekeys, _is_daz=False, log=None):
     return fbms
 
 
+def is_jcm_shapekey(sh_name):
+    """True for a joint-corrective morph — deleted during consolidation, not merged.
+
+    Poser's FBX export names these either spaced ("JCM Left Knee Bend 90") or
+    camelCase ("JCMrElbowBend130"); Blender's dedup can add a .NNN suffix. The
+    check is `startswith`, not a substring — LaFemme ships a control morph
+    literally named "ON <- Use JCM -> OFF" that a substring test would eat.
+    Verified against LaFemme / Aiko3 / Kira FBX exports.
+    """
+    return sh_name.startswith('JCM')
+
+
 def is_child_shapekey(sh_name, _is_daz=False):
     if _is_daz and (sh_name[0] == 'p' or _PBM_RE.match(sh_name)):
         return True
@@ -190,6 +202,7 @@ def consolidate_poser_shapekeys(obj, shapekeys, _is_daz=False):
         promoted          – orphan children promoted to standalone parents
         renamed           – {old_name: new_name} for promoted-orphan prefix strips
         children_deleted  – child key names removed after merging
+        jcm_removed       – JCM (joint-corrective) key names deleted from the mesh
         log               – full itemized text, one entry per line, for _write_report()
     """
     log = []
@@ -200,8 +213,22 @@ def consolidate_poser_shapekeys(obj, shapekeys, _is_daz=False):
         "promoted": [],
         "renamed": {},
         "children_deleted": [],
+        "jcm_removed": [],
         "log": log,
     }
+
+    # JCM morphs are pose-driven joint correctives. FBX export bakes the shape
+    # but discards the ERC/driver relationship that fires it, so the key can
+    # never work as intended — it's just dead weight. Delete them up front
+    # (cr2_importer, working from the .cr2, never creates them at all).
+    jcm_names = [sh.name for sh in shapekeys if is_jcm_shapekey(sh.name)]
+    result["jcm_removed"] = jcm_names
+    if jcm_names:
+        log.append(f"Removed {len(jcm_names)} JCM morph(s):")
+        for name in jcm_names:
+            log.append(f"  {name}")
+        for name in jcm_names:
+            obj.shape_key_remove(shapekeys[name])
 
     fbm_shapekeys = build_fbm_shapekey_list(shapekeys, _is_daz, log)
     result["promoted"] = [m for m, d in fbm_shapekeys.items() if d.get("is_promoted_orphan")]

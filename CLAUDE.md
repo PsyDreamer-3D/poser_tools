@@ -41,6 +41,11 @@ Standard scaffold layout. Two things worth knowing:
 - **Shape-key consolidation diagnostics** go to the `"Poser Shapekey Report"` `bpy.data.texts`
   block (full itemized log) plus a one-line `self.report({'INFO'}, …)` summary — never `print()`.
   `consolidate_poser_shapekeys()` returns a summary dict carrying that `log`.
+- **JCM morphs are deleted during consolidation** — `is_jcm_shapekey()` (`name.startswith('JCM')`,
+  deliberately not a substring test — LaFemme ships a `"ON <- Use JCM -> OFF"` control morph).
+  `consolidate_poser_shapekeys()` removes them up front. FBX export bakes the corrective *shape*
+  but discards the bone-rotation ERC link that drives it, so the key can never fire — keeping it
+  is keeping dead weight. Poser's export uses both `"JCM Foo Bar"` and `"JCMrFooBar"` forms.
 
 ## Out of scope (permanent)
 
