@@ -64,6 +64,18 @@ class OT_ImportPoserFBX(bpy.types.Operator):
                     "and rename vertex groups to match the primary armature",
         default=True,
     )
+    consolidate_shapekeys: BoolProperty(
+        name="Consolidate Shape Keys",
+        description="Merge Poser's split parent/child morphs into single shape keys and remove "
+                    "joint-corrective (JCM) morphs, right after import",
+        default=True,
+    )
+    legacy_daz_figure: BoolProperty(
+        name="Legacy Daz3D Figure",
+        description="Millennium 3/4 figures (Michael 4, Victoria 4, Aiko 3, …) — their morphs use a "
+                    "'p'/'PBM' name prefix instead of Blender's numeric suffix",
+        default=False,
+    )
 
     def draw(self, context):
         layout = self.layout
@@ -81,6 +93,13 @@ class OT_ImportPoserFBX(bpy.types.Operator):
         col.prop(self, "primary_bone_axis")
         col.prop(self, "secondary_bone_axis")
         col.prop(self, "separate_figures")
+
+        layout.separator()
+        col = layout.column(heading="Shape Keys")
+        col.prop(self, "consolidate_shapekeys")
+        sub = col.row()
+        sub.enabled = self.consolidate_shapekeys
+        sub.prop(self, "legacy_daz_figure")
 
     def invoke(self, context, event):
         context.window_manager.fileselect_add(self)
@@ -218,5 +237,38 @@ class OT_ImportPoserFBX(bpy.types.Operator):
 
         finally:
             wm.progress_end()
+
+        # Shape-key consolidation runs outside the import's progress context
+        # (consolidate_poser_shapekeys drives its own progress bar). The only
+        # early return above ('FINISHED' not in result) exits before this point.
+        if self.consolidate_shapekeys and 'FINISHED' in result:
+            from ..core.functionsShapeKeys import (
+                consolidate_poser_shapekeys,
+                format_consolidation_summary,
+            )
+            from ..core.utils import _write_report
+
+            report_lines = []
+            done = 0
+            any_overlap = False
+            for obj in mesh_objects:
+                if obj.data.shape_keys is None or obj.get("morphs_consolidated"):
+                    continue
+                rep = consolidate_poser_shapekeys(
+                    obj, obj.data.shape_keys.key_blocks, self.legacy_daz_figure
+                )
+                obj["morphs_consolidated"] = True
+                done += 1
+                any_overlap = any_overlap or bool(rep["overlaps"])
+                report_lines += [
+                    f"=== {obj.name} ===",
+                    format_consolidation_summary(rep),
+                    *rep["log"],
+                    "",
+                ]
+            if report_lines:
+                _write_report(context, "Poser Shapekey Report", report_lines)
+                msg = f"Consolidated shape keys on {done} mesh(es) — see the 'Poser Shapekey Report' text block"
+                self.report({'WARNING'} if any_overlap else {'INFO'}, msg)
 
         return result

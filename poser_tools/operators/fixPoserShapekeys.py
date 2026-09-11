@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 
 import bpy
-from ..core.functionsShapeKeys import consolidate_poser_shapekeys
+from ..core.functionsShapeKeys import consolidate_poser_shapekeys, format_consolidation_summary
 from ..core.utils import _write_report
 
 _REPORT_TEXT = "Poser Shapekey Report"
@@ -36,15 +36,7 @@ class OT_FixPoserShapekeys_Operator(bpy.types.Operator):
         report = consolidate_poser_shapekeys(obj, shapekeys, options.is_daz)
         obj["morphs_consolidated"] = True
 
-        summary = (
-            f"Consolidated {len(report['consolidated'])} morph(s), "
-            f"kept {len(report['working_kept'])} working, "
-            f"skipped {len(report['empty_skipped'])} empty"
-        )
-        if report['promoted']:
-            summary += f", promoted {len(report['promoted'])} orphan(s)"
-        if report['jcm_removed']:
-            summary += f", removed {len(report['jcm_removed'])} JCM"
+        summary = format_consolidation_summary(report)
 
         header = [summary]
         if report['overlaps']:

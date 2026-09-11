@@ -39,14 +39,16 @@ Click **Import Poser FBX** and select your `.fbx` file. The importer is based on
 - Removes loose (seam) vertices left over from Poser's geometry
 - Removes unused material slots and restores Poser's original body-part material order
 - Detects conforming figures (hair, clothing) and separates them into their own armatures, with their meshes re-parented to the main armature
+- **Consolidates shape keys** — merges Poser's parent/child morph pairs into single usable sliders and removes joint-corrective (JCM) morphs. What it merged is recorded on the mesh, and a full log is written to a **Poser Shapekey Report** text block.
 
-### 2. Fix Poser Shapekeys
+Two shape-key options in the import dialog:
 
-With the imported mesh selected as the active object, click **Fix Poser Shapekeys**.
+- **Consolidate Shape Keys** *(on by default)* — untick to import the raw shape keys and run the consolidation later by hand.
+- **Legacy Daz3D Figure** *(off)* — tick for Millennium 3 / 4 figures (Michael 4, Victoria 4, Aiko 3, …), which name their morphs with a `p`/`PBM` prefix instead of Blender's numeric suffix.
 
-This consolidates Poser's parent/child morph pairs into single, usable shapekeys in Blender.
+### 2. Fix Poser Shapekeys *(only if needed)*
 
-> **Legacy Daz3D figures (Millennium 3 / 4):** Enable the **Legacy Daz3D Figure** checkbox before clicking the button. This activates handling for `p`-prefixed child morphs that these figures use.
+Consolidation already ran on import. Use this button to **re-run** it, or to consolidate a mesh imported some other way. Set the **Legacy Daz3D Figure** checkbox first for M3/M4 figures.
 
 ### 3. Rename Armature Bones
 

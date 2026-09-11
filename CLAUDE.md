@@ -77,14 +77,15 @@ No automated test harness (`tests/` absent) — manual smoke test only:
 1. Install via Blender Preferences → Extensions → Install from Disk, pointing at `poser_tools/` (or
    drag-and-drop a built zip). The add-on should enable with no registration errors.
 2. Import a Poser-exported FBX via the **Poser FBX Importer** N-panel tab → **Import Poser FBX**.
-   Check: mesh + armature import, material-slot order restored, loose verts gone, bone rolls sane,
-   neck centered, conforming figures (hair/clothing) split into their own armatures.
-3. Select the imported mesh, open **Fix Poser Shapekeys**, and (for M3/M4 figures) enable
-   **Legacy Daz3D Figure** first.
-4. Click **Fix Poser Shapekeys**. Expected: parent/child morph pairs collapse into single sliders
-   under the mesh's Shape Keys panel; no duplicate `.001`-suffixed keys remain;
-   `obj["morphs_consolidated"]` is set so re-running is a no-op.
-5. Armature selected → **Rename Armature Bones** adds `.L`/`.R` suffixes. Mesh selected →
+   For an M3/M4 figure tick **Legacy Daz3D Figure** in the import dialog. Check: mesh + armature
+   import, material-slot order restored, loose verts gone, bone rolls sane, neck centered,
+   conforming figures split into their own armatures. Shape keys: parent/child morphs collapsed
+   into single sliders, no `.001`-suffixed or `JCM…` keys left, a **Poser Shapekey Report** text
+   block written, `mesh["poser_shapekey_merges"]` set.
+3. Re-run check: **Fix Poser Shapekeys** on the same mesh → "already consolidated" info, no-op
+   (`obj["morphs_consolidated"]`). Untick **Consolidate Shape Keys** in a fresh import → raw shape
+   keys, no report, then the button does the work.
+4. Armature selected → **Rename Armature Bones** adds `.L`/`.R` suffixes. Mesh selected →
    **Rename Weight Groups** applies the matching rename to vertex groups.
 
 For a quick check without Blender: `python -m py_compile` the tree, or import `poser_tools` under a
