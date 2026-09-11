@@ -39,8 +39,12 @@ Standard scaffold layout. Two things worth knowing:
   `object.transform_apply` on the fresh multi-object import selection. Each is commented in place.
   Everything else that mutates data uses `bpy.data`/`bmesh` directly.
 - **Shape-key consolidation diagnostics** go to the `"Poser Shapekey Report"` `bpy.data.texts`
-  block (full itemized log) plus a one-line `self.report({'INFO'}, …)` summary — never `print()`.
+  block (full itemized log) plus a one-line `self.report(…)` summary — never `print()`.
   `consolidate_poser_shapekeys()` returns a summary dict carrying that `log`.
+- **Child-delta accumulation is an unconditional sum** and stays that way — Poser splits a
+  full-body morph into per-actor children with disjoint vertex sets (verified across every test
+  figure). `_detect_child_overlap()` is a tripwire only: if a malformed export ever has two
+  children moving one vertex, it's reported (`overlaps` key, `{'WARNING'}`), not silently doubled.
 - **JCM morphs are deleted during consolidation** — `is_jcm_shapekey()` (`name.startswith('JCM')`,
   deliberately not a substring test — LaFemme ships a `"ON <- Use JCM -> OFF"` control morph).
   `consolidate_poser_shapekeys()` removes them up front. FBX export bakes the corrective *shape*

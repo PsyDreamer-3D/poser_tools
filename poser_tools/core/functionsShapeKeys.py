@@ -12,6 +12,12 @@ import numpy as np
 _TRAILING_DIGITS_RE = re.compile(r'\.[0-9]{3}')
 _PBM_RE = re.compile(r'^PBM')
 
+# Per-vertex displacement (world units) above which a child morph is considered
+# to actually move a vertex. Below this is float32 noise. Used only for overlap
+# detection — Poser's per-actor morph split is disjoint in every figure tested,
+# so this is a tripwire for a malformed export, not an expected code path.
+_OVERLAP_EPS = 1e-5
+
 
 def mute_all_shapekeys(shapekeys):
     for sh in shapekeys:
@@ -169,6 +175,37 @@ def is_shapekey_empty(sh_name, shapekeys, basis_co):
     return np.array_equal(basis_co, key_co)
 
 
+def _detect_child_overlap(child_coords, basis_co):
+    """Return overlap info if >1 child moves the same vertex, else None.
+
+    Poser's per-actor morph split is disjoint in every figure tested, so this
+    should always return None. It exists to make a malformed export loud rather
+    than silently double-counting a vertex's delta in accumulate_fbm_shapekey().
+    """
+    if len(child_coords) < 2:
+        return None
+
+    basis3 = basis_co.reshape(-1, 3)
+    names = list(child_coords)
+    masks = [
+        np.linalg.norm(child_coords[ch].reshape(-1, 3) - basis3, axis=1) > _OVERLAP_EPS
+        for ch in names
+    ]
+    hit_count = np.sum(masks, axis=0)
+    overlap_verts = int(np.count_nonzero(hit_count >= 2))
+    if not overlap_verts:
+        return None
+
+    pairs = []
+    for i in range(len(names)):
+        for j in range(i + 1, len(names)):
+            shared = int(np.count_nonzero(masks[i] & masks[j]))
+            if shared:
+                pairs.append((names[i], names[j], shared))
+    pairs.sort(key=lambda t: -t[2])
+    return {"vert_count": overlap_verts, "pairs": pairs}
+
+
 def accumulate_fbm_shapekey(master_shapekeys, morph, shapekeys, basis_co, child_coords, fbm_has_data):
     fbm_key = shapekeys[morph]
     n = len(basis_co)
@@ -182,6 +219,8 @@ def accumulate_fbm_shapekey(master_shapekeys, morph, shapekeys, basis_co, child_
         result_co = basis_co.copy()
         # result = basis_co + sum(child_co - basis_co)
 
+    overlap = _detect_child_overlap(child_coords, basis_co)
+
     for child_co in child_coords.values():
         result_co += child_co - basis_co
 
@@ -190,6 +229,7 @@ def accumulate_fbm_shapekey(master_shapekeys, morph, shapekeys, basis_co, child_
     fbm_key.slider_min = -1.0
     fbm_key.value = master_shapekeys[morph]['value']
     fbm_key.mute = True
+    return overlap
 
 
 def consolidate_poser_shapekeys(obj, shapekeys, _is_daz=False):
@@ -203,6 +243,7 @@ def consolidate_poser_shapekeys(obj, shapekeys, _is_daz=False):
         renamed           – {old_name: new_name} for promoted-orphan prefix strips
         children_deleted  – child key names removed after merging
         jcm_removed       – JCM (joint-corrective) key names deleted from the mesh
+        overlaps          – {fbm: {vert_count, pairs}} where >1 child moved a vertex
         log               – full itemized text, one entry per line, for _write_report()
     """
     log = []
@@ -214,6 +255,7 @@ def consolidate_poser_shapekeys(obj, shapekeys, _is_daz=False):
         "renamed": {},
         "children_deleted": [],
         "jcm_removed": [],
+        "overlaps": {},
         "log": log,
     }
 
@@ -279,10 +321,20 @@ def consolidate_poser_shapekeys(obj, shapekeys, _is_daz=False):
             else:
                 # has_children is True from here
                 child_coords = {ch: all_child_coords[ch] for ch in fbm_shapekeys[morph]['children']}
-                accumulate_fbm_shapekey(fbm_shapekeys, morph, shapekeys, basis_co, child_coords, not fbm_empty)
+                overlap = accumulate_fbm_shapekey(
+                    fbm_shapekeys, morph, shapekeys, basis_co, child_coords, not fbm_empty
+                )
 
                 child_names = list(fbm_shapekeys[morph]['children'])
                 log.append(f'  {morph}: converted ({len(child_names)} child(ren) merged)')
+                if overlap:
+                    result["overlaps"][morph] = overlap
+                    log.append(
+                        f'      WARNING: {overlap["vert_count"]} vert(s) moved by >1 child — '
+                        f'deltas were summed, which may over-shoot:'
+                    )
+                    for a, b, cnt in overlap["pairs"]:
+                        log.append(f'        {a} & {b}: {cnt} shared vert(s)')
                 result["consolidated"].append(morph)
                 shapekeys_processed.append(morph)
 
