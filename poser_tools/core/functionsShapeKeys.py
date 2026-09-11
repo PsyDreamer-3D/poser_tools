@@ -1,9 +1,13 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 
+import json
 import re
 from collections import defaultdict
 import bpy
 import numpy as np
+
+# Bump when the shape of the poser_shapekey_merges record on obj.data changes.
+_MERGE_RECORD_VERSION = 1
 
 # we need to check for existing value, and if it's there, it should be saved
 # Older Daz and other Poser figures append "p" to morphs on body parts that are
@@ -244,6 +248,7 @@ def consolidate_poser_shapekeys(obj, shapekeys, _is_daz=False):
         children_deleted  – child key names removed after merging
         jcm_removed       – JCM (joint-corrective) key names deleted from the mesh
         overlaps          – {fbm: {vert_count, pairs}} where >1 child moved a vertex
+        merge_record      – the dict also serialised to obj.data['poser_shapekey_merges']
         log               – full itemized text, one entry per line, for _write_report()
     """
     log = []
@@ -256,6 +261,7 @@ def consolidate_poser_shapekeys(obj, shapekeys, _is_daz=False):
         "children_deleted": [],
         "jcm_removed": [],
         "overlaps": {},
+        "merge_record": {},
         "log": log,
     }
 
@@ -362,5 +368,25 @@ def consolidate_poser_shapekeys(obj, shapekeys, _is_daz=False):
 
     finally:
         wm.progress_end()
+
+    # Round-trip record: what merged into what, keyed by the shape key's final
+    # name. Stored on the mesh data-block (bpy.types.ShapeKey has no ID props).
+    # Lets a later pass — e.g. resolving a PZ2 pose that dials 'BreastSize.002'
+    # — map a pre-merge child name back to the surviving morph.
+    merges = {}
+    for morph in result["consolidated"]:
+        final_name = result["renamed"].get(morph, morph)
+        merges[final_name] = {
+            "children": list(fbm_shapekeys[morph]["children"]),
+            "promoted_orphan": bool(fbm_shapekeys[morph].get("is_promoted_orphan")),
+        }
+    merge_record = {
+        "version": _MERGE_RECORD_VERSION,
+        "merges": merges,
+        "renamed": dict(result["renamed"]),
+    }
+    result["merge_record"] = merge_record
+    obj.data["poser_shapekey_merges"] = json.dumps(merge_record)
+    log.append(f'Merge record written to mesh["poser_shapekey_merges"] ({len(merges)} merge(s)).')
 
     return result
