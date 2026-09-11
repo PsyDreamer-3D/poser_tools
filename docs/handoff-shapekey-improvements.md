@@ -11,9 +11,9 @@ JCM-first, but the work order was changed to put diagnostics first — Phases 1,
 through the same channel, and diagnostics is the only phase not blocked on real Poser test data:
 
 1. **Diagnostics** via `self.report()` + a `bpy.data.texts` block, replacing `print()` — **done** (`feature/shapekey-diagnostics`)
-2. **JCM detection/exclusion** — **done** (`feature/jcm-exclusion`)
-3. Overlap-safe delta accumulation ← next
-4. Round-trip merge metadata
+2. **JCM detection/exclusion** — **done** (`feature/jcm-exclusion`) — JCM keys are *deleted*
+3. **Overlap-safe delta accumulation** — **done** (`feature/overlap-detection`) — detection-only tripwire; real Poser splits are disjoint
+4. Round-trip merge metadata ← next
 5. (Longer-term, spike first) Optional CR2 cross-reference for ground-truth canonical naming
 
 Each phase is independently shippable. Follow this repo's phased-work discipline: plan → confirm with the project owner → implement → manual test in Blender → move to the next phase. Don't bundle phases into one PR/commit unless asked. **Section headings below keep the original numbering** (Phase 1 = JCM, Phase 2 = diagnostics, …).
@@ -125,22 +125,33 @@ Branch `feature/shapekey-diagnostics`. Implemented:
   `AttributeError`); `self.report({'INFO'}, …)` on the already-consolidated no-op.
 - No behavior change to the consolidation math or grouping. The summary-dict keys
   (`consolidated` / `working_kept` / `empty_skipped` / `promoted` / `renamed` / `children_deleted` /
-  `jcm_removed` / `log`) are the extension point for Phases 3, 4 — add keys, don't change the signature.
+  `jcm_removed` / `overlaps` / `log`) are the extension point for Phase 4 — add keys, don't change the signature.
 
 ---
 
-## Phase 3 — Overlap-safe delta accumulation
+## Phase 3 — Overlap-safe delta accumulation — **DONE**
 
-**Goal:** `accumulate_fbm_shapekey()` currently sums every child's delta onto the FBM unconditionally:
-```python
-for child_co in child_coords.values():
-    result_co += child_co - basis_co
-```
-If two children both move the same vertex (a real risk — Poser's per-actor morph split isn't guaranteed disjoint), this silently double-counts. Default behavior should **stay additive** — that's correct for the normal non-overlapping case — this phase only adds *detection and reporting* of the failure mode, not a behavior change to the happy path.
+Branch `feature/overlap-detection`.
 
-**Approach:** before summing, compute a per-vertex "touched by more than one child" mask (nonzero delta on more than one child, above some epsilon to ignore float noise). Any overlapping vertex range gets logged (via the Phase 2 reporting path) with the FBM name, the conflicting child names, and the affected vertex count — not silently absorbed.
+**The premise doesn't fire in practice.** `accumulate_fbm_shapekey()` sums every child's delta onto
+the FBM. If two children of the same FBM both moved a vertex, the sum would double-count. Probed all
+three figures in Blender (LaFemme / Aiko3 / Kira, 69 multi-child FBM groups): **zero overlapping
+vertices, even at epsilon 1e-7.** Poser splits a full-body morph into per-actor children with
+exactly-disjoint vertex sets and FBX export keeps that partition.
 
-**Acceptance test:** construct or find a figure with known overlapping child morphs (if none is known to exist, this may need a synthetic test mesh with two shape keys deliberately sharing a moved vertex) and confirm the overlap is reported, not swallowed.
+**So this ships as a tripwire, not a fix:**
+- `_detect_child_overlap(child_coords, basis_co)` in `core/functionsShapeKeys.py` — per-child
+  displacement mask (`> _OVERLAP_EPS = 1e-5` world units), returns `{vert_count, pairs}` or `None`.
+- `accumulate_fbm_shapekey()` returns that; the math is **unchanged** (still an unconditional sum).
+- `consolidate_poser_shapekeys()` collects hits into `result["overlaps"]` (`{fbm: {vert_count,
+  pairs}}`) and writes `WARNING:` lines into the report log naming the FBM, the shared vert count,
+  and the conflicting child pairs.
+- `OT_FixPoserShapekeys_Operator` escalates its `self.report` to `{'WARNING'}` and adds a banner
+  line to the report header when `overlaps` is non-empty.
+
+**Verified in headless Blender:** LaFemme / Aiko3 run clean (no warning, consolidation counts
+unchanged). Injecting a synthetic overlap into two of `MouthOpen`'s children → operator emits the
+`{'WARNING'}` and the report lists `MouthOpen.001 & MouthOpen.002: 1 shared vert(s)`.
 
 ---
 

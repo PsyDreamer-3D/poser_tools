@@ -45,7 +45,17 @@ class OT_FixPoserShapekeys_Operator(bpy.types.Operator):
             summary += f", promoted {len(report['promoted'])} orphan(s)"
         if report['jcm_removed']:
             summary += f", removed {len(report['jcm_removed'])} JCM"
-        self.report({'INFO'}, summary)
 
-        _write_report(context, _REPORT_TEXT, [summary, ""] + report['log'])
+        header = [summary]
+        if report['overlaps']:
+            n_ov = len(report['overlaps'])
+            header.append(f"{n_ov} morph(s) had overlapping child deltas (summed, may over-shoot) — details below")
+            self.report(
+                {'WARNING'},
+                f"{summary}. {n_ov} morph(s) with overlapping child deltas — see the '{_REPORT_TEXT}' text block.",
+            )
+        else:
+            self.report({'INFO'}, summary)
+
+        _write_report(context, _REPORT_TEXT, header + ["", *report['log']])
         return {'FINISHED'}
