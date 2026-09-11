@@ -13,8 +13,8 @@ through the same channel, and diagnostics is the only phase not blocked on real 
 1. **Diagnostics** via `self.report()` + a `bpy.data.texts` block, replacing `print()` — **done** (`feature/shapekey-diagnostics`)
 2. **JCM detection/exclusion** — **done** (`feature/jcm-exclusion`) — JCM keys are *deleted*
 3. **Overlap-safe delta accumulation** — **done** (`feature/overlap-detection`) — detection-only tripwire; real Poser splits are disjoint
-4. Round-trip merge metadata ← next
-5. (Longer-term, spike first) Optional CR2 cross-reference for ground-truth canonical naming
+4. **Round-trip merge metadata** — **done** (`feature/merge-metadata`) — `obj.data['poser_shapekey_merges']` JSON
+5. (Longer-term, spike first) Optional CR2 cross-reference for ground-truth canonical naming ← next
 
 Each phase is independently shippable. Follow this repo's phased-work discipline: plan → confirm with the project owner → implement → manual test in Blender → move to the next phase. Don't bundle phases into one PR/commit unless asked. **Section headings below keep the original numbering** (Phase 1 = JCM, Phase 2 = diagnostics, …).
 
@@ -125,7 +125,7 @@ Branch `feature/shapekey-diagnostics`. Implemented:
   `AttributeError`); `self.report({'INFO'}, …)` on the already-consolidated no-op.
 - No behavior change to the consolidation math or grouping. The summary-dict keys
   (`consolidated` / `working_kept` / `empty_skipped` / `promoted` / `renamed` / `children_deleted` /
-  `jcm_removed` / `overlaps` / `log`) are the extension point for Phase 4 — add keys, don't change the signature.
+  `jcm_removed` / `overlaps` / `merge_record` / `log`) — add keys, don't change the signature.
 
 ---
 
@@ -155,22 +155,34 @@ unchanged). Injecting a synthetic overlap into two of `MouthOpen`'s children →
 
 ---
 
-## Phase 4 — Round-trip merge metadata
+## Phase 4 — Round-trip merge metadata — **DONE**
 
-**Goal:** after consolidation, record what happened so a later session (or a future "apply pose" style operator, if `poser_tools` ever grows one) can inspect it — mirroring `cr2_importer`'s `poser_internal_names` pattern, adapted to what FBX actually gives us (no internal channel names survive, so this is structural, not a name-resolution map).
+Branch `feature/merge-metadata`.
 
-**Shape:** write to `obj.data['poser_shapekey_merges']` as JSON:
+`consolidate_poser_shapekeys()` serialises a record to `obj.data['poser_shapekey_merges']` (JSON
+string — `bpy.types.Mesh` takes ID properties, `bpy.types.ShapeKey` does not) right before it
+returns, and also returns it as `result["merge_record"]`:
 ```json
 {
   "version": 1,
   "merges": {
-    "BreastSize": {"children": ["BreastSize.001", "BreastSize.002"], "promoted_orphan": false}
-  }
+    "<final shape-key name>": {"children": ["BreastSize.001", "BreastSize.002"], "promoted_orphan": false}
+  },
+  "renamed": {"pPregnant": "Pregnant"}
 }
 ```
-Write this from `consolidate_poser_shapekeys()` right before the function returns, using data already computed in `fbm_shapekeys`. This replaces the sole existing signal (`obj["morphs_consolidated"] = True`) with something inspectable, while keeping that boolean too since the operator's `poll()`/early-return still needs a fast re-run guard.
+- Keyed by the **final** shape-key name (post promoted-orphan rename). `renamed` maps original → final.
+- `merges` holds only the FBMs that actually absorbed children (`result["consolidated"]`); childless
+  `working_kept` / `empty_skipped` morphs aren't listed. JCM removals and overlap hits stay in the
+  report text block, not this record — bump `version` if a consumer needs them.
+- `obj["morphs_consolidated"] = True` stays as the fast re-run guard.
 
-**Acceptance test:** run Fix Poser Shapekeys, then inspect `bpy.data.objects[name].data['poser_shapekey_merges']` in the Python console (or via a small throwaway script) and confirm it accurately reflects what was merged.
+Lets a later pass (e.g. resolving a PZ2 pose that dials `BreastSize.002`) map a pre-merge child
+name back to the surviving morph.
+
+**Verified in headless Blender:** LaFemme (21 merges / 105 children), Aiko3 `is_daz` (84 / 419),
+Kira (0 merges, empty record still written). Every merge key is a surviving shape key; every listed
+child is gone; every rename source absent / target present.
 
 ---
 

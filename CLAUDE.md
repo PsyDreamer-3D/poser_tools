@@ -45,6 +45,10 @@ Standard scaffold layout. Two things worth knowing:
   full-body morph into per-actor children with disjoint vertex sets (verified across every test
   figure). `_detect_child_overlap()` is a tripwire only: if a malformed export ever has two
   children moving one vertex, it's reported (`overlaps` key, `{'WARNING'}`), not silently doubled.
+- **Consolidation writes a merge record** to `mesh["poser_shapekey_merges"]` (JSON: `version`,
+  `merges` keyed by final shape-key name → `{children, promoted_orphan}`, `renamed`). It's for a
+  future pass to resolve a pre-merge morph name back to the surviving key. `mesh`, not `ShapeKey` —
+  the latter has no ID properties. `obj["morphs_consolidated"]` stays as the re-run guard.
 - **JCM morphs are deleted during consolidation** — `is_jcm_shapekey()` (`name.startswith('JCM')`,
   deliberately not a substring test — LaFemme ships a `"ON <- Use JCM -> OFF"` control morph).
   `consolidate_poser_shapekeys()` removes them up front. FBX export bakes the corrective *shape*
