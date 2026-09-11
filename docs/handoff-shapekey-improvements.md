@@ -1,6 +1,8 @@
-# Handoff: Shape-Key Handling Improvements
+# Shape-Key Handling Improvements — record
 
-Written for a fresh session with no prior context. Read `../CLAUDE.md` first for layout and design notes, then this document for the actual work.
+All five phases are resolved (four shipped, Phase 5 ruled out). This is now a record of what was
+done and why — the per-phase sections and the decisions log are the reference for anyone touching
+`core/functionsShapeKeys.py`. Read `../CLAUDE.md` first for layout and design notes.
 
 ## Why this exists
 
@@ -14,7 +16,9 @@ through the same channel, and diagnostics is the only phase not blocked on real 
 2. **JCM detection/exclusion** — **done** (`feature/jcm-exclusion`) — JCM keys are *deleted*
 3. **Overlap-safe delta accumulation** — **done** (`feature/overlap-detection`) — detection-only tripwire; real Poser splits are disjoint
 4. **Round-trip merge metadata** — **done** (`feature/merge-metadata`) — `obj.data['poser_shapekey_merges']` JSON
-5. (Longer-term, spike first) Optional CR2 cross-reference for ground-truth canonical naming ← next
+5. Optional CR2 cross-reference for ground-truth canonical naming — **ruled out** (spiked; the CR2 rarely has the morphs)
+
+All five phases are resolved. See the per-phase sections for what shipped and why Phase 5 didn't.
 
 Each phase is independently shippable. Follow this repo's phased-work discipline: plan → confirm with the project owner → implement → manual test in Blender → move to the next phase. Don't bundle phases into one PR/commit unless asked. **Section headings below keep the original numbering** (Phase 1 = JCM, Phase 2 = diagnostics, …).
 
@@ -186,23 +190,48 @@ child is gone; every rename source absent / target present.
 
 ---
 
-## Phase 5 — CR2 cross-reference (spike first — do not commit to a design yet)
+## Phase 5 — CR2 cross-reference — **RULED OUT** (spiked, not built)
 
-**Goal:** optionally use the source `.cr2`/`.crz` file (if the user has it) to get a ground-truth `internal_name → canonical_name` map instead of guessing from FBX shape-key name patterns, closing the gap described in `CLAUDE.md`'s "Key design decisions."
+**Goal was:** use the source `.cr2`/`.crz` to get a ground-truth `internal_name → canonical_name`
+map instead of guessing from FBX shape-key name patterns.
 
-**Two unknowns to resolve before writing any consolidation logic — this is a spike, not a build:**
+**Spike** (`CR2Parser` from `cr2_importer` + vendored `parse_fbx`, on `LaFemme Pro.cr2` ↔
+`~/Desktop/LaFemme.fbx` and `Legacy-Aiko3.cr2` ↔ `~/Desktop/Aiko3.fbx`) — three independent
+blockers, any one fatal:
 
-1. **Naming correspondence is unverified.** We don't know whether Poser's FBX exporter names blend shapes after the CR2 channel's `internal_name`, `display_name`, or something FBX-sanitized/truncated. Get one real `.cr2` and its matching exported `.fbx` for the same figure, parse the CR2's channel names, and diff them against the actual shape-key names Blender ends up with after importing the FBX. Do this before writing a matcher — if the names don't correspond cleanly, the whole approach needs rethinking, not patching.
-2. **Vendoring decision.** Getting `cr2_importer`'s four-tier canonical map (`ShapeKeyImporter._build_canonical_name_map()` — BODY valueParm ERC link, then cross-actor targetGeom ERC link, then `p`-prefix, then raw name) means parsing CR2 channel/ERC data, which means bringing a trimmed `cr2_parser.py`/`poser_io.py` into `poser_tools`. `poser_tools` already vendors `io_scene_fbx` as its own copy (see `poser_tools/vendor/`), so the precedent is to vendor rather than share code between the two add-ons — but confirm with the project owner before duplicating parser code, in case a shared library is preferred instead.
+1. **The CR2 usually doesn't contain the morphs.** A user's `.cr2` is normally the base figure;
+   the morph channels come from external `.pmd` binaries + `.pz2` injection poses.
+   `~/Desktop/Aiko3.fbx` has 638 shape keys; `Legacy-Aiko3.cr2` has **18 targetGeom channels** (just
+   the JCMs) — `Spandex`, `BreastSize1`, `pStylized` etc. appear zero times. And legacy DAZ figures
+   like Aiko3 are exactly where the `p`-prefix heuristic is weakest, i.e. where this would help most.
+   Self-contained LaFemme fares better (271/300) but still misses 29.
+2. **Naming isn't a clean rule.** Where a channel *is* present, the FBX blendshape name matches its
+   `internal_name` (~78% on LaFemme) **or** its `display_name` (~11%) with no predictable pattern —
+   `JCMlKneeBend90` vs `JCM Left Knee Bend 90` are the same channel. Needs a fuzzy 2-tier matcher and
+   still guesses.
+3. **The parser we'd vendor is incomplete.** `cr2_importer`'s `CR2Parser` silently drops channels
+   whose internal name contains a space (`Toes Grasp`, `Eyes Blink` — present as raw text in
+   `LaFemme Pro.cr2`, missed by the parser), and has **no `.pmd` reader** (inline `d idx dx dy dz`
+   deltas only), so it can't recover external morphs either.
 
-Do not start implementation on this phase without both unknowns resolved and a plan approved — per this repo's phased-work policy, this one clearly crosses the "architectural change touching core logic" threshold.
+Cost (vendor + fix a CR2 parser, add a PMD binary reader, add a PZ2 injection parser, build a fuzzy
+matcher, thread a file picker through the operator) far outweighs a partial, figure-dependent gain.
+The `_TRAILING_DIGITS_RE` / `p`-prefix heuristic is about as good as FBX-derived data allows, and
+Phases 1–4 made the flow robust and inspectable. Revisit only if a concrete need appears (e.g. a
+future "apply Poser pose" operator that genuinely needs canonical names).
+
+Spike scripts: `scratchpad/spike_cr2_names.py` (not committed).
 
 ---
 
-## Summary of open decisions for the project owner
+## Decisions log
 
 - ~~Phase 2 (diagnostics): `core/` package now, or keep flat?~~ Done — shipped on `feature/shapekey-diagnostics`.
 - ~~Phase 1: user-facing JCM toggle or always-skip?~~ Done — always skip, no toggle; `feature/jcm-exclusion`.
+- ~~Phase 1: JCM keys — leave in place or delete?~~ Delete — FBX drops the driver so a baked JCM shape can't fire.
 - ~~Phase 1: does `startswith('JCM')` survive FBX export?~~ Yes — verified against LaFemme / Aiko3 / Kira.
-- Phase 5: vendor a trimmed CR2 parser into `poser_tools`, or extract a shared library both add-ons depend on?
-- Phase 5: `.cr2` + matching `.fbx` pairs — owner has generated files; `~/Desktop/{LaFemme,Aiko3,Kira}.fbx` have morphs (binary FBX 7500), `../FBX_Weightmap_Tests/*.cr2` are the CR2 sources for the Legacy set (but those FBX exports carry no morphs).
+- ~~Phase 3: overlap-safe accumulation — fix or detect?~~ Detect only — real Poser splits are disjoint (probed).
+- ~~Phase 5: vendor a trimmed CR2 parser, or shared library?~~ Moot — Phase 5 ruled out; the CR2 rarely has the morphs.
+
+Test data: `~/Desktop/{LaFemme,Aiko3,Kira}.fbx` (binary FBX 7500, real morphs). `../FBX_Weightmap_Tests/`
+has `.cr2` sources + weight-map FBX exports (no morphs). Blender is runnable headless (`/snap/bin/blender`).

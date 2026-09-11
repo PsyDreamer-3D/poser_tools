@@ -25,9 +25,11 @@ Standard scaffold layout. Two things worth knowing:
   Blender's `.001`/`.002`-style dedup suffixes (`_TRAILING_DIGITS_RE`) or, for legacy Daz3D M3/M4
   figures, a `p`-prefix (`is_daz=True`). This is necessarily a guess: FBX export bakes shape-key
   geometry but discards Poser's authored channel relationships (ERC / `valueOpDeltaAdd` links), so
-  there's no ground-truth grouping available from the FBX alone. A sibling add-on, `cr2_importer`
-  (private repo, reads CR2 files directly), has that ERC data and resolves grouping with certainty —
-  see the handoff doc for how that gap might eventually be closed.
+  there's no ground-truth grouping available from the FBX alone. Cross-referencing the source `.cr2`
+  for canonical names was evaluated and **ruled out** (`docs/handoff-shapekey-improvements.md`
+  Phase 5): the CR2 a user has is usually the base figure, and the morphs came from external
+  `.pmd`/`.pz2` injections that aren't in it — e.g. `Legacy-Aiko3.cr2` has 18 of the FBX's 638
+  shape-key channels. The heuristic is as good as FBX-derived data allows.
 - **Legacy Daz3D mode (`is_daz`) is a distinct code path**, not a variant of the same regex — M3/M4
   figures use a `p`/`PBM` prefix convention instead of Blender's numeric-suffix convention, and both
   can theoretically co-occur, so `is_child_shapekey()` checks both independently.
@@ -61,12 +63,12 @@ Weight-mapped / TriAx rigging support. Ruled out after real evaluation — the P
 already solved it and reimplementing it worse isn't worth the scope. Don't resurrect it here or in
 `cr2_importer`.
 
-## In progress
+## Shape-key consolidation history
 
-`docs/handoff-shapekey-improvements.md` — a 5-phase plan to bring lessons from `cr2_importer` into
-the shape-key consolidation flow (JCM exclusion, `self.report()`/text-block diagnostics via
-`core/utils.py`'s `_write_report()`, overlap-safe delta accumulation, round-trip merge metadata, and
-a longer-term CR2 cross-reference spike). Written for a fresh session with no prior context — start there.
+`docs/handoff-shapekey-improvements.md` — a 5-phase pass over the consolidation flow, all resolved:
+diagnostics (report text block), JCM deletion, overlap detection (tripwire), merge metadata on
+`obj.data`, and a CR2 cross-reference that was spiked and ruled out. Read it before touching
+`core/functionsShapeKeys.py` — it records why each piece is shaped the way it is.
 
 ## Testing
 
