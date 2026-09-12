@@ -1,8 +1,9 @@
 # Shape-Key Handling Improvements — record
 
-All five phases are resolved (four shipped, Phase 5 ruled out). This is now a record of what was
-done and why — the per-phase sections and the decisions log are the reference for anyone touching
-`core/functionsShapeKeys.py`. Read `../CLAUDE.md` first for layout and design notes.
+Four phases shipped; Phase 5 (CR2 cross-reference) is **reopened** — the first ruling was measured
+against an incomplete test CR2 and didn't hold up against a proper dataset. The per-phase sections
+and the decisions log are the reference for anyone touching `core/functionsShapeKeys.py`. Read
+`../CLAUDE.md` first for layout and design notes.
 
 ## Why this exists
 
@@ -16,9 +17,9 @@ through the same channel, and diagnostics is the only phase not blocked on real 
 2. **JCM detection/exclusion** — **done** (`feature/jcm-exclusion`) — JCM keys are *deleted*
 3. **Overlap-safe delta accumulation** — **done** (`feature/overlap-detection`) — detection-only tripwire; real Poser splits are disjoint
 4. **Round-trip merge metadata** — **done** (`feature/merge-metadata`) — `obj.data['poser_shapekey_merges']` JSON
-5. Optional CR2 cross-reference for ground-truth canonical naming — **ruled out** (spiked; the CR2 rarely has the morphs)
+5. Optional CR2 cross-reference for ground-truth canonical naming — **reopened** (first spike ruled it out on bad test data; a re-spike with a complete CR2 dataset got 90–99% naming coverage — see Phase 5)
 
-All five phases are resolved. See the per-phase sections for what shipped and why Phase 5 didn't.
+Phases 1–4 are done; see their sections for what shipped. Phase 5 is under active re-evaluation.
 
 Each phase is independently shippable. Follow this repo's phased-work discipline: plan → confirm with the project owner → implement → manual test in Blender → move to the next phase. Don't bundle phases into one PR/commit unless asked. **Section headings below keep the original numbering** (Phase 1 = JCM, Phase 2 = diagnostics, …).
 
@@ -190,37 +191,124 @@ child is gone; every rename source absent / target present.
 
 ---
 
-## Phase 5 — CR2 cross-reference — **RULED OUT** (spiked, not built)
+## Phase 5 — CR2 cross-reference — **REOPENED** (first ruling was measured on bad test data)
 
-**Goal was:** use the source `.cr2`/`.crz` to get a ground-truth `internal_name → canonical_name`
-map instead of guessing from FBX shape-key name patterns.
+**Goal:** use the source `.cr2`/`.crz` to get a ground-truth `internal_name → canonical_name` map
+instead of guessing from FBX shape-key name patterns. Also the intended first step in bringing
+usable parts of `cr2_importer` over to `poser_tools` more generally — this phase is as much "is
+that worth doing" as it is "fix this one heuristic."
 
-**Spike** (`CR2Parser` from `cr2_importer` + vendored `parse_fbx`, on `LaFemme Pro.cr2` ↔
-`~/Desktop/LaFemme.fbx` and `Legacy-Aiko3.cr2` ↔ `~/Desktop/Aiko3.fbx`) — three independent
-blockers, any one fatal:
+### First spike (ruled out) — and why that ruling didn't hold up
 
-1. **The CR2 usually doesn't contain the morphs.** A user's `.cr2` is normally the base figure;
-   the morph channels come from external `.pmd` binaries + `.pz2` injection poses.
-   `~/Desktop/Aiko3.fbx` has 638 shape keys; `Legacy-Aiko3.cr2` has **18 targetGeom channels** (just
-   the JCMs) — `Spandex`, `BreastSize1`, `pStylized` etc. appear zero times. And legacy DAZ figures
-   like Aiko3 are exactly where the `p`-prefix heuristic is weakest, i.e. where this would help most.
-   Self-contained LaFemme fares better (271/300) but still misses 29.
-2. **Naming isn't a clean rule.** Where a channel *is* present, the FBX blendshape name matches its
-   `internal_name` (~78% on LaFemme) **or** its `display_name` (~11%) with no predictable pattern —
-   `JCMlKneeBend90` vs `JCM Left Knee Bend 90` are the same channel. Needs a fuzzy 2-tier matcher and
-   still guesses.
-3. **The parser we'd vendor is incomplete.** `cr2_importer`'s `CR2Parser` silently drops channels
-   whose internal name contains a space (`Toes Grasp`, `Eyes Blink` — present as raw text in
-   `LaFemme Pro.cr2`, missed by the parser), and has **no `.pmd` reader** (inline `d idx dx dy dz`
-   deltas only), so it can't recover external morphs either.
+Originally spiked against `~/Desktop/{LaFemme,Aiko3}.fbx` + `LaFemme Pro.cr2` /
+`Legacy-Aiko3.cr2` (a path that no longer exists — see "re-spike" below). Verdict then: ruled out,
+three blockers. Blocker #1 ("the CR2 usually doesn't contain the morphs") turned out to be a
+**test-data artifact**: `Legacy-Aiko3.cr2` was a minimal/stripped CR2 (18 `targetGeom` channels
+total), not representative of a real base-figure file.
 
-Cost (vendor + fix a CR2 parser, add a PMD binary reader, add a PZ2 injection parser, build a fuzzy
-matcher, thread a file picker through the operator) far outweighs a partial, figure-dependent gain.
-The `_TRAILING_DIGITS_RE` / `p`-prefix heuristic is about as good as FBX-derived data allows, and
-Phases 1–4 made the flow robust and inspectable. Revisit only if a concrete need appears (e.g. a
-future "apply Poser pose" operator that genuinely needs canonical names).
+### Re-spike with `Test_Poser_Assets/` — reopened
 
-Spike scripts: `scratchpad/spike_cr2_names.py` (not committed).
+Owner supplied a proper dataset: `!Aiko 3.cr2` (inline deltas) ↔ `Aiko3.fbx` /
+`Aiko3 SP All Morphs.fbx` (includes injected Stephanie 3 morphs), `Aiko3 All SP Morphs.cr2`
+(external deltas via `.pmd`) ↔ the same, `LaFemme Pro tmp.cr2` + `.pmd` ↔ `LaFemme.fbx` /
+`LaFemme with 3rd Party Morphs.fbx`. Same method as before (`CR2Parser` + vendored `parse_fbx`,
+diffing FBX shape-key names against CR2 `targetGeom` `internal_name`/`display_name`):
+
+| FBX | CR2 | shape keys | matched | rate |
+|---|---|--:|--:|--:|
+| `Aiko3.fbx` | `!Aiko 3.cr2` | 637 | 620 | 97.3% |
+| `Aiko3 SP All Morphs.fbx` | `Aiko3 All SP Morphs.cr2` | 1193 | 1176 | 98.6% |
+| `LaFemme.fbx` | `LaFemme Pro tmp.cr2` | 300 | 271 | 90.3% |
+| `LaFemme with 3rd Party Morphs.fbx` | `LaFemme Pro tmp.cr2` | 671 | 619 | 92.2% |
+
+Against a complete base-figure CR2, coverage is 90–99%, not 2.8%. Also confirmed directly (not
+guessed): the small `Aiko3 All SP Morphs.cr2` (3.1MB, *more* targetGeom channels than the 48MB
+`!Aiko 3.cr2`) is small because it externalizes deltas to a `.pmd` — `morphBinaryFile
+:Runtime:libraries:Character:DAZ Aiko 3:Aiko3 All SP Morphs.pmd` appears twice in the raw text —
+**not** a `.pz2` injection reference. Channel *declarations* (name, hierarchy, ERC) stay in the
+CR2 text either way; only the per-vertex delta payload moves to the `.pmd`. So blocker #1 is not
+real for a complete CR2 — the earlier ruling conflated "test file was incomplete" with "this
+approach doesn't work."
+
+**Blocker #2 (naming inconsistency) — still real.** Which tier wins is figure-dependent: Aiko3
+mostly matches `display_name` (407 + 953 across the two exports), LaFemme mostly matches
+`internal_name` (237, 584). No fixed rule; a real matcher needs both tiers tried in some order.
+
+**Blocker #3 (parser gaps) is now the dominant, and the only fixable, remaining gap.** Checked
+every miss by hand against the raw CR2 text. With one exception (`GMThumbMorph` — genuinely
+absent, real added content), **100% of the misses are `targetGeom` channels whose internal name
+contains a space** — `targetGeom Blink Right`, `targetGeom Toes Grasp`, `targetGeom Thumb Morph`,
+etc. — present in the file, dropped by `cr2_importer`'s parser.
+
+### The `cr2_importer` parser bug (documented here; the fix belongs in that repo)
+
+`cr2_parser.py`'s `CR2Parser._parse_channel()`:
+```python
+def _parse_channel(self) -> Channel:
+    kind = self.consume()
+    internal_name = '' if self.peek() == '{' else self.consume()   # <-- one token only
+    ch = Channel(internal_name=internal_name, kind=kind)
+    if self.peek() != '{':
+        return ch                                                  # <-- bails here
+    ...
+```
+For `targetGeom Blink Right\n\t{...}`: `kind = "targetGeom"`, then `internal_name = "Blink"` (one
+`consume()`). `peek()` is now `"Right"`, not `"{"`, so the function returns immediately — the
+channel is recorded with a **truncated** `internal_name` and no body at all (no `display_name`, no
+`deltas`, no ERC). Back in `_parse_channels_block()`, the orphaned `"Right"` token doesn't match
+any known keyword and is silently swallowed by the `else: self.consume()` fallback; the next
+token is the channel's real `{`, which the loop's `elif tok == '{': self.skip_block()` then
+discards whole. The entire channel — deltas included — is lost, not just under-labeled.
+
+This is the same shape of problem the tokenizer already solves for Poser's `name` keyword (whose
+value is unquoted and can contain spaces — see `CR2Tokenizer.tokenize()`'s special case). Channel
+`internal_name` has the identical grammar (bare, unquoted, extends to end-of-line/next `{`) and
+needs the same treatment.
+
+**Proposed fix**, scoped to `_parse_channel()` only (no tokenizer change needed — this only
+affects channels, `name` values are already handled upstream):
+```python
+def _parse_channel(self) -> Channel:
+    kind = self.consume()
+    if self.peek() == '{':
+        internal_name = ''
+    else:
+        # internal_name is a bare, unquoted token run — Poser allows it to
+        # contain spaces (e.g. "targetGeom Blink Right"), the same grammar as
+        # the tokenizer's 'name' special-case. Consume until the block open.
+        parts = []
+        while self.peek() is not None and self.peek() != '{':
+            parts.append(self.consume())
+        internal_name = ' '.join(parts)
+    ch = Channel(internal_name=internal_name, kind=kind)
+    ...
+```
+No other channel in the grammar comment at the top of `cr2_parser.py` documents a bare (non-`{`,
+non-`name`) token appearing between `internalName` and `{`, so a "consume until `{`" loop should
+be safe — but re-run the full test corpus (`Test_Poser_Assets/` + whatever `cr2_importer` already
+has) after the change, not just the cases found here.
+
+**Not applied.** This is a fix in `cr2_importer` (separate private repo) — documented here for
+whoever picks it up there. `poser_tools` doesn't vendor `cr2_parser.py` yet; whether to vendor a
+fixed copy or depend on a shared library is still the open Phase 5 vendoring question below.
+
+### Verification plan once the parser fix lands
+
+Re-run `scratchpad/spike_cr2_names.py` (or its successor) against the same four FBX/CR2 pairs;
+expect the space-containing names to move from `NO_MATCH` into `tgeom_internal`/`tgeom_display`,
+and the `Aiko3 SP` / `LaFemme 3rd Party` runs to isolate genuinely new content (like `GMThumbMorph`)
+more cleanly once the false negatives are gone.
+
+### Open decisions (unchanged from the first spike)
+
+- Vendor a trimmed, fixed `cr2_parser.py`/`poser_io.py` into `poser_tools/vendor/` (precedent:
+  `vendor/io_scene_fbx`), or depend on a shared library between `poser_tools` and `cr2_importer`?
+- Even with a fixed parser and full coverage, still need the 2-tier `internal_name`/`display_name`
+  matcher (blocker #2) before this could replace or augment the current heuristic in
+  `core/functionsShapeKeys.py`.
+- No design committed yet — this phase is reopened for evaluation, not queued for implementation.
+
+Spike scripts: `scratchpad/spike_cr2_names.py` (not committed; session-local under `/tmp`).
 
 ---
 
@@ -231,7 +319,10 @@ Spike scripts: `scratchpad/spike_cr2_names.py` (not committed).
 - ~~Phase 1: JCM keys — leave in place or delete?~~ Delete — FBX drops the driver so a baked JCM shape can't fire.
 - ~~Phase 1: does `startswith('JCM')` survive FBX export?~~ Yes — verified against LaFemme / Aiko3 / Kira.
 - ~~Phase 3: overlap-safe accumulation — fix or detect?~~ Detect only — real Poser splits are disjoint (probed).
-- ~~Phase 5: vendor a trimmed CR2 parser, or shared library?~~ Moot — Phase 5 ruled out; the CR2 rarely has the morphs.
+- Phase 5: "the CR2 rarely has the morphs" — **reversed.** That was true of the specific `Legacy-Aiko3.cr2`
+  test file (18 channels, a minimal/stripped CR2), not of real base-figure CR2s (90–99% coverage
+  against `!Aiko 3.cr2`, `Aiko3 All SP Morphs.cr2`, `LaFemme Pro tmp.cr2`). Phase 5 reopened.
+- Phase 5: vendor a trimmed CR2 parser, or shared library? — still open, now live again (see Phase 5).
 
-Test data: `~/Desktop/{LaFemme,Aiko3,Kira}.fbx` (binary FBX 7500, real morphs). `../FBX_Weightmap_Tests/`
-has `.cr2` sources + weight-map FBX exports (no morphs). Blender is runnable headless (`/snap/bin/blender`).
+Test data: `Test_Poser_Assets/` (see project memory / ask the owner for the current path — it has
+moved once already). Blender is runnable headless (`/snap/bin/blender`).

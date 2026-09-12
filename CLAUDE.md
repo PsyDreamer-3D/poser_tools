@@ -26,10 +26,11 @@ Standard scaffold layout. Two things worth knowing:
   figures, a `p`-prefix (`is_daz=True`). This is necessarily a guess: FBX export bakes shape-key
   geometry but discards Poser's authored channel relationships (ERC / `valueOpDeltaAdd` links), so
   there's no ground-truth grouping available from the FBX alone. Cross-referencing the source `.cr2`
-  for canonical names was evaluated and **ruled out** (`docs/handoff-shapekey-improvements.md`
-  Phase 5): the CR2 a user has is usually the base figure, and the morphs came from external
-  `.pmd`/`.pz2` injections that aren't in it — e.g. `Legacy-Aiko3.cr2` has 18 of the FBX's 638
-  shape-key channels. The heuristic is as good as FBX-derived data allows.
+  for canonical names is **under active re-evaluation** (`docs/handoff-shapekey-improvements.md`
+  Phase 5, reopened) — a first spike ruled it out against an incomplete test CR2, but a proper
+  base-figure CR2 gets 90–99% naming coverage; the remaining gap traces to a fixable
+  `cr2_importer` parser bug (documented in the handoff doc), not a lack of data. The heuristic
+  below stays authoritative until/unless Phase 5 lands something to replace it.
 - **Legacy Daz3D mode (`is_daz`) is a distinct code path**, not a variant of the same regex — M3/M4
   figures use a `p`/`PBM` prefix convention instead of Blender's numeric-suffix convention, and both
   can theoretically co-occur, so `is_child_shapekey()` checks both independently.
@@ -70,9 +71,10 @@ already solved it and reimplementing it worse isn't worth the scope. Don't resur
 
 ## Shape-key consolidation history
 
-`docs/handoff-shapekey-improvements.md` — a 5-phase pass over the consolidation flow, all resolved:
-diagnostics (report text block), JCM deletion, overlap detection (tripwire), merge metadata on
-`obj.data`, and a CR2 cross-reference that was spiked and ruled out. Read it before touching
+`docs/handoff-shapekey-improvements.md` — a 5-phase pass over the consolidation flow. Phases 1–4
+shipped: diagnostics (report text block), JCM deletion, overlap detection (tripwire), merge
+metadata on `obj.data`. Phase 5 (CR2 cross-reference) is reopened — see the doc for the current
+naming-correspondence numbers and the `cr2_importer` parser bug write-up. Read the doc before touching
 `core/functionsShapeKeys.py` — it records why each piece is shaped the way it is.
 
 ## Testing
