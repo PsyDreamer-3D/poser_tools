@@ -175,36 +175,94 @@ radius during scoring only (`_SCORING_MAX_RADIUS = 4` in `_coarse_align`) — a 
 fails fast, a right one is unaffected (it never needed more than a ring or two anyway) — bringing
 coarse-align down to under a minute.
 
-### Phase 2 — Per-actor local-index → OBJ-global-index resolution
+### Phase 2 — Per-actor local-index → OBJ-global-index resolution ✅ shipped
 
 **Goal:** a `d 47 dx dy dz` delta's `47` is local to one actor's geometry group within the OBJ.
 Need `47` → the OBJ's *global* vertex index, the same translation `cr2_importer`'s `obj_loader.py`
 does via `g <actor>` face groups (`sorted(set(vertex_indices_touched_by_that_actors_faces))`).
 
-**Design:** a minimal OBJ face/group reader — track `g <name>` directives and each face's vertex
-refs, only what's needed to answer "which global vertex indices does actor X's geometry touch, in
-Poser's local order" — not a full mesh/material/UV importer like `cr2_importer`'s `obj_loader.py`.
+**Built:** `core/cr2/actor_vertex_index.py` — `load_obj_actor_vertex_groups(path)` (a minimal OBJ
+face/group reader: tracks `g <name>` directives and each face's vertex refs, *not* a full
+mesh/material/UV importer like `cr2_importer`'s `obj_loader.py`) and `resolve_local_index(group, i)`.
+MIT header, not GPL — unlike Phase 1's `obj_io.py`/`mesh_correspondence.py`, this one really is a
+direct adaptation of `cr2_importer` (`obj_loader.py`'s group/face tracking, and specifically
+`shape_key_importer.py`'s `sorted(set(group.vertex_indices()))` convention, confirmed by reading
+that file rather than assumed) rather than original code solving a problem `cr2_importer` never
+had. 9 new tests in `tests/test_actor_vertex_index.py` (28 total in `tests/` now), including one
+real-data check: parsed `!Aiko 3.cr2` + `blAiko3.obj` together and confirmed all 55 geometry-bearing
+actors (`actor.geom_name or actor.name`) resolve to a real OBJ group — the only miss is `BODY`
+(Poser's whole-figure root actor, which has no geometry group of its own; expected, not a bug).
 
 Composed with Phase 1: `local_idx` (Phase 2) → OBJ global idx (Phase 2) → Blender vertex idx
 (Phase 1) is the full address of one delta.
 
-### Phase 3 — Apply an inline-delta injection to a mesh
+### Phase 3 — Apply an inline-delta injection to a mesh ✅ shipped
 
 **Goal:** given an already-imported mesh + its reference OBJ + a parsed inline-delta channel group
 (from `core/cr2/cr2_parser.py`, potentially spanning several actors — `core/cr2/name_match.py`
 already groups a morph name across actors), build one new Blender shape key with the combined,
 correctly-placed deltas.
 
-**Design:** reuse patterns already proven in this codebase — `core/functionsShapeKeys.py`'s
-mute-management and slider setup, and the basis-copy + scatter-add accumulation pattern
-`cr2_importer`'s `ShapeKeyImporter._build_one()` uses (`np.add.at` onto a basis copy). Orchestrator
-`.pz2` resolution (locating the `Runtime` root, walking `readScript` references) is part of this
-phase, not its own — it's plumbing, not a design risk.
+**Built:**
+- `core/cr2/poser_paths.py` (MIT — real adaptation of `cr2_importer`'s `PoserPathResolver`):
+  `find_runtime_root()` + `resolve_poser_path()`, resolving a `:Runtime:...` colon-path relative to
+  whatever file referenced it.
+- `core/cr2/injection_package.py` (GPL — `cr2_importer` only *detects* the orchestrator category,
+  never follows it): `load_injection_package()` recursively resolves `readScript` orchestrator
+  references (confirmed grammar: `readScript "<colon-path>"`, one token pair) into a single merged
+  `Figure`, so a plain single-file package and a many-file orchestrator package both look the same
+  to `name_match.py`. Unresolvable references are reported (`unresolved_paths`), never silently
+  dropped.
+- `core/cr2/apply_injection.py` (GPL — original composition, `cr2_importer` never needed this):
+  `build_shape_key_positions()` composes Phase 1 + Phase 2 to place one morph's deltas onto the
+  mesh's own current Basis positions. Handles two collision types `cr2_importer` never has to
+  (it never reorders vertices): actor-to-actor seam sharing (mirrors `cr2_importer`'s own `claimed`-set
+  fix) and Phase 1's own OBJ→Blender many-to-one collision (resolved by keeping whichever
+  contending OBJ vertex Phase 1 matched more precisely). Also fixed a real gap surfaced while
+  building this: `core/cr2/name_match.py` used to return bare `Channel`s with no actor identity,
+  useless for this phase (which needs to know *which actor's* geometry group each delta belongs to)
+  — it now returns `(Actor, Channel)` pairs. And extended `core/cr2/cr2_parser.py`'s `Channel` with
+  a `uses_binary_morph` flag (from the `useBinaryMorph 1` token, previously silently discarded) so a
+  PMD-referenced channel (Phase 4 territory, real deltas but stored externally) is distinguishable
+  from a channel with genuinely no deltas at all.
 
-**Acceptance test:** apply `! All Morphs.pz2` (Aiko3/Hiro3 pack) or `!SP All Morphs INJ` to a
-freshly-imported figure; confirm the new shape keys appear, are named sensibly, and visibly
-deform the mesh correctly when dialed up (owner verifies in Blender — I can't eyeball a morph's
-correctness, only that indices/counts line up).
+**Real-data verification** (manual, cached Phase 1 point clouds, no fresh Blender import needed —
+see "How to apply" in the `project_morph_injection` memory for why caching pays off): applied two
+real morphs from the external content-library mount to Aiko3.
+
+| | BrowHeavy (1 actor) | PBMMuscular (19 actors) |
+|---|--:|--:|
+| Total deltas | 2295 | 14263 |
+| Touched (final) | 1795 | 11409 |
+| OBJ→Blender collisions resolved | 500 | 1578 |
+| Seam collisions skipped | 0 | 932 |
+| Unmapped | 0 | 344 |
+| Max displacement (Blender units) | 0.0047 | 0.0478 |
+
+Both cases: every raw delta is accounted for in exactly one bucket (touched + collided + seam-skipped
++ unmapped == total deltas exactly, both times) — nothing silently lost or double-counted. PBMMuscular's
+344/14263 (2.4%) unmapped rate lines up closely with Aiko3's own Phase 1 miss rate (2.28%), a good
+cross-check that this phase isn't introducing new loss on top of Phase 1's own.
+
+**Scope boundary worth being explicit about:** `build_shape_key_positions()` returns a plain numpy
+position array, not a real `bpy.types.ShapeKey` — matching the rest of `core/cr2/`'s no-`bpy`,
+plain-`pytest`-testable discipline (the same reason `mesh_correspondence.py` doesn't touch `bpy`
+either). Actually calling `mesh.shape_key_add(name=...)` + `sk.data.foreach_set('co', ...)` on a real
+mesh object is a few trivial lines of glue that belongs with Phase 5's operator, not a `core/`
+module. So "build one new Blender shape key" (this phase's stated goal) means "compute the correctly
+combined position array a shape key needs" — the object doesn't exist in the scene yet.
+
+**Not verified — the actual visual deformation.** I can confirm indices/counts/collision stats line
+up (above); I can't eyeball whether `BrowHeavy` actually looks like a heavier brow in Blender. That's
+the owner's job, once Phase 5 makes it possible to try.
+
+**Explicitly not solved (documented, not a bug):** the real packages' `valueOpDeltaAdd → BODY:1 →
+<name>` ERC links target a channel that's never statically declared anywhere in the injection files
+themselves (confirmed by grepping the whole package for `createFullBodyMorph` — nothing) — Poser
+creates it live, at load time, so there's no canonical/pretty name to resolve from files alone the
+way `cr2_importer`'s 4-tier naming logic does. `build_shape_key_positions()` doesn't attempt this;
+the shape key's name is the caller's job (the channel group's own internal name, for now) — smarter
+naming is Phase 5 polish, not required for this phase's own goal (correctly-placed deltas).
 
 ### Phase 4 — PMD binary reader (separate; spike first)
 
@@ -230,15 +288,16 @@ later, separate change.
 
 ## Open decisions
 
-- Phase 1: `mathutils.kdtree` (needs `bpy`) vs. a pure-numpy spatial index (stays pytest-testable,
-  consistent with the rest of `core/cr2/`). Leaning numpy; not yet decided.
-- Where Phases 1–2's new modules live: proposed to stay inside `core/cr2/` (e.g.
-  `mesh_correspondence.py`, `obj_groups.py`) for cohesion with the rest of the Poser-data toolkit,
-  even though they're about OBJ/geometry correspondence rather than CR2/PZ2 text parsing per se.
-  Not yet confirmed.
+- ~~Phase 1: `mathutils.kdtree` vs. pure-numpy.~~ Resolved: pure numpy, stays pytest-testable.
+- ~~Where Phases 1–2's new modules live.~~ Resolved: all in `core/cr2/` (`mesh_correspondence.py`,
+  `actor_vertex_index.py`, `poser_paths.py`, `injection_package.py`, `apply_injection.py`) — same
+  cohesion reasoning, held up through Phase 3.
 - Whether/how Phase 3's new shape keys interact with the existing consolidation flow
   (`core/functionsShapeKeys.py`) — e.g. does an injected morph get JCM-checked, merge-recorded,
-  etc., the same way FBX-native ones do? Not addressed yet.
+  etc., the same way FBX-native ones do? Still not addressed — Phase 3 only builds the position
+  array (`build_shape_key_positions()`); nothing yet actually calls `shape_key_add()` +
+  `foreach_set('co', ...)` on a real mesh object, which is where this question becomes concrete
+  (Phase 5, once there's an operator to wire it into).
 - Phase 4 (PMD) needs its own real spike before any design — explicitly not scoped here.
 
 ## Test data

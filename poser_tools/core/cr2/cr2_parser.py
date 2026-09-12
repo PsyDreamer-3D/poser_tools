@@ -84,6 +84,13 @@ class Channel:
     keyed_val: Optional[float] = None   # first k-frame value from keys block; None if absent
     value_operations: list = field(default_factory=list)
     deltas: list = field(default_factory=list)
+    uses_binary_morph: bool = False  # 'useBinaryMorph 1' -- real deltas exist, but in an
+                                      # external .pmd file, not inline here (see
+                                      # docs/handoff-morph-injection.md Phase 4). Without this,
+                                      # a PMD-referenced channel and a plain no-op dial channel
+                                      # both look like empty `deltas` -- indistinguishable to a
+                                      # caller deciding whether "no deltas" means "nothing to
+                                      # apply" or "can't apply yet, needs the Phase 4 PMD reader".
 
 
 @dataclass
@@ -904,6 +911,8 @@ class CR2Parser:
             elif tok == 'valueOpDeltaAdd':
                 ch.value_operations.append(self._parse_valueop_delta_add())
             elif tok in ('indexes', 'numbDeltas'): self.consume(); self.consume()
+            elif tok == 'useBinaryMorph':
+                self.consume(); ch.uses_binary_morph = bool(int(self.consume_float()))
             elif tok == 'deltas':
                 self.consume()
                 if self.peek() == '{': ch.deltas = self._parse_morph_deltas()

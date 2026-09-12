@@ -17,14 +17,26 @@ Standard scaffold layout. Two things worth knowing:
 - `vendor/io_scene_fbx/` is a vendored copy of Blender's legacy FBX importer (Blender Foundation,
   GPL-2.0-or-later), kept because Poser figures need axis/bone handling the current importer dropped.
   Left as-is with its own license headers; excluded from convention passes.
-- `core/cr2/` (`cr2_parser.py`, `constants.py`, `poser_io.py`, `name_match.py`) is **not** `vendor/` — it's adapted
-  from `cr2_importer` (PsyDreamer-3D's own now-unmaintained CR2 importer) but actively maintained
-  here going forward, per Phase 5 of the handoff doc. Files keep their original MIT SPDX header
-  (same exception `vendor/io_scene_fbx` sets), but this code gets fixed and extended in place, not
-  frozen. No `bpy` dependency — pure Python, covered by `tests/test_cr2_parser.py`.
-  `core/cr2/obj_io.py` and `core/cr2/mesh_correspondence.py` (morph-injection Phase 1, see below)
-  live in the same package but are original `poser_tools` code, not adapted from `cr2_importer` —
-  GPL-3.0-or-later, not MIT. Same no-`bpy` / plain-`pytest` discipline (`tests/test_mesh_correspondence.py`).
+- `core/cr2/` (`cr2_parser.py`, `constants.py`, `poser_io.py`, `name_match.py`,
+  `actor_vertex_index.py`, `poser_paths.py`) is **not** `vendor/` — it's adapted from `cr2_importer`
+  (PsyDreamer-3D's own now-unmaintained CR2 importer) but actively maintained here going forward,
+  per Phase 5 of the handoff doc. Files keep their original MIT SPDX header (same exception
+  `vendor/io_scene_fbx` sets), but this code gets fixed and extended in place, not frozen. No `bpy`
+  dependency — pure Python, covered by `tests/test_cr2_parser.py`, `tests/test_actor_vertex_index.py`,
+  and `tests/test_poser_paths.py`.
+  `core/cr2/obj_io.py`, `core/cr2/mesh_correspondence.py`, `core/cr2/injection_package.py`, and
+  `core/cr2/apply_injection.py` (morph-injection Phases 1 and 3, see below) live in the same package
+  but are original `poser_tools` code, not adapted from `cr2_importer` — GPL-3.0-or-later, not MIT.
+  Same no-`bpy` / plain-`pytest` discipline (`tests/test_mesh_correspondence.py`,
+  `tests/test_injection_package.py`, `tests/test_apply_injection.py`).
+  Which license a new `core/cr2/` file gets is a judgment call, not automatic just because it's in
+  this package — MIT when it's a real adaptation of specific `cr2_importer` logic (like
+  `actor_vertex_index.py`'s local-index convention, or `poser_paths.py`'s `PoserPathResolver`,
+  confirmed by reading `cr2_importer`'s own code), GPL when it's original code solving a problem
+  `cr2_importer` never had (like `mesh_correspondence.py`, needed only because this add-on injects
+  into an already-imported mesh rather than building one from scratch, or `injection_package.py`'s
+  `readScript`-following — `cr2_importer`'s own `pz2_parser.py` only *detects* that an orchestrator
+  file exists, it never actually follows one).
 
 ## Key design decisions
 
@@ -97,8 +109,17 @@ is shipped — matches a Poser-native `.obj` against an FBX-imported mesh by pos
 recovering the transform automatically and resolving the large majority of vertices with near-zero
 residual (97.7%/68.1% on the two real test figures — see the doc for why exact 100% wasn't chased
 further, and for a scratch-harness gotcha re: `matrix_world` timing worth knowing before writing
-another headless-Blender verification script against this figure). Phases 2-5 (per-actor index
-resolution, applying an injection, PMD binary reader, user-facing operator) not started — read the
+another headless-Blender verification script against this figure). Phase 2 (per-actor local-index →
+OBJ-global-index resolution: `core/cr2/actor_vertex_index.py`) is also shipped — unlike Phase 1's
+files, this one is MIT-headed (a direct adaptation of `cr2_importer`'s group-tracking + its
+`sorted(set(...))` local-index convention, not original code). Phase 3 (applying an injection:
+`core/cr2/poser_paths.py`, `core/cr2/injection_package.py`, `core/cr2/apply_injection.py`) is also
+shipped — composes Phases 1+2 into `build_shape_key_positions()`, which returns the correctly
+combined position array a new shape key needs (not yet a real `bpy.types.ShapeKey` — that's a few
+lines of glue left for Phase 5's operator, keeping this `bpy`-free like the rest of `core/cr2/`).
+Verified against two real morphs (single-actor and 19-actor) — see the doc for the exact
+touched/collision/unmapped accounting. Phases 4-5 (PMD binary reader, user-facing operator) not
+started — read the
 doc before starting any of them.
 
 ## Testing
