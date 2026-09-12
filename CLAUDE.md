@@ -22,6 +22,9 @@ Standard scaffold layout. Two things worth knowing:
   here going forward, per Phase 5 of the handoff doc. Files keep their original MIT SPDX header
   (same exception `vendor/io_scene_fbx` sets), but this code gets fixed and extended in place, not
   frozen. No `bpy` dependency — pure Python, covered by `tests/test_cr2_parser.py`.
+  `core/cr2/obj_io.py` and `core/cr2/mesh_correspondence.py` (morph-injection Phase 1, see below)
+  live in the same package but are original `poser_tools` code, not adapted from `cr2_importer` —
+  GPL-3.0-or-later, not MIT. Same no-`bpy` / plain-`pytest` discipline (`tests/test_mesh_correspondence.py`).
 
 ## Key design decisions
 
@@ -84,14 +87,19 @@ metadata on `obj.data`. Phase 5 (CR2 cross-reference) is reopened — see the do
 naming-correspondence numbers and the `cr2_importer` parser bug write-up. Read the doc before touching
 `core/functionsShapeKeys.py` — it records why each piece is shaped the way it is.
 
-## Morph injection (in planning)
+## Morph injection (in progress)
 
 `docs/handoff-morph-injection.md` — a separate, bigger capability than consolidation: importing a
 3rd-party Poser morph package (`.pz2` injection template) and adding its morphs as *new* shape keys
 to an already-imported mesh, not just grouping ones the FBX export already baked. Builds on
-`core/cr2/`. Vertex correspondence between Poser-native geometry and the FBX-imported mesh has
-been investigated and found solvable (not by raw index — by position, after a coarse align); real
-injection-package formats have been surveyed. No code written yet — read the doc before starting.
+`core/cr2/`. Phase 1 (vertex correspondence: `core/cr2/obj_io.py` + `core/cr2/mesh_correspondence.py`)
+is shipped — matches a Poser-native `.obj` against an FBX-imported mesh by position (not raw index),
+recovering the transform automatically and resolving the large majority of vertices with near-zero
+residual (97.7%/68.1% on the two real test figures — see the doc for why exact 100% wasn't chased
+further, and for a scratch-harness gotcha re: `matrix_world` timing worth knowing before writing
+another headless-Blender verification script against this figure). Phases 2-5 (per-actor index
+resolution, applying an injection, PMD binary reader, user-facing operator) not started — read the
+doc before starting any of them.
 
 ## Testing
 

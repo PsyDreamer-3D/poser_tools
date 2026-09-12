@@ -54,6 +54,14 @@ mesh, using Blender's own `mathutils.kdtree`), *provided we have the figure's re
 the same file the CR2's `figureResFile` already names. That's the one real external dependency,
 not a coding blocker.
 
+> **Update after Phase 1 shipped:** re-verifying through the productized module (below) found
+> 97.72% / 68.11% match, not the 100% this table reports — this scratch table's "100%, residual
+> ≈0.000000" predates fixing a bug in the *scratch harness itself* (world-space vs. raw local
+> vertex coordinates, see Phase 1's "Real-data verification"). The permutation/signs/scale figures
+> here still check out (independently confirmed 3 more times since). Left as-is for the historical
+> record of how correspondence was first shown to be solvable at all; treat Phase 1's own numbers
+> as authoritative for match rate.
+
 ## Real injection packages, surveyed
 
 Inspected three real 3rd-party packages (owner-supplied paths, all under a mounted Poser content
@@ -90,32 +98,82 @@ named `Runtime`, walking up from the file itself.
 
 ## Phases
 
-### Phase 1 — Vertex correspondence module
+### Phase 1 — Vertex correspondence module ✅ shipped
 
 **Goal:** given a reference `.obj` (Poser-native vertex order) and an already-imported, already-
 `remove_loose_verts()`-cleaned poser_tools mesh, produce an OBJ-vertex-index → Blender-vertex-index
 mapping.
 
-**Design:**
-- Lightweight OBJ vertex loader (just `v x y z` lines, in order — not a full mesh importer).
-- Coarse alignment: the transform found above (scale 2.62128, axis permute (0,2,1), signs
-  (+,−,+)) as the fast default, but *re-derive and verify* it per call (centroid + RMS-radius scale
-  + best-fitting axis/sign candidate via a quick sampled nearest-neighbor check) rather than
-  hardcoding it blind — cheap, and self-checking against a future change to the import pipeline's
-  axis/scale settings is safer than a silently-wrong magic constant.
-- Fine correspondence: real nearest-neighbor match on the full point set.
-- **Decision to make:** `mathutils.kdtree` (what the scratch spike used, simplest, but needs
-  `bpy` — breaks `core/cr2/`'s current pure-Python/pytest-testable pattern) vs. a small pure-numpy
-  spatial index (grid-bucket or similar) that stays consistent with the rest of `core/cr2/` and
-  runs under plain `pytest` like `test_cr2_parser.py`/`test_cr2_name_match.py` do. Recommend the
-  numpy version — `core/functionsShapeKeys.py` already hard-depends on numpy inside Blender, so
-  it's not a new dependency, and keeping this testable without launching Blender matches how the
-  rest of `core/cr2/` was deliberately built.
-- Report, don't silently drop: unmatched OBJ vertices and multi-target collisions (like Aiko3's 48)
-  need to surface, not vanish.
+**Built:** `core/cr2/obj_io.py` (`load_obj_vertex_positions`) + `core/cr2/mesh_correspondence.py`
+(`build_vertex_correspondence`, plus internal `_coarse_align`/`_grid_nearest_neighbor`) +
+`tests/test_mesh_correspondence.py` (synthetic round-trip, duplicate-target, and unmatched-point
+cases, no `Test_Poser_Assets/` dependency). Pure NumPy, no `bpy`/`mathutils.kdtree` — went with the
+numpy grid-bucket nearest-neighbor over `mathutils.kdtree` per the recommendation below, keeping
+`core/cr2/` entirely `pytest`-testable without launching Blender.
 
-**Acceptance test:** re-run the two-figure comparison (Aiko3, LaFemme) as a committed check —
-100% match, ~0 residual, consistent with the manual results above.
+**Design, as built:**
+- Coarse alignment *re-derives and verifies* the transform per call (mean/RMS-radius centroid +
+  scale, with a generous MAD-based gross-outlier filter, then a 48-way axis-permutation/sign-flip
+  search scored by a radius-capped sampled nearest-neighbor check) rather than hardcoding the
+  known scale (2.62128) blind — see "Real-data verification" below for why *median*-based
+  statistics (the first attempt) turned out to be the wrong choice for a real body mesh.
+- One scale-refinement pass: pass 1's matched pairs feed a least-squares refit of scale (real
+  correspondence data, not just aggregate cloud statistics), then a second, final nearest-neighbor
+  pass with the refined scale.
+- Unmatched/collided vertices are reported, not dropped: `matched_index` is `-1` for anything past
+  `match_epsilon`, and `duplicate_targets` names every target claimed by more than one source
+  vertex.
+
+**Real-data verification** (manual, headless Blender, Aiko3 + LaFemme — not a committed fixture,
+per the plan's own reasoning: this needs an actual FBX-imported mesh):
+
+| | Aiko3 (72712 verts) | LaFemme (24478 verts) |
+|---|--:|--:|
+| Recovered permutation/signs | (0,2,1), (+,−,+) | (0,2,1), (+,−,+) |
+| Refined scale | 2.6367 | 2.6372 |
+| vs. `cr2_importer`'s constant (2.62128) | +0.65% | +0.68% |
+| Matched within 1cm | 97.72% | 68.11% |
+| Mean residual (matched) | 0.0028 | 0.0046 |
+
+Two things worth recording so a future session doesn't re-derive them:
+1. **A naive scratch harness will get this badly wrong.** Reading `mesh.vertices.co` right after
+   `import_fbx.load()` isn't enough — the unit/axis conversion (`global_scale`, here `0.01`, i.e.
+   the standard FBX-declares-centimeters conversion, generic to any FBX and unrelated to Poser)
+   lands on the *parent* object (the armature the mesh is parented to), not baked into the mesh's
+   local vertex data, and `matrix_world` isn't valid until the depsgraph has evaluated that
+   parenting. Call `bpy.context.view_layer.update()` after import and read world-space positions
+   (`local_co @ matrix_world`), or you'll compare against raw, un-converted, ~100x-too-large
+   numbers and get nonsense (this is exactly what happened on the first real-data run). This is a
+   second, separate scale factor from the ~2.62 Poser-native-unit-to-meters constant below —
+   they're independent, stacked, unrelated conversions, not a discrepancy in either one.
+2. **Median-based robust statistics are the wrong choice for a real body mesh**, despite testing
+   fine synthetically. A real mesh's per-vertex radius about its own centroid is heavily
+   right-skewed (dense torso/face vertices sit close in, a long thin tail runs out to
+   fingertips/toes) — the median is exactly the statistic a skewed distribution makes unstable
+   (a handful of stray/unmatched vertices shifts *which* vertex sits at the 50th percentile, and
+   because the distribution is steep there, that shifts the value a lot). Mean/RMS over the whole
+   cloud is far more accurate here; what it can't tolerate is a genuine gross outlier, which is why
+   `_coarse_align` filters by a generous (20 MAD) threshold first, then uses mean/RMS.
+
+**Not fully closed:** exact match rate (97.7% / 68.1%, not literally 100%) is lower than the
+original pre-compaction scratch investigation's "100%, ~0 residual" finding for the same file pair.
+Tried and confirmed *not* the fix: refining scale further (a 10-iteration refit/re-match
+experiment was abandoned as too slow to validate — ~2 min per full 72k-point pass — after the
+single-pass refit already landed within 0.7% of the known constant without meaningfully improving
+match rate). Owner's call (2026-09-12): accept this as Phase 1's real, verified behavior rather
+than keep chasing it — the module recovers the correct transform automatically and resolves the
+large majority of vertices with near-zero residual; the remaining gap is most likely seam-duplicate
+vertices (Blender's FBX import can weld positions Poser's OBJ format keeps duplicated per UV seam)
+rather than an algorithm defect, but that's not independently confirmed. If a future phase needs a
+tighter guarantee, look there first before re-tuning the alignment math.
+
+**Performance note:** the pure-Python grid nearest-neighbor is fine for the final match (one pass,
+~2 min on 72k points) but the naive 48-candidate coarse-align scoring loop was *not* — it originally
+took **12+ minutes and counting** (killed before finishing) because each of the ~47 wrong candidates
+paid for an unbounded, exhaustive grid search before being ruled out. Fixed by capping the ring
+radius during scoring only (`_SCORING_MAX_RADIUS = 4` in `_coarse_align`) — a wrong candidate now
+fails fast, a right one is unaffected (it never needed more than a ring or two anyway) — bringing
+coarse-align down to under a minute.
 
 ### Phase 2 — Per-actor local-index → OBJ-global-index resolution
 
