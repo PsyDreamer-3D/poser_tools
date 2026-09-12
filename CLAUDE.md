@@ -17,6 +17,11 @@ Standard scaffold layout. Two things worth knowing:
 - `vendor/io_scene_fbx/` is a vendored copy of Blender's legacy FBX importer (Blender Foundation,
   GPL-2.0-or-later), kept because Poser figures need axis/bone handling the current importer dropped.
   Left as-is with its own license headers; excluded from convention passes.
+- `core/cr2/` (`cr2_parser.py`, `constants.py`, `poser_io.py`) is **not** `vendor/` — it's adapted
+  from `cr2_importer` (PsyDreamer-3D's own now-unmaintained CR2 importer) but actively maintained
+  here going forward, per Phase 5 of the handoff doc. Files keep their original MIT SPDX header
+  (same exception `vendor/io_scene_fbx` sets), but this code gets fixed and extended in place, not
+  frozen. No `bpy` dependency — pure Python, covered by `tests/test_cr2_parser.py`.
 
 ## Key design decisions
 
@@ -28,9 +33,10 @@ Standard scaffold layout. Two things worth knowing:
   there's no ground-truth grouping available from the FBX alone. Cross-referencing the source `.cr2`
   for canonical names is **under active re-evaluation** (`docs/handoff-shapekey-improvements.md`
   Phase 5, reopened) — a first spike ruled it out against an incomplete test CR2, but a proper
-  base-figure CR2 gets 90–99% naming coverage; the remaining gap traces to a fixable
-  `cr2_importer` parser bug (documented in the handoff doc), not a lack of data. The heuristic
-  below stays authoritative until/unless Phase 5 lands something to replace it.
+  base-figure CR2 gets 90–99% naming coverage. `core/cr2/cr2_parser.py` (adapted from the
+  now-unmaintained `cr2_importer`) had the one bug that explained nearly all of the remaining gap —
+  fixed there. The heuristic below stays authoritative until/unless Phase 5 lands something to
+  replace it.
 - **Legacy Daz3D mode (`is_daz`) is a distinct code path**, not a variant of the same regex — M3/M4
   figures use a `p`/`PBM` prefix convention instead of Blender's numeric-suffix convention, and both
   can theoretically co-occur, so `is_child_shapekey()` checks both independently.
@@ -79,7 +85,13 @@ naming-correspondence numbers and the `cr2_importer` parser bug write-up. Read t
 
 ## Testing
 
-No automated test harness (`tests/` absent) — manual smoke test only:
+`tests/` has a real `pytest` suite, so far scoped to `core/cr2/` (pure Python, no `bpy`, exactly
+the parsing-logic case that gets real tests rather than manual verification). One-time setup:
+`.venv/bin/pip install pytest`; run with `.venv/bin/python -m pytest`. Fixture-backed tests read
+real CR2 files from an external `Test_Poser_Assets/` directory (not committed — large binaries,
+machine-specific path) and skip cleanly if it isn't present.
+
+Everything else is manual smoke test only — no `bpy`-dependent code has automated coverage:
 
 1. Install via Blender Preferences → Extensions → Install from Disk, pointing at `poser_tools/` (or
    drag-and-drop a built zip). The add-on should enable with no registration errors.

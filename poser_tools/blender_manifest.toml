@@ -19,6 +19,7 @@ license = [
 copyright = [
   "2025 Jess Green",
   "2011-2023 Blender Foundation (vendored io_scene_fbx)",
+  "2026 PsyDreamer-3D (adapted CR2 parser from cr2_importer)",
 ]
 
 [build]
