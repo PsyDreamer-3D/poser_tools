@@ -142,3 +142,25 @@ def test_lafemme_cr2_recovers_known_space_names(asset_path):
     }
     for expected in ("Arms Up-Down", "Eyes Blink", "Toes Grasp", "Thumb Morph"):
         assert expected in names, f"{expected!r} missing — space-in-name regression"
+
+
+def test_use_binary_morph_flag_distinguishes_pmd_referenced_channels():
+    """A channel with `useBinaryMorph 1` and no inline deltas{} block has real
+    deltas -- just stored externally in a .pmd (docs/handoff-morph-injection.md
+    Phase 4, not built yet) -- unlike a plain dial channel with genuinely no
+    deltas at all. Both have `ch.deltas == []`; only this flag tells them apart."""
+    actor = _actor(_wrap_channels("""
+        targetGeom Shldr_Gap_ADJ_R
+            {
+            numbDeltas 25892
+            useBinaryMorph 1
+            }
+        targetGeom PlainDial
+            {
+            initValue 0
+            }
+    """))
+    by_name = {ch.internal_name: ch for ch in actor.channels}
+    assert by_name["Shldr_Gap_ADJ_R"].uses_binary_morph is True
+    assert by_name["Shldr_Gap_ADJ_R"].deltas == []
+    assert by_name["PlainDial"].uses_binary_morph is False
