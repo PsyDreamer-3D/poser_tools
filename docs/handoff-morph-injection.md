@@ -175,15 +175,23 @@ radius during scoring only (`_SCORING_MAX_RADIUS = 4` in `_coarse_align`) — a 
 fails fast, a right one is unaffected (it never needed more than a ring or two anyway) — bringing
 coarse-align down to under a minute.
 
-### Phase 2 — Per-actor local-index → OBJ-global-index resolution
+### Phase 2 — Per-actor local-index → OBJ-global-index resolution ✅ shipped
 
 **Goal:** a `d 47 dx dy dz` delta's `47` is local to one actor's geometry group within the OBJ.
 Need `47` → the OBJ's *global* vertex index, the same translation `cr2_importer`'s `obj_loader.py`
 does via `g <actor>` face groups (`sorted(set(vertex_indices_touched_by_that_actors_faces))`).
 
-**Design:** a minimal OBJ face/group reader — track `g <name>` directives and each face's vertex
-refs, only what's needed to answer "which global vertex indices does actor X's geometry touch, in
-Poser's local order" — not a full mesh/material/UV importer like `cr2_importer`'s `obj_loader.py`.
+**Built:** `core/cr2/actor_vertex_index.py` — `load_obj_actor_vertex_groups(path)` (a minimal OBJ
+face/group reader: tracks `g <name>` directives and each face's vertex refs, *not* a full
+mesh/material/UV importer like `cr2_importer`'s `obj_loader.py`) and `resolve_local_index(group, i)`.
+MIT header, not GPL — unlike Phase 1's `obj_io.py`/`mesh_correspondence.py`, this one really is a
+direct adaptation of `cr2_importer` (`obj_loader.py`'s group/face tracking, and specifically
+`shape_key_importer.py`'s `sorted(set(group.vertex_indices()))` convention, confirmed by reading
+that file rather than assumed) rather than original code solving a problem `cr2_importer` never
+had. 9 new tests in `tests/test_actor_vertex_index.py` (28 total in `tests/` now), including one
+real-data check: parsed `!Aiko 3.cr2` + `blAiko3.obj` together and confirmed all 55 geometry-bearing
+actors (`actor.geom_name or actor.name`) resolve to a real OBJ group — the only miss is `BODY`
+(Poser's whole-figure root actor, which has no geometry group of its own; expected, not a bug).
 
 Composed with Phase 1: `local_idx` (Phase 2) → OBJ global idx (Phase 2) → Blender vertex idx
 (Phase 1) is the full address of one delta.
