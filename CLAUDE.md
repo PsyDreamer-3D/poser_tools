@@ -99,28 +99,33 @@ metadata on `obj.data`. Phase 5 (CR2 cross-reference) is reopened — see the do
 naming-correspondence numbers and the `cr2_importer` parser bug write-up. Read the doc before touching
 `core/functionsShapeKeys.py` — it records why each piece is shaped the way it is.
 
-## Morph injection (in progress)
+## Morph injection
 
 `docs/handoff-morph-injection.md` — a separate, bigger capability than consolidation: importing a
 3rd-party Poser morph package (`.pz2` injection template) and adding its morphs as *new* shape keys
 to an already-imported mesh, not just grouping ones the FBX export already baked. Builds on
-`core/cr2/`. Phase 1 (vertex correspondence: `core/cr2/obj_io.py` + `core/cr2/mesh_correspondence.py`)
-is shipped — matches a Poser-native `.obj` against an FBX-imported mesh by position (not raw index),
-recovering the transform automatically and resolving the large majority of vertices with near-zero
-residual (97.7%/68.1% on the two real test figures — see the doc for why exact 100% wasn't chased
-further, and for a scratch-harness gotcha re: `matrix_world` timing worth knowing before writing
-another headless-Blender verification script against this figure). Phase 2 (per-actor local-index →
-OBJ-global-index resolution: `core/cr2/actor_vertex_index.py`) is also shipped — unlike Phase 1's
-files, this one is MIT-headed (a direct adaptation of `cr2_importer`'s group-tracking + its
-`sorted(set(...))` local-index convention, not original code). Phase 3 (applying an injection:
-`core/cr2/poser_paths.py`, `core/cr2/injection_package.py`, `core/cr2/apply_injection.py`) is also
-shipped — composes Phases 1+2 into `build_shape_key_positions()`, which returns the correctly
-combined position array a new shape key needs (not yet a real `bpy.types.ShapeKey` — that's a few
-lines of glue left for Phase 5's operator, keeping this `bpy`-free like the rest of `core/cr2/`).
-Verified against two real morphs (single-actor and 19-actor) — see the doc for the exact
-touched/collision/unmapped accounting. Phases 4-5 (PMD binary reader, user-facing operator) not
-started — read the
-doc before starting any of them.
+`core/cr2/`. Phases 1-3 and 5 are shipped; Phase 4 (PMD binary reader) is **paused indefinitely** —
+don't resume it without a specific reason to.
+
+- Phase 1 (vertex correspondence: `core/cr2/obj_io.py` + `core/cr2/mesh_correspondence.py`) matches
+  a Poser-native `.obj` against an FBX-imported mesh by position (not raw index), recovering the
+  transform automatically. Its documented 97.7%/68.1% match rate turned out to be measured against
+  the *unstripped* raw FBX mesh (scratch scripts bypassed `remove_loose_verts()`) — real usage
+  (through `remove_loose_verts()`) measured cleaner in a real Phase 5 end-to-end run; see the doc's
+  Phase 5 section for the caveat and why it isn't re-verified at full scale yet.
+- Phase 2 (per-actor local-index → OBJ-global-index resolution: `core/cr2/actor_vertex_index.py`)
+  is MIT-headed, unlike Phases 1/3's GPL originals — a direct adaptation of `cr2_importer`'s
+  group-tracking + `sorted(set(...))` local-index convention.
+- Phase 3 (applying an injection: `core/cr2/poser_paths.py`, `core/cr2/injection_package.py`,
+  `core/cr2/apply_injection.py`) composes Phases 1+2 into `build_shape_key_positions()` — a plain
+  numpy position array, not yet a real `bpy.types.ShapeKey` (that's Phase 5's job, keeping this
+  `bpy`-free like the rest of `core/cr2/`).
+- Phase 5 (`operators/applyMorphInjection.py` + `ui/applyMorphInjection.py`,
+  `poser.apply_morph_injection`) is the actual user-facing operator — a popup collects the
+  injection file + reference OBJ (remembered on the mesh as `poser_reference_obj`), applies every
+  morph in the package in one run (skips JCM-named and already-present ones), reports to a
+  `"Poser Morph Injection Report"` text block. Real end-to-end verified (real import + real
+  operator call, not just registration).
 
 ## Testing
 
@@ -145,6 +150,11 @@ Everything else is manual smoke test only — no `bpy`-dependent code has automa
    keys, no report, then the button does the work.
 4. Armature selected → **Rename Armature Bones** adds `.L`/`.R` suffixes. Mesh selected →
    **Rename Weight Groups** applies the matching rename to vertex groups.
+5. Mesh selected → **Apply Morph Injection**, pick a real injection `.pz2` and the figure's
+   reference `.obj` in the popup. Expect: new shape keys named after the package's morphs, a
+   **Poser Morph Injection Report** text block, `mesh["poser_reference_obj"]` set. This one is slow
+   (~1-5 min, dominated by the one-time vertex-correspondence build) — that's expected, not a hang.
+   Re-run with the same package → reports "already present", no duplicate keys.
 
 For a quick check without Blender: `python -m py_compile` the tree, or import `poser_tools` under a
 stubbed `bpy` and call `register()`/`unregister()` — that catches class-tuple typos and bad import

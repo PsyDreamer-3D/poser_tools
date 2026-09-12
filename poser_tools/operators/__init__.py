@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 
+from .applyMorphInjection import OT_ApplyMorphInjection_Operator
 from .fixPoserShapekeys import OT_FixPoserShapekeys_Operator
 from .importPoserFBX import OT_ImportPoserFBX
 from .renameArmatureBones import OT_RenameArmatureBones_Operator, OT_PrefixArmatureBones_Operator
@@ -8,6 +9,7 @@ from .renameWeightGroups import OT_RenameWeightGroups_Operator, OT_PrefixWeightG
 classes = (
     OT_ImportPoserFBX,
     OT_FixPoserShapekeys_Operator,
+    OT_ApplyMorphInjection_Operator,
     OT_RenameArmatureBones_Operator,
     OT_PrefixArmatureBones_Operator,
     OT_RenameWeightGroups_Operator,

@@ -253,8 +253,9 @@ module. So "build one new Blender shape key" (this phase's stated goal) means "c
 combined position array a shape key needs" — the object doesn't exist in the scene yet.
 
 **Not verified — the actual visual deformation.** I can confirm indices/counts/collision stats line
-up (above); I can't eyeball whether `BrowHeavy` actually looks like a heavier brow in Blender. That's
-the owner's job, once Phase 5 makes it possible to try.
+up (above), and (once Phase 5 existed) that the shape key's numeric displacement is sane and
+non-zero; I can't eyeball whether `BrowHeavy` actually looks like a heavier brow in Blender. That's
+the owner's job.
 
 **Explicitly not solved (documented, not a bug):** the real packages' `valueOpDeltaAdd → BODY:1 →
 <name>` ERC links target a channel that's never statically declared anywhere in the injection files
@@ -274,7 +275,7 @@ PMD reader today. This needs its own investigation (binary layout is undocumente
 anything in this codebase shows) before any design, same discipline as the CR2 parser bug and the
 original naming spike got. Do not start on this without a dedicated spike.
 
-### Phase 5 — User-facing operator
+### Phase 5 — User-facing operator ✅ shipped
 
 **Goal:** wire Phases 1–3 into an actual operator (a file picker for the injection `.pz2`, applied
 to the active mesh), following existing conventions — `self.report()` + a text-block report
@@ -286,19 +287,68 @@ and confirm those before wiring up an operator around them, matching how the ori
 consolidation phases were built as pure logic first and only wired into `OT_ImportPoserFBX` in a
 later, separate change.
 
+**Built:** `operators/applyMorphInjection.py` (`OT_ApplyMorphInjection_Operator`,
+`poser.apply_morph_injection`) + `ui/applyMorphInjection.py`, following the exact conventions
+above. A two-field popup (`invoke_props_dialog`) collects the injection file and the figure's
+reference OBJ (the latter remembered on the mesh as `obj["poser_reference_obj"]`, pre-filled on the
+next run). Applies **every** morph the package contains in one run (owner's call — build a
+per-morph picker only if this proves too slow in practice; see the timing finding below for why it
+turned out not to matter). Skips JCM-named morphs (`core.functionsShapeKeys.is_jcm_shapekey()`,
+same reasoning as consolidation) and any morph whose shape-key name already exists (the shape key's
+own presence *is* the "already applied" signal — no separate JSON bookkeeping needed, unlike
+consolidation's `morphs_consolidated` flag). Reports per-morph touched/unmapped/collision stats to
+a new `"Poser Morph Injection Report"` text block, plus any unresolved `readScript` paths and any
+skipped-for-being-empty morphs.
+
+**Real end-to-end verification** (not just registration — an actual `bpy.ops.poser.import_poser_fbx`
+import followed by a real `bpy.ops.poser.apply_morph_injection` call, headless, real Aiko3 + real
+BrowHeavy): new shape key `PBMDC_39` appeared with `touched=2295 unmapped=0 collisions_resolved=0
+seam_collisions_skipped=0`, visibly displaced from Basis (max diff 0.0047, 2295 vertices moved,
+matching the delta count exactly). Re-running the same call correctly reported "already present,
+skipped" and created no duplicate. `poser_reference_obj` bookkeeping round-tripped correctly.
+
+**Important discovery from this real run, worth correcting the record on:** Phase 1/3's own
+real-data verification (97.7%/68.1% match rate, and BrowHeavy's earlier-reported
+`collisions_resolved=500`) was measured against the FBX-imported mesh *before*
+`remove_loose_verts()` — because those scratch scripts called `import_fbx.load()` directly,
+bypassing the real add-on's own post-import cleanup. This end-to-end test instead went through the
+*actual* `OT_ImportPoserFBX` operator, which does call `remove_loose_verts()` — and on the properly
+cleaned-up mesh, the same BrowHeavy morph produced **zero** OBJ→Blender collisions, not 500. The
+duplicate-vertex problem Phase 1 characterized appears to be substantially (maybe entirely, for
+this case) an artifact of the *unstripped* raw FBX vertex set, not a property of what a real user's
+mesh actually looks like. Not re-verified at full-figure scale (would need PBMMuscular through the
+real operator, another ~5 minutes) — flagging this for whoever next has reason to revisit Phase 1's
+match-rate numbers, since the real, production figure may perform meaningfully better than
+documented there.
+
+**Timing finding, relevant to the "apply all vs. per-morph picker" decision:** the ~5 minutes this
+real run took is almost entirely the one-time `build_vertex_correspondence()` call (Phase 1) — it
+doesn't scale with how many morphs are in the package. A per-morph selection UI would save nothing
+on the slow part; the only lever that would (deferred, see "Explicitly not doing" below) is caching
+the correspondence across runs on the same mesh.
+
 ## Open decisions
 
 - ~~Phase 1: `mathutils.kdtree` vs. pure-numpy.~~ Resolved: pure numpy, stays pytest-testable.
 - ~~Where Phases 1–2's new modules live.~~ Resolved: all in `core/cr2/` (`mesh_correspondence.py`,
   `actor_vertex_index.py`, `poser_paths.py`, `injection_package.py`, `apply_injection.py`) — same
   cohesion reasoning, held up through Phase 3.
-- Whether/how Phase 3's new shape keys interact with the existing consolidation flow
-  (`core/functionsShapeKeys.py`) — e.g. does an injected morph get JCM-checked, merge-recorded,
-  etc., the same way FBX-native ones do? Still not addressed — Phase 3 only builds the position
-  array (`build_shape_key_positions()`); nothing yet actually calls `shape_key_add()` +
-  `foreach_set('co', ...)` on a real mesh object, which is where this question becomes concrete
-  (Phase 5, once there's an operator to wire it into).
-- Phase 4 (PMD) needs its own real spike before any design — explicitly not scoped here.
+- ~~Whether/how Phase 3's new shape keys interact with the existing consolidation flow.~~ Resolved
+  in Phase 5: JCM-named morphs are skipped (reuses `is_jcm_shapekey()`, same reasoning as
+  consolidation), and there's no merge/split step needed — an injected morph is already one combined
+  shape key per name, unlike raw FBX-baked ones. No driver/ERC wiring attempted.
+- Phase 4 (PMD) — paused indefinitely per owner (2026-09-12), not just "needs a spike." No plan to
+  resume without a specific reason to.
+- New, from Phase 5's real end-to-end run: Phase 1/3's documented 97.7%/68.1% match rate and
+  BrowHeavy's `collisions_resolved=500` were measured *without* `remove_loose_verts()` — the real
+  add-on operator's own post-import cleanup, which the Phase 1/3 scratch scripts bypassed. The same
+  BrowHeavy morph through the *real* import+apply pipeline got zero collisions. Not re-verified at
+  full-figure scale — worth revisiting if a future session has reason to touch Phase 1's match-rate
+  numbers again.
+- Correspondence caching across multiple `poser.apply_morph_injection` runs on the same mesh —
+  deferred; the ~5 minute real-run cost is dominated by one `build_vertex_correspondence()` call
+  regardless of package size, so this (not a per-morph picker) is the actual lever if speed becomes
+  a real complaint.
 
 ## Test data
 
