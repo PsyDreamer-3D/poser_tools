@@ -23,6 +23,8 @@ class FixPoserShapekeys_Panel(FixPoserShapekeys, bpy.types.Panel):
         scene = context.scene
         options = scene.poser_shapekeys_addon
 
+        layout.label(text="Runs automatically on import — use this to re-run", icon='INFO')
+
         row = layout.row(align=True)
         row.prop(options, "is_daz")
         text = """

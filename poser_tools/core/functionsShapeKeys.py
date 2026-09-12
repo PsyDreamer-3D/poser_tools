@@ -390,3 +390,17 @@ def consolidate_poser_shapekeys(obj, shapekeys, _is_daz=False):
     log.append(f'Merge record written to mesh["poser_shapekey_merges"] ({len(merges)} merge(s)).')
 
     return result
+
+
+def format_consolidation_summary(report):
+    """One-line summary of a consolidate_poser_shapekeys() result, for self.report / text block."""
+    summary = (
+        f"Consolidated {len(report['consolidated'])} morph(s), "
+        f"kept {len(report['working_kept'])} working, "
+        f"skipped {len(report['empty_skipped'])} empty"
+    )
+    if report['promoted']:
+        summary += f", promoted {len(report['promoted'])} orphan(s)"
+    if report['jcm_removed']:
+        summary += f", removed {len(report['jcm_removed'])} JCM"
+    return summary
