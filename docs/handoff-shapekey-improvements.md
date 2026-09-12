@@ -17,12 +17,14 @@ through the same channel, and diagnostics is the only phase not blocked on real 
 2. **JCM detection/exclusion** — **done** (`feature/jcm-exclusion`) — JCM keys are *deleted*
 3. **Overlap-safe delta accumulation** — **done** (`feature/overlap-detection`) — detection-only tripwire; real Poser splits are disjoint
 4. **Round-trip merge metadata** — **done** (`feature/merge-metadata`) — `obj.data['poser_shapekey_merges']` JSON
-5. Optional CR2 cross-reference for ground-truth canonical naming — **reopened, parser fixed** —
-   `CR2Parser` now lives in `core/cr2/`, a real parser bug is fixed, and naming coverage is
-   **100%** against a complete CR2 — see Phase 5. Whether/how to act on it is still open.
+5. Optional CR2 cross-reference for ground-truth canonical naming — **reopened, parser fixed,
+   name matcher shipped** — `CR2Parser` lives in `core/cr2/`, naming coverage is **100%** against
+   a complete CR2, and `name_match.py` resolves an FBX shape-key name to its full per-actor
+   channel group — see Phase 5. Whether/how to act on it (replace or augment the heuristic) is
+   still open.
 
 Phases 1–4 are done; see their sections for what shipped. Phase 5 has real infrastructure now
-(`core/cr2/`) but no decided design for using it yet.
+(`core/cr2/`: parsing + name matching) but no decided design for using it in the add-on yet.
 
 Each phase is independently shippable. Follow this repo's phased-work discipline: plan → confirm with the project owner → implement → manual test in Blender → move to the next phase. Don't bundle phases into one PR/commit unless asked. **Section headings below keep the original numbering** (Phase 1 = JCM, Phase 2 = diagnostics, …).
 
@@ -291,15 +293,48 @@ data-availability blocker for a complete base-figure CR2.
 is still figure-dependent (compare the `tgeom_internal`/`tgeom_display` split above across the four
 pairs) — any real matcher still needs both tiers, tried in some order, no fixed rule for which wins.
 
+### The name matcher — blocker #2, resolved
+
+`core/cr2/name_match.py`: `build_channel_index(figure)` + `match_channel_group(index, name)`.
+
+**Structural finding while building this:** a morph name almost never identifies a single
+`Channel`. Poser declares a body-wide morph (`Pregnant`, `PBMFullFigure`, …) **once per actor** —
+hip, chest, every finger, … — up to 50+ separate `Channel`s sharing one name in the real test
+CR2s, each holding that actor's slice of the full mesh delta. So the matcher's unit of work is
+name → **channel group**, not name → one channel. (This mirrors, on the CR2 side, exactly the
+per-actor split `core/functionsShapeKeys.py`'s heuristic already reconstructs from FBX `.001`/
+`.002` naming.)
+
+**Also checked:** no `display_name` is shared by two *distinct* `internal_name`s within a figure
+(0 collisions across all three CR2s) — confirmed even where a name's *own* display_name disagrees
+across actors of the same group (Aiko3's `HdStylized`: `display_name` is `"HdStylized"` on the
+`head` actor but `"pHdStylized"` on `neck`/eye actors — same `internal_name`, same group, still
+resolves correctly either way). So blocker #2's "which tier wins" needed no priority/scoring —
+`by_internal` first, `by_display → by_internal` as a safe fallback.
+
+**Verified against real data:** re-ran the matcher over every FBX shape-key name from the Phase 5
+re-spike (LaFemme, LaFemme 3rd-party, Aiko3 SP — all previously 100%-matched) — every name
+resolves to a non-empty channel group. One instructive exception: on `Aiko3.fbx` ↔ `!Aiko 3.cr2`,
+56 names (`Realistic`, `Stylized`, `FullFigure`, `Muscular`, …) resolve to `[]` — **by design**,
+not a bug. Those are `valueParm` master-dial channels (the un-prefixed name), not `targetGeom`
+morph channels — the actual geometry for that morph lives on differently-named (`pRealistic`/
+`PBMRealistic`) `targetGeom` channels, which the matcher does resolve, just under their own
+group. `name_match.py` only indexes `targetGeom` (the kind that carries deltas) — a `valueParm`
+hit means "this name isn't a morph's own geometry channel," a real and useful distinction, not a
+gap to close.
+
 ### Open decisions
 
 - ~~Vendor a trimmed, fixed parser, or shared library?~~ Resolved — vendored into `core/cr2/`,
   actively maintained there (`cr2_importer` won't be touched again for this).
-- Still open: the 2-tier `internal_name`/`display_name` matcher, and whether/how any of this
-  replaces or augments the current heuristic in `core/functionsShapeKeys.py`. No design committed
-  — full naming coverage removes the data blocker, but doesn't by itself answer whether cross-
-  referencing the CR2 is worth wiring into the add-on's actual import flow (needs a file picker,
-  handling for a missing/mismatched CR2, etc.).
+- ~~The 2-tier `internal_name`/`display_name` matcher~~ Resolved — `core/cr2/name_match.py`,
+  `tests/test_cr2_name_match.py`.
+- Still open: whether/how any of this replaces or augments the current heuristic in
+  `core/functionsShapeKeys.py`. Matching + full naming coverage remove the data and naming
+  blockers, but don't by themselves answer whether cross-referencing the CR2 is worth wiring into
+  the add-on's actual import flow (needs combining a channel group's per-actor deltas into one
+  mesh-wide delta — the way `cr2_importer`'s `ShapeKeyImporter._collect_morphs()` did it — plus a
+  file picker, handling for a missing/mismatched CR2, etc.). No design committed.
 
 Spike script: `scratchpad/spike_cr2_names.py` (not committed; session-local under `/tmp`), now
 importing `poser_tools.core.cr2.cr2_parser` instead of `cr2_importer`.
@@ -321,6 +356,13 @@ importing `poser_tools.core.cr2.cr2_parser` instead of `cr2_importer`.
 - ~~Phase 5: does the parser drop space-in-name channels?~~ Yes, confirmed and **fixed** in
   `core/cr2/cr2_parser.py`. Re-spike after the fix: 100% naming coverage on all four FBX/CR2 pairs
   (was 90–98.6%) — the entire residual gap was this one bug, not missing data.
+- ~~Phase 5: does "which tier wins" (internal_name vs display_name) need priority rules?~~ No —
+  0 display_name collisions with distinct internal_names across all three CR2s, so a simple
+  internal-then-display fallback (`core/cr2/name_match.py`) is safe.
+- Phase 5: a morph *name* maps to a **group** of `Channel`s (one per actor), not a single
+  `Channel` — up to 50+ in the real test CR2s. Any future code building actual shape-key deltas
+  from CR2 data needs to combine a group's per-actor deltas via global vertex-index translation
+  (`cr2_importer`'s `ShapeKeyImporter._collect_morphs()` is the reference pattern) — not done here.
 
 Test data: `Test_Poser_Assets/` (see project memory / ask the owner for the current path — it has
 moved once already). Blender is runnable headless (`/snap/bin/blender`).
