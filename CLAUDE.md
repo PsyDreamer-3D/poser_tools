@@ -33,9 +33,14 @@ Standard scaffold layout. Two things worth knowing:
 - **Legacy Daz3D mode (`is_daz`) is a distinct code path**, not a variant of the same regex — M3/M4
   figures use a `p`/`PBM` prefix convention instead of Blender's numeric-suffix convention, and both
   can theoretically co-occur, so `is_child_shapekey()` checks both independently.
-- **Orphan promotion**: a numbered child with no un-numbered parent present gets promoted to a
+- **Orphan promotion**: a child with no matching top-level parent present gets promoted to a
   standalone parent (`is_promoted_orphan`) and renamed post-consolidation to strip the child-marker
-  prefix, so it reads as an ordinary full-body morph rather than disappearing or erroring.
+  prefix, so it reads as an ordinary full-body morph rather than disappearing or erroring. Applies
+  equally to a `.NNN`-numbered orphan, a bare `p`-prefixed one with no digits at all, and a
+  `PBM`-prefixed one (seen on injected Stephanie 3 morphs) — `get_parent_name()` is prefix-aware for
+  both `p` and `PBM`, and the promotion step only cares about the computed missing-parent name, not
+  which convention produced it. Verified for both prefixes and the no-top-level case with a scratch
+  test (not committed — `tests/` doesn't exist yet).
 - **A few importer steps stay on `bpy.ops`** — `object.mode_set` (edit-bone access has no data-API
   equivalent), `armature.separate` (no way to split an armature via `bpy.data`), and one
   `object.transform_apply` on the fresh multi-object import selection. Each is commented in place.
