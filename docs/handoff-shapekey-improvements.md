@@ -17,9 +17,12 @@ through the same channel, and diagnostics is the only phase not blocked on real 
 2. **JCM detection/exclusion** — **done** (`feature/jcm-exclusion`) — JCM keys are *deleted*
 3. **Overlap-safe delta accumulation** — **done** (`feature/overlap-detection`) — detection-only tripwire; real Poser splits are disjoint
 4. **Round-trip merge metadata** — **done** (`feature/merge-metadata`) — `obj.data['poser_shapekey_merges']` JSON
-5. Optional CR2 cross-reference for ground-truth canonical naming — **reopened** (first spike ruled it out on bad test data; a re-spike with a complete CR2 dataset got 90–99% naming coverage — see Phase 5)
+5. Optional CR2 cross-reference for ground-truth canonical naming — **reopened, parser fixed** —
+   `CR2Parser` now lives in `core/cr2/`, a real parser bug is fixed, and naming coverage is
+   **100%** against a complete CR2 — see Phase 5. Whether/how to act on it is still open.
 
-Phases 1–4 are done; see their sections for what shipped. Phase 5 is under active re-evaluation.
+Phases 1–4 are done; see their sections for what shipped. Phase 5 has real infrastructure now
+(`core/cr2/`) but no decided design for using it yet.
 
 Each phase is independently shippable. Follow this repo's phased-work discipline: plan → confirm with the project owner → implement → manual test in Blender → move to the next phase. Don't bundle phases into one PR/commit unless asked. **Section headings below keep the original numbering** (Phase 1 = JCM, Phase 2 = diagnostics, …).
 
@@ -191,12 +194,11 @@ child is gone; every rename source absent / target present.
 
 ---
 
-## Phase 5 — CR2 cross-reference — **REOPENED** (first ruling was measured on bad test data)
+## Phase 5 — CR2 cross-reference — **REOPENED, parser now in-house**
 
 **Goal:** use the source `.cr2`/`.crz` to get a ground-truth `internal_name → canonical_name` map
-instead of guessing from FBX shape-key name patterns. Also the intended first step in bringing
-usable parts of `cr2_importer` over to `poser_tools` more generally — this phase is as much "is
-that worth doing" as it is "fix this one heuristic."
+instead of guessing from FBX shape-key name patterns. Doubled as the first step in bringing usable
+parts of `cr2_importer` over to `poser_tools` — done: `CR2Parser` now lives in `core/cr2/`.
 
 ### First spike (ruled out) — and why that ruling didn't hold up
 
@@ -240,9 +242,14 @@ absent, real added content), **100% of the misses are `targetGeom` channels whos
 contains a space** — `targetGeom Blink Right`, `targetGeom Toes Grasp`, `targetGeom Thumb Morph`,
 etc. — present in the file, dropped by `cr2_importer`'s parser.
 
-### The `cr2_importer` parser bug (documented here; the fix belongs in that repo)
+### The parser bug — found, brought in-house, fixed
 
-`cr2_parser.py`'s `CR2Parser._parse_channel()`:
+`cr2_importer` is an unmaintained project (owner's call), so rather than fix this upstream, its
+`CR2Parser` (+ `constants.py`, `poser_io.py` — its only two deps, both pure stdlib) moved into
+`poser_tools/core/cr2/`, actively maintained here from now on. See `CLAUDE.md` for why this isn't
+`vendor/` (that name means frozen; this code gets extended, starting with this fix).
+
+`CR2Parser._parse_channel()` read a channel's `internal_name` as a single token:
 ```python
 def _parse_channel(self) -> Channel:
     kind = self.consume()
@@ -252,63 +259,50 @@ def _parse_channel(self) -> Channel:
         return ch                                                  # <-- bails here
     ...
 ```
-For `targetGeom Blink Right\n\t{...}`: `kind = "targetGeom"`, then `internal_name = "Blink"` (one
-`consume()`). `peek()` is now `"Right"`, not `"{"`, so the function returns immediately — the
-channel is recorded with a **truncated** `internal_name` and no body at all (no `display_name`, no
-`deltas`, no ERC). Back in `_parse_channels_block()`, the orphaned `"Right"` token doesn't match
-any known keyword and is silently swallowed by the `else: self.consume()` fallback; the next
-token is the channel's real `{`, which the loop's `elif tok == '{': self.skip_block()` then
-discards whole. The entire channel — deltas included — is lost, not just under-labeled.
+For `targetGeom Blink Right\n\t{...}`: `internal_name = "Blink"` (one `consume()`), then `peek()`
+is `"Right"` — not `"{"` — so the function returns immediately with a **truncated** name and no
+body at all (no `display_name`, no `deltas`, no ERC). The orphaned `"Right"` token and the
+channel's real `{` then get silently swallowed by the caller's fallback token handling. The whole
+channel — deltas included — is lost, not just under-labeled. Same grammar problem the tokenizer
+already solves for Poser's `name` keyword (unquoted, can contain spaces); channel `internal_name`
+just needed the same treatment.
 
-This is the same shape of problem the tokenizer already solves for Poser's `name` keyword (whose
-value is unquoted and can contain spaces — see `CR2Tokenizer.tokenize()`'s special case). Channel
-`internal_name` has the identical grammar (bare, unquoted, extends to end-of-line/next `{`) and
-needs the same treatment.
+**Fixed** in `core/cr2/cr2_parser.py`: consume tokens until `{` instead of one token, joined with
+spaces. Covered by `tests/test_cr2_parser.py` (inline-snippet unit tests for the space case, the
+bare-nameless-channel case, and the "doesn't swallow the next channel" case, plus fixture tests
+against all three real CR2s asserting the previously-dropped names are now present).
 
-**Proposed fix**, scoped to `_parse_channel()` only (no tokenizer change needed — this only
-affects channels, `name` values are already handled upstream):
-```python
-def _parse_channel(self) -> Channel:
-    kind = self.consume()
-    if self.peek() == '{':
-        internal_name = ''
-    else:
-        # internal_name is a bare, unquoted token run — Poser allows it to
-        # contain spaces (e.g. "targetGeom Blink Right"), the same grammar as
-        # the tokenizer's 'name' special-case. Consume until the block open.
-        parts = []
-        while self.peek() is not None and self.peek() != '{':
-            parts.append(self.consume())
-        internal_name = ' '.join(parts)
-    ch = Channel(internal_name=internal_name, kind=kind)
-    ...
-```
-No other channel in the grammar comment at the top of `cr2_parser.py` documents a bare (non-`{`,
-non-`name`) token appearing between `internalName` and `{`, so a "consume until `{`" loop should
-be safe — but re-run the full test corpus (`Test_Poser_Assets/` + whatever `cr2_importer` already
-has) after the change, not just the cases found here.
+**Re-spiked with the fix in place** — same four FBX/CR2 pairs, same method:
 
-**Not applied.** This is a fix in `cr2_importer` (separate private repo) — documented here for
-whoever picks it up there. `poser_tools` doesn't vendor `cr2_parser.py` yet; whether to vendor a
-fixed copy or depend on a shared library is still the open Phase 5 vendoring question below.
+| FBX | CR2 | shape keys | matched | rate |
+|---|---|--:|--:|--:|
+| `Aiko3.fbx` | `!Aiko 3.cr2` | 637 | 637 | **100%** |
+| `Aiko3 SP All Morphs.fbx` | `Aiko3 All SP Morphs.cr2` | 1193 | 1193 | **100%** |
+| `LaFemme.fbx` | `LaFemme Pro tmp.cr2` | 300 | 300 | **100%** |
+| `LaFemme with 3rd Party Morphs.fbx` | `LaFemme Pro tmp.cr2` | 671 | 671 | **100%** |
 
-### Verification plan once the parser fix lands
+Zero `NO_MATCH` across all four — including `GMThumbMorph`, which the first re-spike had pegged as
+genuinely-new content not in the CR2. It wasn't: it was another casualty of the same bug (a
+space-containing sibling channel corrupting the parse), recovered once the fix landed. **The
+entire residual gap from the first re-spike was this one bug** — there is no remaining
+data-availability blocker for a complete base-figure CR2.
 
-Re-run `scratchpad/spike_cr2_names.py` (or its successor) against the same four FBX/CR2 pairs;
-expect the space-containing names to move from `NO_MATCH` into `tgeom_internal`/`tgeom_display`,
-and the `Aiko3 SP` / `LaFemme 3rd Party` runs to isolate genuinely new content (like `GMThumbMorph`)
-more cleanly once the false negatives are gone.
+**Blocker #2 (naming inconsistency) still stands** — `internal_name` vs `display_name` dominance
+is still figure-dependent (compare the `tgeom_internal`/`tgeom_display` split above across the four
+pairs) — any real matcher still needs both tiers, tried in some order, no fixed rule for which wins.
 
-### Open decisions (unchanged from the first spike)
+### Open decisions
 
-- Vendor a trimmed, fixed `cr2_parser.py`/`poser_io.py` into `poser_tools/vendor/` (precedent:
-  `vendor/io_scene_fbx`), or depend on a shared library between `poser_tools` and `cr2_importer`?
-- Even with a fixed parser and full coverage, still need the 2-tier `internal_name`/`display_name`
-  matcher (blocker #2) before this could replace or augment the current heuristic in
-  `core/functionsShapeKeys.py`.
-- No design committed yet — this phase is reopened for evaluation, not queued for implementation.
+- ~~Vendor a trimmed, fixed parser, or shared library?~~ Resolved — vendored into `core/cr2/`,
+  actively maintained there (`cr2_importer` won't be touched again for this).
+- Still open: the 2-tier `internal_name`/`display_name` matcher, and whether/how any of this
+  replaces or augments the current heuristic in `core/functionsShapeKeys.py`. No design committed
+  — full naming coverage removes the data blocker, but doesn't by itself answer whether cross-
+  referencing the CR2 is worth wiring into the add-on's actual import flow (needs a file picker,
+  handling for a missing/mismatched CR2, etc.).
 
-Spike scripts: `scratchpad/spike_cr2_names.py` (not committed; session-local under `/tmp`).
+Spike script: `scratchpad/spike_cr2_names.py` (not committed; session-local under `/tmp`), now
+importing `poser_tools.core.cr2.cr2_parser` instead of `cr2_importer`.
 
 ---
 
@@ -322,7 +316,11 @@ Spike scripts: `scratchpad/spike_cr2_names.py` (not committed; session-local und
 - Phase 5: "the CR2 rarely has the morphs" — **reversed.** That was true of the specific `Legacy-Aiko3.cr2`
   test file (18 channels, a minimal/stripped CR2), not of real base-figure CR2s (90–99% coverage
   against `!Aiko 3.cr2`, `Aiko3 All SP Morphs.cr2`, `LaFemme Pro tmp.cr2`). Phase 5 reopened.
-- Phase 5: vendor a trimmed CR2 parser, or shared library? — still open, now live again (see Phase 5).
+- ~~Phase 5: vendor a trimmed CR2 parser, or shared library?~~ Vendored into `core/cr2/` — `cr2_importer`
+  is unmaintained, so this is the parser's new home, actively maintained here.
+- ~~Phase 5: does the parser drop space-in-name channels?~~ Yes, confirmed and **fixed** in
+  `core/cr2/cr2_parser.py`. Re-spike after the fix: 100% naming coverage on all four FBX/CR2 pairs
+  (was 90–98.6%) — the entire residual gap was this one bug, not missing data.
 
 Test data: `Test_Poser_Assets/` (see project memory / ask the owner for the current path — it has
 moved once already). Blender is runnable headless (`/snap/bin/blender`).

@@ -8,6 +8,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Changed
+- Added `core/cr2/` — a CR2 (Poser Character Resource) parser adapted from the now-unmaintained `cr2_importer` project, with a bug fixed (channel names containing spaces, e.g. `Blink Right`, were silently dropped). Internal groundwork for cross-referencing morph names against the source `.cr2`; no user-facing operator yet. First `pytest` suite in the repo (`tests/`), covering this parser.
 - Shape-key consolidation now runs **automatically on import** (new **Consolidate Shape Keys** option in the Import Poser FBX dialog, on by default; **Legacy Daz3D Figure** checkbox alongside it). The standalone **Fix Poser Shapekeys** button is now for re-running or for meshes imported another way.
 - **Fix Poser Shapekeys** now deletes joint-corrective morphs (JCMs, `JCM…`). FBX export bakes the shape but drops the bone-driven relationship that fires it, so a JCM shape key on the imported mesh can't function — it was only cluttering the list (156 of 196 keys on LaFemme). The report lists every one removed.
 - **Fix Poser Shapekeys** now flags morphs whose split child deltas overlap on the same vertex (they get summed, which can over-shoot). Poser's exports haven't shown this in practice, but a malformed one is now reported instead of silently baked in.
