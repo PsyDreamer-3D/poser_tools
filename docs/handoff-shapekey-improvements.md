@@ -335,6 +335,11 @@ gap to close.
   the add-on's actual import flow (needs combining a channel group's per-actor deltas into one
   mesh-wide delta — the way `cr2_importer`'s `ShapeKeyImporter._collect_morphs()` did it — plus a
   file picker, handling for a missing/mismatched CR2, etc.). No design committed.
+- **The real motivating goal turned out to be bigger than this**, and now has its own document:
+  `docs/handoff-morph-injection.md` — importing a 3rd-party morph *package* and adding new shape
+  keys to an already-imported mesh, not just grouping existing ones. Vertex correspondence between
+  Poser-native geometry and the FBX-imported mesh (the previously-unsolved piece) has been
+  investigated there and found solvable.
 
 Spike script: `scratchpad/spike_cr2_names.py` (not committed; session-local under `/tmp`), now
 importing `poser_tools.core.cr2.cr2_parser` instead of `cr2_importer`.
