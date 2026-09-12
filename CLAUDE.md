@@ -84,6 +84,15 @@ metadata on `obj.data`. Phase 5 (CR2 cross-reference) is reopened — see the do
 naming-correspondence numbers and the `cr2_importer` parser bug write-up. Read the doc before touching
 `core/functionsShapeKeys.py` — it records why each piece is shaped the way it is.
 
+## Morph injection (in planning)
+
+`docs/handoff-morph-injection.md` — a separate, bigger capability than consolidation: importing a
+3rd-party Poser morph package (`.pz2` injection template) and adding its morphs as *new* shape keys
+to an already-imported mesh, not just grouping ones the FBX export already baked. Builds on
+`core/cr2/`. Vertex correspondence between Poser-native geometry and the FBX-imported mesh has
+been investigated and found solvable (not by raw index — by position, after a coarse align); real
+injection-package formats have been surveyed. No code written yet — read the doc before starting.
+
 ## Testing
 
 `tests/` has a real `pytest` suite, so far scoped to `core/cr2/` (pure Python, no `bpy`, exactly
