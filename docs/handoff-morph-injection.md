@@ -462,6 +462,40 @@ own words, on seeing it: "I'm assuming you set the value to 1 as a way to test t
 working?" — no, that was just Blender's own `shape_key_add()` default, never touched deliberately
 until now. Morphs now rest at 0, like a Poser/DAZ dial, for the user to dial in.
 
+### Phase 5.4 — human-readable shape-key names ✅ shipped (2026-09-13)
+
+Injected morphs were coming in named after the CR2 channel's `internal_name` — a cryptic
+sequential code like `PBMDC_39` — instead of anything a user would recognize. The channel's own
+`name` property (`core/cr2/cr2_parser.py`'s existing `Channel.display_name` field) already carries
+the real label; it was just never preferred over `internal_name` for the *created* shape key,
+because `core/cr2/name_match.py`'s index was originally built for the opposite direction (Phase 5's
+FBX-name matching problem: resolving an already-FBX-baked shape-key name, whichever of the two the
+exporter happened to pick, back to its CR2 channel group).
+
+Confirmed against real injection files in `Test_Poser_Assets`'s content library
+(`InjDeltas.DC_*.pz2`): `targetGeom PBMDC_39` / `name BrowHeavy`, `targetGeom PBMDC_44` /
+`name H3NsDragon`, etc. — every sampled injection-delta channel has a real label distinct from its
+internal code. (Base-figure FBM channels are a different story — `PBMFullFigure` / `name
+pFullFigure` is just the same p-prefix convention in both fields — so this only matters for the
+injection path, not FBX-import consolidation, which is untouched.)
+
+`core/cr2/name_match.py` gained `display_name_for(index, internal_name)`: returns the first
+non-empty `display_name` found across the channel's per-actor group, falling back to
+`internal_name` if none set. `operators/applyMorphInjection.py`'s `_apply_morphs()` still looks up
+each channel group by `internal_name` (the CR2's real key) but names the created shape key, and
+runs the JCM/already-applied checks, against the resolved display name. The already-applied check
+also still checks `internal_name` — a mesh injected before this change carries the morph under its
+old raw name, and re-running shouldn't create a second copy under the new one.
+
+One real quirk this surfaced: `InjDeltas.DC_49_Mandible.pz2` declares `targetGeom PBMDC_49` twice
+(once per actor) with *different* `name` values (`pMandible`, then `Mandible`) — confirms
+`name_match.py`'s existing "first one seen wins if a figure is inconsistent" comment is a real,
+observed case, not just defensive wording.
+
+Verified end-to-end in headless Blender (real Aiko3 import + real BrowHeavy injection): shape key
+comes in as `BrowHeavy`, not `PBMDC_39`; re-running the same injection reports it already present
+(no duplicate) instead of creating a second copy.
+
 ## Open decisions
 
 - ~~Phase 1: `mathutils.kdtree` vs. pure-numpy.~~ Resolved: pure numpy, stays pytest-testable.

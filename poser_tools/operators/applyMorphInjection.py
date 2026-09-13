@@ -12,7 +12,7 @@ from ..core.cr2.actor_vertex_index import load_obj_actor_vertex_groups
 from ..core.cr2.apply_injection import build_shape_key_positions
 from ..core.cr2.injection_package import load_injection_package
 from ..core.cr2.mesh_correspondence import build_vertex_correspondence
-from ..core.cr2.name_match import build_channel_index, match_channel_group
+from ..core.cr2.name_match import build_channel_index, display_name_for, match_channel_group
 from ..core.cr2.obj_io import load_obj_vertex_positions
 from ..core.functionsShapeKeys import is_jcm_shapekey
 from ..core.utils import _write_report
@@ -207,17 +207,24 @@ class OT_ApplyMorphInjection_Operator(bpy.types.Operator):
         already_present = []
         empty_skipped = []
 
-        for i, name in enumerate(morph_names):
+        for i, internal_name in enumerate(morph_names):
             wm.progress_update(90 + int(10 * i / n_morphs))
+
+            # The channel's own `name` property (e.g. "BrowHeavy") is what the
+            # created shape key is named -- internal_name (e.g. "PBMDC_39") is
+            # only the CR2's lookup key, not fit for a user-facing name.
+            name = display_name_for(index, internal_name)
 
             if is_jcm_shapekey(name):
                 jcm_skipped.append(name)
                 continue
-            if name in obj.data.shape_keys.key_blocks:
+            # Check internal_name too: a mesh from before this naming change
+            # may already carry the morph under its old raw-internal-name key.
+            if name in obj.data.shape_keys.key_blocks or internal_name in obj.data.shape_keys.key_blocks:
                 already_present.append(name)
                 continue
 
-            group = match_channel_group(index, name)
+            group = match_channel_group(index, internal_name)
             result = build_shape_key_positions(
                 group, actor_obj_groups, basis_positions, correspondence
             )

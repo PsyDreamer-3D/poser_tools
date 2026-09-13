@@ -162,6 +162,12 @@ don't resume it without a specific reason to.
   left in place. Newly applied shape keys also now rest at `value = 0.0` — `shape_key_add()`
   defaults to `1.0` (fully dialed in), which stacked badly when a package applies dozens of morphs
   in one run.
+- Phase 5.4: injected shape keys are named after the CR2 channel's own `name` property (e.g.
+  `BrowHeavy`) instead of its cryptic `internal_name` (e.g. `PBMDC_39`) — `core/cr2/name_match.py`'s
+  `display_name_for()` resolves it, falling back to `internal_name` if a channel never set one.
+  `internal_name` is still the actual CR2 lookup key and is still checked (alongside the display
+  name) for "already applied" idempotency, so a mesh injected before this change doesn't get a
+  duplicate morph under the new name.
 
 ## Testing
 
