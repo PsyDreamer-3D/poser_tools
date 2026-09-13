@@ -60,6 +60,7 @@ class OT_ApplyMorphInjection_Operator(bpy.types.Operator):
         layout.prop(self, "reference_obj_filepath")
 
     def execute(self, context):
+        self._op_start_time = time.time()
         obj = context.active_object
 
         if not os.path.isfile(self.injection_filepath):
@@ -119,15 +120,15 @@ class OT_ApplyMorphInjection_Operator(bpy.types.Operator):
                 wm.progress_end()
 
         # Interactive: build_vertex_correspondence is the one genuinely slow step
-        # (~1-5 min on a 72k-vertex figure), and running it inline here froze
-        # Blender's entire UI for that whole time with no repaint and no way to
-        # tell it apart from a real hang -- confirmed via real UAT, not just a
-        # theory (docs/handoff-morph-injection.md). NumPy's C-level ops release
-        # the GIL, and CPython's own bytecode-level GIL switching keeps this
-        # thread from starving the main thread even in _grid_nearest_neighbor's
-        # plain Python loop -- so a background thread plus a modal timer keeps
-        # Blender responsive without threading a progress callback through
-        # mesh_correspondence.py itself.
+        # -- originally ~1-5 min on a 72k-vertex figure, now ~30s after the
+        # Phase 5.2 rewrite (docs/handoff-morph-injection.md), but running any
+        # multi-second call inline here still freezes Blender's UI with no
+        # repaint and no way to tell it apart from a real hang, as real UAT
+        # confirmed even before that rewrite. NumPy's C-level ops release the
+        # GIL, and CPython's own bytecode-level GIL switching keeps this
+        # thread from starving the main thread regardless -- so a background
+        # thread plus a modal timer keeps Blender responsive without
+        # threading a progress callback through mesh_correspondence.py itself.
         def _worker():
             try:
                 self._correspondence = build_vertex_correspondence(obj_verts, basis_positions)
@@ -141,6 +142,12 @@ class OT_ApplyMorphInjection_Operator(bpy.types.Operator):
         context.workspace.status_text_set(
             "Poser Morph Injection: building vertex correspondence... 0s (Esc to cancel)"
         )
+        # A status-bar text alone turned out to be easy to miss entirely
+        # (confirmed via UAT: "no signs that anything was happening") --
+        # the wait cursor is the one signal every desktop user already
+        # recognizes as "the app is busy," regardless of whether they're
+        # looking at the status bar.
+        context.window.cursor_set('WAIT')
         wm.modal_handler_add(self)
         return {'RUNNING_MODAL'}
 
@@ -184,6 +191,7 @@ class OT_ApplyMorphInjection_Operator(bpy.types.Operator):
     def _finish_modal(self, context):
         context.window_manager.event_timer_remove(self._timer)
         context.workspace.status_text_set(None)
+        context.window.cursor_set('DEFAULT')
 
     def _apply_morphs(self, context):
         obj = self._obj
@@ -237,9 +245,11 @@ class OT_ApplyMorphInjection_Operator(bpy.types.Operator):
                 f"seam_collisions_skipped={result['seam_collisions_skipped']}"
             )
 
+        total_elapsed = time.time() - self._op_start_time
         header = [f"Injection file: {self.injection_filepath}",
                   f"Reference OBJ: {self.reference_obj_filepath}",
-                  f"Applied {applied}/{n_morphs} morph(s)."]
+                  f"Applied {applied}/{n_morphs} morph(s).",
+                  f"Total time: {total_elapsed:.1f}s"]
         if pkg["unresolved_paths"]:
             header.append(
                 f"{len(pkg['unresolved_paths'])} readScript reference(s) could not be resolved: "

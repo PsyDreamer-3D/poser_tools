@@ -133,9 +133,18 @@ don't resume it without a specific reason to.
   updates the status bar with elapsed time (Esc abandons the wait); headless (`--background`, or a
   scripted `bpy.ops` call) stays fully synchronous, since nothing dispatches `TIMER` events there.
   `context.window is None` is *not* a valid headless check — a `Window` datablock exists even under
-  `--background --factory-startup` on this Blender build; use `bpy.app.background`. No changes to
-  `core/cr2/mesh_correspondence.py` itself. See `docs/handoff-morph-injection.md`'s Phase 5.1
-  section for the full reasoning.
+  `--background --factory-startup` on this Blender build; use `bpy.app.background`.
+- Phase 5.2: the correspondence build itself is now ~9x faster (real Aiko3+BrowHeavy:
+  295.4s → 31.8s, `touched=2295 unmapped=0` unchanged). `core/cr2/mesh_correspondence.py`'s two real
+  full-mesh passes were rewritten from a per-point Python loop to a vectorized, sorted-cell-grid
+  search (`_query_grid`/`_build_target_grid`), each pass sized to the actual distance tolerance it
+  needs rather than "search everywhere then threshold." `_coarse_align`'s 48-candidate scoring
+  search deliberately stayed on the *old* per-point loop — it was never the bottleneck (~13-20s of
+  the original 283s), and vectorizing it hit a real trap on real mesh data (a dense anatomical
+  region can make a vectorized batch's candidate count explode; a per-point loop pays for that
+  region individually and cheaply instead). See `docs/handoff-morph-injection.md`'s Phase 5.1/5.2
+  sections for the full reasoning, including the specific tolerance values tuned against real
+  Aiko3 density data, not just a synthetic benchmark.
 
 ## Testing
 
@@ -162,10 +171,11 @@ Everything else is manual smoke test only — no `bpy`-dependent code has automa
    **Rename Weight Groups** applies the matching rename to vertex groups.
 5. Mesh selected → **Apply Morph Injection**, pick a real injection `.pz2` and the figure's
    reference `.obj` in the popup. Expect: new shape keys named after the package's morphs, a
-   **Poser Morph Injection Report** text block, `mesh["poser_reference_obj"]` set. This one is slow
-   (~1-5 min, dominated by the one-time vertex-correspondence build), but Blender should stay
-   responsive the whole time — status bar shows elapsed seconds, window doesn't grey out, Esc
-   cancels cleanly. Re-run with the same package → reports "already present", no duplicate keys.
+   **Poser Morph Injection Report** text block (including a total-time line), `mesh["poser_reference_obj"]`
+   set. Expect roughly 30-60s on a 70k-vertex figure, dominated by the one-time
+   vertex-correspondence build — the cursor shows busy (wait icon) and the status bar shows elapsed
+   seconds the whole time, window never greys out, Esc cancels cleanly. Re-run with the same
+   package → reports "already present", no duplicate keys, same ~30-60s cost (no caching yet).
 
 For a quick check without Blender: `python -m py_compile` the tree, or import `poser_tools` under a
 stubbed `bpy` and call `register()`/`unregister()` — that catches class-tuple typos and bad import

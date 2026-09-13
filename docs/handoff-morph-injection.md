@@ -364,6 +364,79 @@ operator from *looking* hung; a real percentage isn't worth the added coupling. 
 caching across runs (see the open decision below) is a different, still-deferred optimization —
 it would speed up a second run, but the *first* run still has to look responsive while it works.
 
+### Phase 5.2 — make the correspondence build actually fast ✅ shipped (2026-09-13)
+
+**Problem:** Phase 5.1 stopped the operator from *looking* hung, but real UAT confirmed ~5 minutes
+is still too slow to ship, and separately noted the wait had "no signs anything was happening"
+even with the status-bar text. A dedicated Opus research pass profiled
+`core/cr2/mesh_correspondence.py` and found the real bottleneck: `_grid_nearest_neighbor`'s
+per-point Python loop pays ~750µs of interpreter overhead per query point for ~20µs of actual
+arithmetic, and a query point with no real match can cost 4.8s alone (the ring-expansion loop
+rebuilds its whole search cube from scratch at every radius, all the way to the grid's full
+footprint, before giving up on something `match_epsilon` was going to discard anyway).
+
+**What shipped, and what didn't (two real dead ends worth recording):**
+
+The agent's own verified prototype vectorized *everything*, including `_coarse_align`'s
+48-candidate scoring search (rebuilding it as a fixed-neighborhood or ring-escalating batched
+lookup). Reimplementing that here hit a real trap on both synthetic and **real Aiko3 data**: a
+uniform grid cell size that's fine on average can still land on a genuinely dense local region —
+measured directly on Aiko3, ~4,282 vertices sit inside a single 2.7cm cube near the hip/pelvis
+(vs. a median cell occupancy of ~5). A *vectorized batch* search sums candidate counts across every
+query point in the batch at once; a wrong candidate's sample points, still centered near the same
+origin as the real cloud regardless of the (wrong) axis permutation, can spuriously sweep up that
+one dense region once the search radius grows — costing minutes and multiple GB of temporary
+arrays for a batch that a *per-point* loop would have paid for individually and cheaply. Two
+attempts at fixing this (a fixed-ring lookup, then an adaptive per-point-group escalation) each
+reproduced the same blowup in a different shape before the real fix became clear: **don't vectorize
+`_coarse_align`'s scoring at all.** Real timing already showed it was never the bottleneck (~13-20s
+of the original ~283s) — it's left exactly as it was, per-point loop and all; only the two real
+full-mesh passes in `build_vertex_correspondence`, which *were* ~93% of the runtime, were rewritten.
+
+Those two passes vectorize cleanly because they no longer need to search "everywhere, then
+threshold" — each pass sizes its grid cell to the actual distance tolerance that pass needs (a
+sorted-cell-id grid + `np.searchsorted`, chunked, replacing the per-point loop), so a single fixed
+3×3×3-cell lookup is *provably* sufficient (a target within Euclidean distance ≤ `cell_size` cannot
+differ from the query's own cell by more than 1 along any axis) — no ring-expansion machinery
+needed there at all. Pass 1's tolerance (pre-refit, feeding the least-squares scale refit) needed
+its own real-data tuning for the same density reason: `0.02 × target_radius` (the agent's
+synthetic-benchmark suggestion) and an initially-chosen "safer" `0.05` both cost real minutes/GB on
+Aiko3's dense region — a *larger* tolerance directly means more candidates in that region's cells.
+Measured directly against real Aiko3 data: `0.005` and `0.01` both land **100%** of points within
+tolerance (i.e. neither shrinks the least-squares refit's trusted point set at all, vs. an
+effectively-unbounded old pass 1) at 2.45s and 11.76s respectively for the whole pass; `0.01`
+shipped as a safety margin over the tightest value that still worked, for figures whose
+coarse-alignment residual might be somewhat worse than Aiko3's. Pass 2's tolerance is tied directly
+to `match_epsilon` (with a small margin), which was never the concern.
+
+**Result, real Aiko3 + BrowHeavy, same headless verification as Phase 5.1:** `295.4s → 31.8s`
+(9.3x), `touched=2295 unmapped=0` — bit-identical to the pre-rewrite baseline — and the re-run is
+still correctly idempotent. Not the ~45x a synthetic benchmark alone suggested, but a real,
+verified number against production data, not a projection.
+
+**Known synthetic-only discrepancy (not seen in real data or the existing pytest suite):** a
+harsher-than-realistic synthetic stress test (a torso-like dense cluster with 3% of target points
+randomly deleted, simulating "many points with truly no correspondence") found 43 of 20,000 final
+matches differ from the old, unbounded-search implementation. Root cause: old pass 1's unbounded
+search always found *some* nearest neighbor for every point (however far/bad), so effectively every
+point counted as "trusted" for the scale refit; the new tolerance-bounded pass 1 correctly excludes
+points with no real match within tolerance from that trusted set, which very slightly shifts the
+refit's fitted scale in a scenario with enough genuinely-unmatched points feeding it. Arguably a
+*more* robust behavior (excluding garbage matches from a least-squares fit), not a regression — and
+it did not appear in the real Aiko3 verification (100% matched at pass 1, so nothing was excluded)
+or in any of the project's own pytest fixtures. Worth knowing if a future match-rate investigation
+finds a small discrepancy on unusually noisy data.
+
+**Also added per UAT feedback (Test 1/2):** the interactive wait now sets the window cursor to
+`'WAIT'` (reset to `'DEFAULT'` when done) alongside the existing status-bar text — a status-bar
+message alone was confirmed too easy to miss ("no signs that anything was happening"). The
+`"Poser Morph Injection Report"` text block now includes a `Total time: {elapsed:.1f}s` line.
+
+**Explicitly not done, still:** correspondence caching across runs (see the open decision below);
+importing a morph onto a separate geometry object instead of the active mesh, to apply later —
+raised during UAT, owner's own call to defer it (ties into the planned `mesh_tools` shape-key-export
+merge, not scoped here).
+
 ## Open decisions
 
 - ~~Phase 1: `mathutils.kdtree` vs. pure-numpy.~~ Resolved: pure numpy, stays pytest-testable.
@@ -383,9 +456,14 @@ it would speed up a second run, but the *first* run still has to look responsive
   full-figure scale — worth revisiting if a future session has reason to touch Phase 1's match-rate
   numbers again.
 - Correspondence caching across multiple `poser.apply_morph_injection` runs on the same mesh —
-  deferred; the ~5 minute real-run cost is dominated by one `build_vertex_correspondence()` call
-  regardless of package size, so this (not a per-morph picker) is the actual lever if speed becomes
-  a real complaint.
+  still deferred post-Phase 5.2; the real-run cost (now ~32s, down from ~5 minutes) is dominated by
+  one `build_vertex_correspondence()` call regardless of package size, so this remains the lever if
+  a *second* run's cost specifically becomes a real complaint — Phase 5.2 only fixed the first run.
+- Importing an injection package onto a *separate* geometry object (to apply as a shape key later,
+  rather than directly onto the currently-active mesh) — raised during Phase 5.2's UAT, owner's own
+  call to defer: ties into the planned `mesh_tools` merge, which will bring over the mirror-image
+  feature (exporting an existing shape key as its own geometry object). Not scoped until that
+  merge happens.
 
 ## Test data
 
