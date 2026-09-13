@@ -99,10 +99,8 @@ class OT_ApplyMorphInjection_Operator(bpy.types.Operator):
         self._basis_positions = basis_positions
         self._correspondence = None
         self._thread_error = None
-        # Written by build_vertex_correspondence's progress_callback -- from
-        # the background thread in the interactive path below, so this stays
-        # a plain attribute write (no bpy call), and modal()'s timer tick
-        # (main thread) is what turns it into a real wm.progress_update().
+        # Set via progress_callback from the background thread; modal() turns
+        # it into a real wm.progress_update() on the main thread.
         self._correspondence_progress = 0.0
 
         wm = context.window_manager
@@ -110,14 +108,9 @@ class OT_ApplyMorphInjection_Operator(bpy.types.Operator):
         wm.progress_update(5)
 
         if bpy.app.background:
-            # Headless (`blender --background`, or a scripted bpy.ops call like
-            # this repo's own e2e verification) -- no event loop ever dispatches
-            # TIMER events to a modal operator here, so going modal would just
-            # hang the script forever. `context.window` is *not* a reliable
-            # headless check on its own -- confirmed against this Blender build,
-            # a Window datablock exists even under `--background
-            # --factory-startup`. `bpy.app.background` is the documented flag
-            # for exactly this. Run the slow step inline like before instead.
+            # Headless: no event loop to dispatch TIMER events, so going modal
+            # would hang forever. `context.window` isn't a reliable headless
+            # check on its own (see docs/handoff-morph-injection.md Phase 5.1).
             try:
                 self._correspondence = build_vertex_correspondence(
                     obj_verts, basis_positions, progress_callback=self._set_correspondence_progress
@@ -126,16 +119,9 @@ class OT_ApplyMorphInjection_Operator(bpy.types.Operator):
             finally:
                 wm.progress_end()
 
-        # Interactive: build_vertex_correspondence is the one genuinely slow step
-        # -- originally ~1-5 min on a 72k-vertex figure, now ~30s after the
-        # Phase 5.2 rewrite (docs/handoff-morph-injection.md), but running any
-        # multi-second call inline here still freezes Blender's UI with no
-        # repaint and no way to tell it apart from a real hang, as real UAT
-        # confirmed even before that rewrite. NumPy's C-level ops release the
-        # GIL, and CPython's own bytecode-level GIL switching keeps this
-        # thread from starving the main thread regardless -- so a background
-        # thread plus a modal timer keeps Blender responsive without
-        # threading a progress callback through mesh_correspondence.py itself.
+        # Interactive: run the correspondence build on a background thread so
+        # a modal timer can keep Blender's UI responsive (see
+        # docs/handoff-morph-injection.md Phase 5.1 for why this is needed).
         def _worker():
             try:
                 self._correspondence = build_vertex_correspondence(
@@ -151,11 +137,8 @@ class OT_ApplyMorphInjection_Operator(bpy.types.Operator):
         context.workspace.status_text_set(
             "Poser Morph Injection: building vertex correspondence... 0% 0s (Esc to cancel)"
         )
-        # A status-bar text alone turned out to be easy to miss entirely
-        # (confirmed via UAT: "no signs that anything was happening") --
-        # the wait cursor is the one signal every desktop user already
-        # recognizes as "the app is busy," regardless of whether they're
-        # looking at the status bar.
+        # Status text alone was confirmed too easy to miss -- the wait cursor
+        # is a harder-to-miss "busy" signal.
         context.window.cursor_set('WAIT')
         wm.modal_handler_add(self)
         return {'RUNNING_MODAL'}
@@ -167,10 +150,9 @@ class OT_ApplyMorphInjection_Operator(bpy.types.Operator):
         if event.type == 'ESC':
             self._finish_modal(context)
             context.window_manager.progress_end()
-            # The thread itself isn't forcibly killed (Python threads can't be) --
-            # it keeps running to completion in the background and its result is
-            # simply never picked up. Safe: it only touches obj_verts/basis_positions
-            # NumPy arrays, never bpy.data.
+            # The thread isn't forcibly killed -- it finishes in the
+            # background and its result is just never picked up. Safe: it
+            # never touches bpy.data.
             self.report(
                 {'WARNING'},
                 "Apply Morph Injection cancelled -- no shape keys were added.",
@@ -181,10 +163,7 @@ class OT_ApplyMorphInjection_Operator(bpy.types.Operator):
             return {'PASS_THROUGH'}
 
         elapsed = time.time() - self._start_time
-        # 5-90% of the overall bar is the correspondence build; 90-100% is
-        # the (much faster) per-morph loop in _apply_morphs below. A real
-        # percentage -- not a static number -- is what the owner asked for
-        # after the status-bar text alone still read as "nothing happening."
+        # 5-90%: correspondence build; 90-100%: per-morph loop below.
         pct = 5 + int(85 * self._correspondence_progress)
         context.window_manager.progress_update(pct)
         context.workspace.status_text_set(
@@ -229,8 +208,6 @@ class OT_ApplyMorphInjection_Operator(bpy.types.Operator):
         empty_skipped = []
 
         for i, name in enumerate(morph_names):
-            # 5-90% is the correspondence build (see modal()); this loop is
-            # the remaining 90-100%.
             wm.progress_update(90 + int(10 * i / n_morphs))
 
             if is_jcm_shapekey(name):
@@ -256,11 +233,8 @@ class OT_ApplyMorphInjection_Operator(bpy.types.Operator):
 
             sk = obj.shape_key_add(name=name, from_mix=False)
             sk.data.foreach_set('co', result["positions"].ravel())
-            # shape_key_add() defaults a new key's value to 1.0 (fully dialed
-            # in) -- fine for one morph, but a package applying dozens at
-            # once would otherwise stack all of them at full strength
-            # simultaneously. Rest at 0, like a Poser/DAZ dial, and let the
-            # user dial each one in deliberately.
+            # shape_key_add() defaults value to 1.0 -- rest at 0 like a
+            # Poser/DAZ dial instead.
             sk.value = 0.0
             applied += 1
             report_lines.append(

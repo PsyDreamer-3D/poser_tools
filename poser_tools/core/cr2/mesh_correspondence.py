@@ -21,18 +21,11 @@ Pure NumPy, no bpy and no mathutils.kdtree -- every function here takes/
 returns plain arrays so it's testable head-on with pytest and synthetic point
 clouds, the same shape as cr2_parser.py/name_match.py in this package.
 
-`_coarse_align`'s 48-candidate scoring stays on the original per-point search
-(`_grid_nearest_neighbor`, below) -- real timing showed it was never the
-bottleneck (~13s of a 283s run) and its own vectorized rewrite turned out to
-have a real trap of its own (see docs/handoff-morph-injection.md Phase 5.2):
-a non-uniform point cloud (real mesh or synthetic) can make a *wrong*
-candidate's sample points spuriously "find" a dense region once the search
-radius grows, and summing that across a batch of query points costs far more
-than the same per-point loop paying for it individually. The two real
-full-mesh passes in `build_vertex_correspondence` -- which *were* ~93% of
-the 283s -- use the vectorized `_query_grid` instead, sized to a tight
-distance tolerance per pass rather than a density guess, which is what
-actually made them safe to vectorize.
+`_coarse_align`'s scoring stays on the per-point `_grid_nearest_neighbor`
+search; the two real full-mesh passes in `build_vertex_correspondence` use
+the vectorized `_query_grid` instead. See docs/handoff-morph-injection.md
+Phase 5.2 for why (a vectorized rewrite of the scoring search hit a real
+performance trap on non-uniform point clouds).
 """
 
 import itertools
@@ -40,49 +33,26 @@ from collections import defaultdict, namedtuple
 
 import numpy as np
 
-# Aim for roughly this many target points per grid cell -- few enough that a
-# cell's occupant list stays cheap to scan, many enough that we don't spend
-# most of the search expanding empty rings. Used by the (unchanged)
-# per-point _grid_nearest_neighbor search below.
+# Aim for roughly this many target points per grid cell in the per-point
+# _grid_nearest_neighbor search below.
 _TARGET_POINTS_PER_CELL = 4.0
 
-# Cell-id encoding for _query_grid's vectorized nearest-neighbor search:
-# each axis is offset into [0, _CELL_BASE) then packed into one int64 via
-# positional encoding in that base. _CELL_BASE**3 must stay comfortably
-# under int64's 2**63 ceiling -- (2**20)**3 == 2**60, leaving a healthy
-# margin.
+# _query_grid's cell-id encoding: each axis offset into [0, _CELL_BASE), then
+# packed into one int64. _CELL_BASE**3 == 2**60, well under int64's 2**63.
 _CELL_BASE = 1 << 20
 _CELL_OFFSET = _CELL_BASE // 2
-# Floors how fine the *target* grid can get relative to the cloud's own
-# extent. Without this, a very small cell_size (e.g. this module's own tests
-# use match_epsilon as low as 1e-6) could push the target grid's own span
-# past _CELL_BASE and into the encoding's "out of range" case.
+# Floors how fine the *target* grid can get relative to its own extent, so a
+# tiny cell_size (tests use match_epsilon as low as 1e-6) can't push the
+# grid's span past _CELL_BASE.
 _MAX_GRID_SPAN = 4096
 
 _QUERY_CHUNK_SIZE = 8192
 
-# Pass 1 (pre-scale-refit, in build_vertex_correspondence) needs a tolerance
-# generous enough that essentially every genuine correspondence still counts
-# as "trusted" for the least-squares scale refit below -- the old,
-# unbounded-search pass 1 found *some* nearest neighbor for virtually every
-# point (however good or bad), so in practice almost everything counted as
-# trusted. This is a real tension with performance, not just a tuning knob:
-# real Aiko3 data (measured directly, not guessed) has a genuinely dense
-# anatomical region (~4,282 vertices inside one 2.7cm cube near the
-# hip/pelvis) -- a *larger* tolerance directly means more candidates packed
-# into that region's cells, and an earlier, more "generous" factor (0.05)
-# made real full-mesh passes take minutes and gigabytes, not seconds.
-# Measured on real Aiko3 data: 0.005 and 0.01 both land 100% of points
-# within tolerance (i.e. neither shrinks the trusted set at all vs. an
-# effectively-unbounded search), at 2.45s and 11.76s respectively for the
-# whole pass; 0.01 is used as a safety margin over the tightest value that
-# still worked, for figures whose coarse-alignment residual might be
-# somewhat worse than Aiko3's.
+# Tolerance for pass 1 (pre-refit) and pass 2 (post-refit) in
+# build_vertex_correspondence. Tuned against real, non-uniformly dense Aiko3
+# data, not a synthetic benchmark -- see docs/handoff-morph-injection.md
+# Phase 5.2 for the measurements behind these specific values.
 _PASS1_TOLERANCE_FACTOR = 0.01
-# Pass 2 (post-refit) only cares about match_epsilon-close points anyway --
-# the match_epsilon cutoff below discards everything else regardless of what
-# this search finds. A small safety margin over match_epsilon itself avoids
-# any floating-point boundary edge case exactly at the cutoff.
 _PASS2_TOLERANCE_MARGIN = 1.5
 
 _TargetGrid = namedtuple(
@@ -95,14 +65,10 @@ def build_vertex_correspondence(source_points, target_points, match_epsilon=1e-3
     """Match each `source_points` row to its corresponding `target_points` row,
     without assuming index alignment.
 
-    `progress_callback`, if given, is called with a float in [0, 1] at each of
-    this function's few real phase boundaries (coarse alignment, pass 1,
-    pass 2/refit) -- real progress through actual measured-cost phases, not a
-    fake ticking counter. It's called from whatever thread calls this
-    function; it must not touch bpy itself (this module stays bpy-free) --
-    callers that need to update Blender UI from it should just record the
-    fraction and let their own main-thread code act on it (see
-    operators/applyMorphInjection.py).
+    `progress_callback`, if given, is called with a float in [0, 1] at each
+    real phase boundary (coarse alignment, pass 1, pass 2/refit). Called from
+    whatever thread calls this function -- must not touch bpy itself (see
+    operators/applyMorphInjection.py for how the caller handles that).
 
     Returns a dict:
         matched_index     -- int64 array, len(source_points); -1 where no
@@ -115,9 +81,8 @@ def build_vertex_correspondence(source_points, target_points, match_epsilon=1e-3
                               (len > 1 only)
     """
     transform, source_centroid, target_centroid, target_radius = _coarse_align(source_points, target_points)
-    # Real measured proportions on a 72k-vertex figure: coarse alignment is
-    # ~60% of the total, pass 1 nearly all the rest, pass 2/refit a sliver --
-    # these checkpoints reflect that, not an even split.
+    # Checkpoints reflect real measured proportions (coarse align ~60%, not
+    # an even split).
     if progress_callback:
         progress_callback(0.6)
     perm = transform["permutation"]
@@ -280,15 +245,9 @@ def _grid_nearest_neighbor(query_points, target_points, max_radius=None):
     sit right on top of their match -- is unaffected, since it never needs
     more than a ring or two anyway.
 
-    This per-point loop is intentionally *not* the vectorized approach
-    `_query_grid` below uses for the real full-mesh passes: `_coarse_align`
-    only calls this over a small 500-point sample across 48 candidates
-    (~13s of a real 283s run, never the bottleneck), and per-point handling
-    sidesteps a real trap a vectorized rewrite of this exact call ran into
-    (see docs/handoff-morph-injection.md Phase 5.2) -- a wrong candidate's
-    points can spuriously cluster in a dense region of a non-uniform cloud,
-    and summing that across a whole batch costs far more than paying for it
-    per point individually.
+    Intentionally *not* vectorized like `_query_grid` below -- see
+    docs/handoff-morph-injection.md Phase 5.2 for why a vectorized rewrite of
+    this specific call was a real performance trap on non-uniform data.
 
     Returns (index, distance) int64/float64 arrays, len(query_points).
     `index` is -1 and `distance` is inf for a query point with no match.
@@ -367,13 +326,10 @@ def _grid_nearest_neighbor(query_points, target_points, max_radius=None):
 def _encode_cells(cell_coords):
     """Pack integer (cx, cy, cz) cell coordinates into one int64 id each.
 
-    A coordinate that doesn't fit the safe offset window comes back as -1 --
-    a query point wildly far from the target cloud (a gross outlier with no
-    real correspondence at all, or simply well outside whatever tolerance
-    this call's cell_size represents). -1 can never collide with a real id
-    (always >= 0 by construction), so those points naturally resolve to "no
-    candidates found" through the normal search path in _query_grid, with no
-    special-casing needed there.
+    A coordinate outside the safe offset window comes back as -1 (never
+    collides with a real id, always >= 0) -- a query point far enough from
+    the target cloud that it naturally resolves to "no candidates found" in
+    _query_grid, with no special-casing needed there.
     """
     shifted = cell_coords + _CELL_OFFSET
     in_range = np.all((shifted >= 0) & (shifted < _CELL_BASE), axis=1)
@@ -406,9 +362,7 @@ def _build_target_grid(target_points, cell_size):
     return _TargetGrid(target_points, mins, cell_size, unique_ids, starts, counts, order)
 
 
-# The 27 (rings=1) neighbor-cell offsets -- cached since the same array is
-# reused across every chunk and every call at the only rings value the real
-# passes use.
+# The 27 (rings=1) neighbor-cell offsets, cached and reused across calls.
 _NEIGHBOR_OFFSETS_CACHE = {}
 
 
@@ -426,30 +380,14 @@ def _query_grid(grid, query_points, rings=1):
     vectorized across every query point at once (chunked to bound peak
     memory), not a per-point Python loop.
 
-    Correctness: a target point within Euclidean distance <= rings *
-    grid.cell_size of a query point differs from that query's own cell by
-    at most `rings` cells along each axis -- a displacement of exactly
-    rings*cell_size shifts floor((x-min)/cell_size) by exactly `rings`,
-    since floor(a+n) == floor(a)+n for any integer n, and a smaller
-    displacement can only shift it less. So the (2*rings+1)**3 neighborhood
-    is *guaranteed* to contain every such point; nothing farther away than
-    that tolerance can be missed by mistake. `build_vertex_correspondence`
-    picks cell_size per pass so that tolerance covers exactly what that
-    pass needs (pass 1: a generous multiple of the coarse scale estimate's
-    residual; pass 2: match_epsilon itself) -- a point genuinely farther
-    than that tolerance correctly comes back unmatched, since nothing
-    downstream ever reads a distance beyond the tolerance it was searched
-    with anyway.
-
-    Only ever called with rings=1 in this module -- both real passes size
-    their cell to the exact tolerance that matters, so a single 3x3x3
-    lookup is always sufficient by the argument above; no ring escalation
-    needed (or wanted -- see _grid_nearest_neighbor's docstring for why
-    _coarse_align's scoring specifically stays off this vectorized path).
+    Correctness: any point within Euclidean distance <= rings * cell_size
+    differs from the query's own cell by at most `rings` cells per axis, so
+    the neighborhood is guaranteed to contain it. Only ever called with
+    rings=1 here -- both real passes size cell_size to the exact tolerance
+    they need, so a single 3x3x3 lookup always suffices.
 
     Returns (index, distance) int64/float64 arrays, len(query_points).
-    `index` is -1 and `distance` is inf for a query point with no match
-    found within the searched neighborhood.
+    `index` is -1 and `distance` is inf for no match found.
     """
     n_query = len(query_points)
     matched_index = np.full(n_query, -1, dtype=np.int64)
