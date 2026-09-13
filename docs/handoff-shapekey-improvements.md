@@ -346,6 +346,51 @@ importing `poser_tools.core.cr2.cr2_parser` instead of `cr2_importer`.
 
 ---
 
+## Phase 6 — Auto-detect legacy Daz3D naming — **DONE**
+
+The "Legacy Daz3D Figure" checkbox required the user to already know which Poser figure an FBX
+came from — the FBX itself carries no figure identity, so this was pure user knowledge, not
+anything the add-on could check. Owner wanted it automatic.
+
+**Real signal found, no figure lookup needed.** `is_child_shapekey()`'s existing `is_daz` branch
+already knows the tell: M3/M4-era Daz morphs are named with a `p`/`PBM` prefix
+(`pStylized`, `PBMFullFigure`) instead of Blender's `.NNN` dedup suffix. That prefix is present in
+the *raw*, pre-consolidation shape-key list — sniffing it directly turns out to need nothing more
+than the FBX Blender already imported. Verified against real FBX exports in `Test_Poser_Assets/`:
+
+| | LaFemme (modern) | Aiko3 (legacy Daz M3/M4) |
+|---|--:|--:|
+| shape keys | 300 | 637 |
+| `p[A-Z]…` / `PBM…`-prefixed | 0 | 410 |
+
+No gray zone in the data tested — a tighter regex than the existing per-morph check
+(`^p[A-Z]`, not just `sh_name[0] == 'p'`) avoids a coincidental modern-figure morph name (e.g. an
+English word starting with lowercase "p") tripping detection; `_LEGACY_DAZ_MIN_MATCHES = 3` is a
+floor against one stray name, not a tuned cutoff — real figures land at 0 or in the hundreds.
+
+**Implemented:**
+- `core/functionsShapeKeys.py`: `detect_legacy_daz(shapekeys)` counts `p[A-Z]`/`PBM`-prefixed raw
+  names; `resolve_legacy_daz(mode, shapekeys, log)` turns an `'AUTO'`/`'ON'`/`'OFF'` mode into the
+  bool the rest of the module expects, logging which path was taken.
+  `consolidate_poser_shapekeys()`'s third parameter changed from a bare `_is_daz` bool to
+  `legacy_daz_mode`, resolved once at the top of the function.
+- Both call sites — the import dialog (`operators/importPoserFBX.py`) and the manual re-run panel
+  (`operators/fixPoserShapekeys.py` / `properties/poserToolsAddonSettings.py`) — swapped their
+  `BoolProperty` for an `EnumProperty` (`AUTO` / `ON` / `OFF`, default `AUTO`). Kept as a genuine
+  override rather than removing it outright: Poser content spans 20 years of community assets, and
+  a heuristic with no escape hatch is a worse failure mode than one extra rarely-touched dropdown.
+- The resolution decision is always logged (`"Legacy Daz3D naming: auto-detected yes/no"` or
+  `"forced on/off"`) to the existing report text block — same transparency pattern as the
+  overlap tripwire (Phase 3), not a silent guess.
+
+**Verified in headless Blender** (real FBX import → `consolidate_poser_shapekeys`, `AUTO` mode):
+LaFemme detected `no` — 21 merges / 105 children, identical to the pre-change manual-checkbox
+result. Aiko3 detected `yes` — 84 merges / 419 children, identical to the pre-change result.
+Forcing `OFF` on Aiko3 as a sanity check undercounts as expected (64 merges / 344 children,
+17 fewer empty-morph skips) — confirms detection is actually doing the work, not a no-op.
+
+---
+
 ## Decisions log
 
 - ~~Phase 2 (diagnostics): `core/` package now, or keep flat?~~ Done — shipped on `feature/shapekey-diagnostics`.

@@ -33,7 +33,7 @@ class OT_FixPoserShapekeys_Operator(bpy.types.Operator):
         shapekeys = obj.data.shape_keys.key_blocks
         options = context.scene.poser_shapekeys_addon
 
-        report = consolidate_poser_shapekeys(obj, shapekeys, options.is_daz)
+        report = consolidate_poser_shapekeys(obj, shapekeys, options.legacy_daz_mode)
         obj["morphs_consolidated"] = True
 
         summary = format_consolidation_summary(report)

@@ -56,6 +56,14 @@ Standard scaffold layout. Two things worth knowing:
 - **Legacy Daz3D mode (`is_daz`) is a distinct code path**, not a variant of the same regex — M3/M4
   figures use a `p`/`PBM` prefix convention instead of Blender's numeric-suffix convention, and both
   can theoretically co-occur, so `is_child_shapekey()` checks both independently.
+- **Legacy Daz3D detection is automatic, not a manual checkbox** (`docs/handoff-shapekey-improvements.md`
+  Phase 6) — an FBX carries no figure identity, but the raw shape-key names do: real M3/M4 exports
+  are reliably `p`/`PBM`-prefixed (410/637 on Aiko3) where modern figures have zero such names
+  (LaFemme, Kira). `core/functionsShapeKeys.py`'s `detect_legacy_daz()` sniffs this before
+  consolidation runs; `resolve_legacy_daz()` turns an `'AUTO'`/`'ON'`/`'OFF'` mode into the bool
+  `consolidate_poser_shapekeys()` uses, logging the decision either way. Both the import dialog and
+  the manual re-run panel expose this as an `EnumProperty` defaulting to `AUTO` — kept as a real
+  override, not removed outright, since 20 years of community Poser content can defy the heuristic.
 - **Orphan promotion**: a child with no matching top-level parent present gets promoted to a
   standalone parent (`is_promoted_orphan`) and renamed post-consolidation to strip the child-marker
   prefix, so it reads as an ordinary full-body morph rather than disappearing or erroring. Applies
@@ -168,11 +176,13 @@ Everything else is manual smoke test only — no `bpy`-dependent code has automa
 1. Install via Blender Preferences → Extensions → Install from Disk, pointing at `poser_tools/` (or
    drag-and-drop a built zip). The add-on should enable with no registration errors.
 2. Import a Poser-exported FBX via the **Poser FBX Importer** N-panel tab → **Import Poser FBX**.
-   For an M3/M4 figure tick **Legacy Daz3D Figure** in the import dialog. Check: mesh + armature
-   import, material-slot order restored, loose verts gone, bone rolls sane, neck centered,
+   **Legacy Daz3D Figure** defaults to **Auto-Detect** and doesn't need to be touched for an M3/M4
+   figure — only override it (**Force On**/**Force Off**) if detection guessed wrong. Check: mesh +
+   armature import, material-slot order restored, loose verts gone, bone rolls sane, neck centered,
    conforming figures split into their own armatures. Shape keys: parent/child morphs collapsed
    into single sliders, no `.001`-suffixed or `JCM…` keys left, a **Poser Shapekey Report** text
-   block written, `mesh["poser_shapekey_merges"]` set.
+   block written (including a `Legacy Daz3D naming: auto-detected yes/no` line),
+   `mesh["poser_shapekey_merges"]` set.
 3. Re-run check: **Fix Poser Shapekeys** on the same mesh → "already consolidated" info, no-op
    (`obj["morphs_consolidated"]`). Untick **Consolidate Shape Keys** in a fresh import → raw shape
    keys, no report, then the button does the work.
