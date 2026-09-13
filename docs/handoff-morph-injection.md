@@ -327,6 +327,43 @@ doesn't scale with how many morphs are in the package. A per-morph selection UI 
 on the slow part; the only lever that would (deferred, see "Explicitly not doing" below) is caching
 the correspondence across runs on the same mesh.
 
+### Phase 5.1 — stop the operator from looking hung ✅ shipped (2026-09-13)
+
+**Problem, found via real UAT (not a theory):** running the operator interactively made Blender's
+window go grey and unresponsive for the ~5 minutes `build_vertex_correspondence()` takes, with no
+progress feedback — indistinguishable from a real hang. Owner's own words: "anything longer than
+30 seconds to a minute is likely to make a user force-quit." Reproduced and confirmed the algorithm
+itself isn't at fault (283s, 100% of vertices matched, well inside the already-documented "~1-5
+min" range) — the bug is architectural: `execute()` called the slow function synchronously, so
+Blender's main thread couldn't process any events (repaint, progress bar, "still alive" heartbeat)
+for the whole call.
+
+**Fix:** `execute()` now branches on `bpy.app.background`. Interactively, the correspondence build
+runs on a daemon `threading.Thread` while a `wm.event_timer_add()`-driven `modal()` polls it,
+updating `context.workspace.status_text_set()` with elapsed seconds (and accepting Esc to abandon
+the wait — the thread itself keeps running silently to completion since Python threads can't be
+killed, but it never touches `bpy.data` so this is safe) so Blender's event loop keeps running the
+whole time instead of freezing. NumPy's C-level ops release the GIL, and CPython's own
+bytecode-level GIL switching keeps the thread from starving the main thread even in
+`_grid_nearest_neighbor`'s plain-Python loop — no changes needed to `core/cr2/mesh_correspondence.py`
+itself, which stays bpy-free and pytest-covered exactly as before.
+
+**Headless guard, and a real gotcha found while building it:** `context.window is None` is *not* a
+reliable way to detect `--background` mode — confirmed against this Blender build (5.2.1 LTS), a
+`Window` datablock exists even under `blender --background --factory-startup`. Going modal there
+would hang forever (nothing dispatches `TIMER` events without a real event loop). `bpy.app.background`
+is the correct, documented flag; `execute()` uses that instead, and the headless branch runs
+exactly the old synchronous path (needed for scripted `bpy.ops` verification like this repo's own
+e2e checks). Re-verified end-to-end: headless run of `poser.apply_morph_injection` against real
+Aiko3/BrowHeavy still produces `touched=2295 unmapped=0`, and a second call is still correctly
+idempotent (no duplicate shape key).
+
+**Not done:** no progress-callback/percentage instrumentation threaded through
+`mesh_correspondence.py` — elapsed-time status text plus a responsive UI is enough to stop the
+operator from *looking* hung; a real percentage isn't worth the added coupling. Correspondence
+caching across runs (see the open decision below) is a different, still-deferred optimization —
+it would speed up a second run, but the *first* run still has to look responsive while it works.
+
 ## Open decisions
 
 - ~~Phase 1: `mathutils.kdtree` vs. pure-numpy.~~ Resolved: pure numpy, stays pytest-testable.

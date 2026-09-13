@@ -126,6 +126,16 @@ don't resume it without a specific reason to.
   morph in the package in one run (skips JCM-named and already-present ones), reports to a
   `"Poser Morph Injection Report"` text block. Real end-to-end verified (real import + real
   operator call, not just registration).
+- Phase 5.1: the correspondence build no longer blocks Blender's UI while it runs. Real UAT showed
+  the original blocking call made Blender look hung (grey window, no progress feedback) well before
+  it finished. `execute()` now branches on `bpy.app.background` — interactively, the slow call runs
+  on a background `threading.Thread` while a `wm.event_timer_add()`-driven `modal()` polls it and
+  updates the status bar with elapsed time (Esc abandons the wait); headless (`--background`, or a
+  scripted `bpy.ops` call) stays fully synchronous, since nothing dispatches `TIMER` events there.
+  `context.window is None` is *not* a valid headless check — a `Window` datablock exists even under
+  `--background --factory-startup` on this Blender build; use `bpy.app.background`. No changes to
+  `core/cr2/mesh_correspondence.py` itself. See `docs/handoff-morph-injection.md`'s Phase 5.1
+  section for the full reasoning.
 
 ## Testing
 
@@ -153,8 +163,9 @@ Everything else is manual smoke test only — no `bpy`-dependent code has automa
 5. Mesh selected → **Apply Morph Injection**, pick a real injection `.pz2` and the figure's
    reference `.obj` in the popup. Expect: new shape keys named after the package's morphs, a
    **Poser Morph Injection Report** text block, `mesh["poser_reference_obj"]` set. This one is slow
-   (~1-5 min, dominated by the one-time vertex-correspondence build) — that's expected, not a hang.
-   Re-run with the same package → reports "already present", no duplicate keys.
+   (~1-5 min, dominated by the one-time vertex-correspondence build), but Blender should stay
+   responsive the whole time — status bar shows elapsed seconds, window doesn't grey out, Esc
+   cancels cleanly. Re-run with the same package → reports "already present", no duplicate keys.
 
 For a quick check without Blender: `python -m py_compile` the tree, or import `poser_tools` under a
 stubbed `bpy` and call `register()`/`unregister()` — that catches class-tuple typos and bad import
