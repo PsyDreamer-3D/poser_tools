@@ -1,9 +1,12 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 
 from .poserToolsAddonSettings import PoserShapeKeysAddon_Settings
+from .poserToolsPreferences import PoserRuntimePathItem, PoserToolsPreferences
 
 classes = (
     PoserShapeKeysAddon_Settings,
+    PoserRuntimePathItem,
+    PoserToolsPreferences,
 )
 
 

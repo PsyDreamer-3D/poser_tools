@@ -3,6 +3,7 @@
 import bpy
 
 from ..core.utils import _TAB
+from ..properties.poserToolsPreferences import get_runtime_roots
 
 
 class ApplyMorphInjection_Panel(bpy.types.Panel):
@@ -16,6 +17,9 @@ class ApplyMorphInjection_Panel(bpy.types.Panel):
         layout = self.layout
 
         layout.label(text="Import a 3rd-party morph package (.pz2) onto the active mesh", icon='INFO')
+
+        if not get_runtime_roots(context):
+            layout.label(text="Tip: add your Poser Runtime folders in Preferences to browse", icon='INFO')
 
         row = layout.row()
         row.scale_y = 1.5

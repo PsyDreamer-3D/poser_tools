@@ -31,12 +31,14 @@ Standard scaffold layout. Two things worth knowing:
   `tests/test_injection_package.py`, `tests/test_apply_injection.py`).
   Which license a new `core/cr2/` file gets is a judgment call, not automatic just because it's in
   this package — MIT when it's a real adaptation of specific `cr2_importer` logic (like
-  `actor_vertex_index.py`'s local-index convention, or `poser_paths.py`'s `PoserPathResolver`,
-  confirmed by reading `cr2_importer`'s own code), GPL when it's original code solving a problem
-  `cr2_importer` never had (like `mesh_correspondence.py`, needed only because this add-on injects
-  into an already-imported mesh rather than building one from scratch, or `injection_package.py`'s
-  `readScript`-following — `cr2_importer`'s own `pz2_parser.py` only *detects* that an orchestrator
-  file exists, it never actually follows one).
+  `actor_vertex_index.py`'s local-index convention, `poser_paths.py`'s `PoserPathResolver`, or
+  `runtime_index.py`'s Poser Library scan/cache architecture, confirmed by reading `cr2_importer`'s
+  own code), GPL when it's original code solving a problem `cr2_importer` never had (like
+  `mesh_correspondence.py`, needed only because this add-on injects into an already-imported mesh
+  rather than building one from scratch, `injection_package.py`'s `readScript`-following —
+  `cr2_importer`'s own `pz2_parser.py` only *detects* that an orchestrator file exists, it never
+  actually follows one — or `poser_library_prefs.py`, which reads Poser's own `LibraryPrefs.xml`,
+  something `cr2_importer` never does at all).
 
 ## Key design decisions
 
@@ -168,6 +170,21 @@ don't resume it without a specific reason to.
   `internal_name` is still the actual CR2 lookup key and is still checked (alongside the display
   name) for "already applied" idempotency, so a mesh injected before this change doesn't get a
   duplicate morph under the new name.
+- Phase 5.5: **Apply Morph Injection** no longer requires two raw file-browser picks. Add-on
+  preferences (Edit > Preferences > Add-ons > Poser Tools) hold one or more Poser Runtime roots
+  (`properties/poserToolsPreferences.py`), importable in one shot from Poser's own
+  `LibraryPrefs.xml` (`core/cr2/poser_library_prefs.py`, `poser.runtime_roots_import_from_poser`)
+  instead of retyping each one by hand. `core/cr2/runtime_index.py` (MIT, adapted from
+  cr2_importer's own Poser Library browser, simplified — no folder allowlist since real injection
+  content lives under vendor-prefixed folders like `!DAZ` that cr2_importer's own scanner skips; no
+  thumbnails or content-sniffing, since the picker is a text search, not a thumbnail grid) scans
+  those roots for figure CR2s and `.pz2`/`.p2z` injection candidates. The popup's two fields are now
+  backed by `prop_search()` dropdowns (the same searchable-dropdown widget behind Blender's own
+  Material/Vertex Group/Shape Key pickers) — picking a figure resolves its reference OBJ
+  automatically via the CR2's own `figureResFile` (`core/cr2/cr2_parser.py`'s `resolve_geom_file()`,
+  a real pre-existing function fixed in the same change — it imported a module that only exists in
+  `cr2_importer`, so it silently no-op'd until now). The raw manual-path fields are unchanged and
+  still win if filled in, so nothing breaks for a setup with no Runtime root configured.
 
 ## Testing
 
@@ -194,14 +211,20 @@ Everything else is manual smoke test only — no `bpy`-dependent code has automa
    keys, no report, then the button does the work.
 4. Armature selected → **Rename Armature Bones** adds `.L`/`.R` suffixes. Mesh selected →
    **Rename Weight Groups** applies the matching rename to vertex groups.
-5. Mesh selected → **Apply Morph Injection**, pick a real injection `.pz2` and the figure's
-   reference `.obj` in the popup. Expect: new shape keys named after the package's morphs, a
-   **Poser Morph Injection Report** text block (including a total-time line), `mesh["poser_reference_obj"]`
-   set. Expect roughly 30-60s on a 70k-vertex figure, dominated by the one-time
-   vertex-correspondence build — the cursor shows a counting-up percentage (matching **Import
-   Poser FBX**'s own progress cursor) and the status bar shows both the percentage and elapsed
-   seconds the whole time, window never greys out, Esc cancels cleanly. Re-run with the same
-   package → reports "already present", no duplicate keys, same ~30-60s cost (no caching yet).
+5. First, in Preferences > Add-ons > Poser Tools, add a Poser Runtime root (or click **Import
+   Runtime Roots From Poser** to pull them from `LibraryPrefs.xml` automatically). Mesh selected →
+   **Apply Morph Injection**: the popup's **Figure (CR2)** and **Injection Package** fields are
+   searchable dropdowns sourced from those roots — pick a figure and its reference OBJ resolves
+   automatically (no manual `.obj` browse), pick an injection package the same way. The raw manual
+   path fields below still work and win if filled in (no Runtime root configured, or content
+   outside it). Expect: new shape keys named after the package's morphs, a **Poser Morph Injection
+   Report** text block (including a total-time line), `mesh["poser_reference_obj"]` and
+   `mesh["poser_reference_cr2"]` set. Expect roughly 30-60s on a 70k-vertex figure, dominated by the
+   one-time vertex-correspondence build — the cursor shows a counting-up percentage (matching
+   **Import Poser FBX**'s own progress cursor) and the status bar shows both the percentage and
+   elapsed seconds the whole time, window never greys out, Esc cancels cleanly. Re-run on the same
+   mesh → the figure picker pre-fills the previous choice, reports "already present" for the same
+   package, no duplicate keys, same ~30-60s cost (no caching yet).
 
 For a quick check without Blender: `python -m py_compile` the tree, or import `poser_tools` under a
 stubbed `bpy` and call `register()`/`unregister()` — that catches class-tuple typos and bad import

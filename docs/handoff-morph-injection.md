@@ -496,6 +496,85 @@ Verified end-to-end in headless Blender (real Aiko3 import + real BrowHeavy inje
 comes in as `BrowHeavy`, not `PBMDC_39`; re-running the same injection reports it already present
 (no duplicate) instead of creating a second copy.
 
+### Phase 5.5 — browse the Poser Runtime library instead of two raw file paths ✅ shipped (2026-09-13)
+
+`Apply Morph Injection` required hand-navigating a native OS file dialog twice — once for the
+injection `.pz2`, once for the figure's reference `.obj` — every time, even though both live
+somewhere inside a Runtime folder structure the owner already has organized. Investigated
+`cr2_importer`'s own "Poser Library" browser (`core/runtime_index.py`, `properties/preferences.py`,
+`operators/pref_ops.py`, `core/pz2_parser.py`'s `pz2_sniff`) to see what was directly reusable — its
+scan/cache architecture and multi-root preferences pattern were a good fit; its full
+UIList/thumbnail/background-scan browser panel was not (it exists to browse figures, props, hair,
+poses, and materials all at once — more machinery than a two-field picker needs).
+
+**New `core/cr2/runtime_index.py`** (MIT, adapted): same JSON-cache/incremental-mtime-diffing scan
+as cr2_importer's version, but with two deliberate simplifications. First, no top-level
+library-folder allowlist — cr2_importer only walks 10 canonical category folders and explicitly
+skips vendor-prefixed folders like `!DAZ`, but that's exactly where real injection content lives
+(`Runtime/libraries/!DAZ/A3-H3MorExp1/Deltas/InjDeltas.*.pz2`); this walks the whole
+`Runtime/Libraries/` tree. Second, no thumbnail scanning — the picker this feeds is a text search
+dropdown, not a thumbnail grid, so there's no consumer for one. Extensions narrowed to
+`.cr2`/`.crz` (figures) + `.pz2`/`.p2z` (injection candidates); no content-sniffing to classify
+`.pz2` files further (owner's call — real injection files are conventionally named
+`InjDeltas.*`/`Inj*`, so search-as-you-type is enough, confirmed against real product libraries).
+Dropping content-sniffing and thumbnails also meant dropping cr2_importer's background-thread scan
+— a plain `os.walk()` (incrementally cached) is fast enough to run synchronously in `invoke()`.
+
+**New `core/cr2/poser_library_prefs.py`** (GPL, original — no cr2_importer equivalent): Poser
+itself already tracks every registered content folder in `LibraryPrefs.xml`, written/read by Poser
+on every launch. Confirmed against the owner's real, live file
+(`~/.wine-poser13/.../AppData/Roaming/Poser/13/LibraryPrefs.xml`, 20 registered folders) and an
+older archived one (schema unchanged since at least Poser 5, 2005). `find_library_prefs_files()`
+locates the *live* file via the standard per-platform/Wine preferences location (POSIX + Wine:
+`~/.wine*/drive_c/users/*/AppData/Roaming/Poser/*/LibraryPrefs.xml`; native Windows:
+`%APPDATA%\Poser\*\LibraryPrefs.xml`) — deliberately not a filesystem-wide search, since a stale
+copy can be sitting inside old archived content (observed in the wild) and must never be mistaken
+for current. `parse_content_folders()` reads every `<ContentFolder folder="...">`, strips the
+trailing `Runtime/libraries` segment, and — only on POSIX, only for a drive-lettered path —
+translates Wine's drive-letter convention: `Z:` → `/` (Wine's standard default mapping, verified
+against the real file), any other letter (typically `C:`) resolved against the *same* Wine
+prefix's own `drive_c`, derived from the XML file's own path rather than a guessed default prefix.
+Anything that doesn't resolve to a real directory is silently skipped (a moved drive, removed
+content, a legacy schema's bare relative path, an old file's drive letter with no Wine mapping).
+
+**Fixed real, pre-existing dead code along the way**: `core/cr2/cr2_parser.py`'s
+`_resolve_geom_file()` (now public `resolve_geom_file()`) already did exactly the resolution this
+feature needs — turn a parsed `Figure.geom_file` (the `figureResFile` colon-path) into a real OBJ
+path — but imported a `PoserPathResolver` from a `core/cr2/obj_loader.py` module that only exists in
+`cr2_importer`, not `poser_tools`. It silently no-op'd (caught the `ImportError`, returned) because
+nothing called it. Fixed to route through `poser_paths.resolve_poser_path()`, the module that
+actually exists.
+
+**`operators/applyMorphInjection.py`**: new `PoserLibraryItem` (category-qualified `name` —
+`"!DAZ/A3-H3MorExp1/Deltas/InjDeltas.Foo.pz2"`, not a bare filename, since DAZ products commonly
+reuse orchestrator/morph names like `"BrowHeavy.pz2"` across completely unrelated product folders,
+confirmed directly: the real library has *five* distinct `BrowHeavy.pz2` files across different
+vendor folders) backs two new `prop_search()` dropdowns — the same searchable-dropdown mechanism
+behind Blender's own Material/Vertex Group/Shape Key pickers — for the figure's CR2 and the
+injection package, populated from `runtime_index.get_all_items()` in `invoke()`. Picking a figure
+resolves its reference OBJ automatically via `CR2Parser.parse_file()` +
+`resolve_geom_file()` — no manual OBJ browsing at all when a Runtime root is configured. The
+existing raw `injection_filepath`/`reference_obj_filepath` fields stay as a manual override
+(unchanged behavior for no-Runtime-root setups or content outside it) and always win if filled in.
+The picked CR2 is remembered on the mesh (`poser_reference_cr2`, parallel to the existing
+`poser_reference_obj`) so a re-run pre-fills the same figure.
+
+**New add-on preferences** (`properties/poserToolsPreferences.py`, `operators/runtimePaths.py`):
+multiple registered Runtime roots (`PoserRuntimePathItem` list, add/remove/reorder — mirrors
+cr2_importer's own preferences pattern), plus a `poser.runtime_roots_import_from_poser` button that
+imports roots from `LibraryPrefs.xml` in one shot instead of retyping each one. New operators use
+`poser.runtime_root_*` idnames rather than cr2_importer's exact `poser.runtime_path_*` — both
+add-ons share the bare `poser.*` operator namespace and could plausibly be installed side by side.
+
+Verified end-to-end against real content (not synthetic fixtures): imported the owner's actual,
+live `LibraryPrefs.xml` (20 roots resolved, including the real `Base Figures` folder); scanned
+22,419 real CR2/PZ2 files across those roots; resolved a real Aiko3 CR2's `figureResFile` to its
+real, correct OBJ path with zero manual input; ran a full real injection through the resolved path,
+`touched=2436 unmapped=0`, matching the same pipeline's established correctness elsewhere in this
+doc. `.venv/bin/python -m pytest` — 76 passed (21 new: `poser_library_prefs`, `runtime_index`, two
+`resolve_geom_file` cases), including real-file tests against the owner's live install that skip
+cleanly on a machine without it.
+
 ## Open decisions
 
 - ~~Phase 1: `mathutils.kdtree` vs. pure-numpy.~~ Resolved: pure numpy, stays pytest-testable.
