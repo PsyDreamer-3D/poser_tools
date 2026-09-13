@@ -99,10 +99,15 @@ class OT_ApplyMorphInjection_Operator(bpy.types.Operator):
         self._basis_positions = basis_positions
         self._correspondence = None
         self._thread_error = None
+        # Written by build_vertex_correspondence's progress_callback -- from
+        # the background thread in the interactive path below, so this stays
+        # a plain attribute write (no bpy call), and modal()'s timer tick
+        # (main thread) is what turns it into a real wm.progress_update().
+        self._correspondence_progress = 0.0
 
         wm = context.window_manager
         wm.progress_begin(0, 100)
-        wm.progress_update(50)
+        wm.progress_update(5)
 
         if bpy.app.background:
             # Headless (`blender --background`, or a scripted bpy.ops call like
@@ -114,7 +119,9 @@ class OT_ApplyMorphInjection_Operator(bpy.types.Operator):
             # --factory-startup`. `bpy.app.background` is the documented flag
             # for exactly this. Run the slow step inline like before instead.
             try:
-                self._correspondence = build_vertex_correspondence(obj_verts, basis_positions)
+                self._correspondence = build_vertex_correspondence(
+                    obj_verts, basis_positions, progress_callback=self._set_correspondence_progress
+                )
                 return self._apply_morphs(context)
             finally:
                 wm.progress_end()
@@ -131,7 +138,9 @@ class OT_ApplyMorphInjection_Operator(bpy.types.Operator):
         # threading a progress callback through mesh_correspondence.py itself.
         def _worker():
             try:
-                self._correspondence = build_vertex_correspondence(obj_verts, basis_positions)
+                self._correspondence = build_vertex_correspondence(
+                    obj_verts, basis_positions, progress_callback=self._set_correspondence_progress
+                )
             except Exception as exc:
                 self._thread_error = exc
 
@@ -140,7 +149,7 @@ class OT_ApplyMorphInjection_Operator(bpy.types.Operator):
         self._thread.start()
         self._timer = wm.event_timer_add(0.15, window=context.window)
         context.workspace.status_text_set(
-            "Poser Morph Injection: building vertex correspondence... 0s (Esc to cancel)"
+            "Poser Morph Injection: building vertex correspondence... 0% 0s (Esc to cancel)"
         )
         # A status-bar text alone turned out to be easy to miss entirely
         # (confirmed via UAT: "no signs that anything was happening") --
@@ -150,6 +159,9 @@ class OT_ApplyMorphInjection_Operator(bpy.types.Operator):
         context.window.cursor_set('WAIT')
         wm.modal_handler_add(self)
         return {'RUNNING_MODAL'}
+
+    def _set_correspondence_progress(self, fraction):
+        self._correspondence_progress = fraction
 
     def modal(self, context, event):
         if event.type == 'ESC':
@@ -169,8 +181,14 @@ class OT_ApplyMorphInjection_Operator(bpy.types.Operator):
             return {'PASS_THROUGH'}
 
         elapsed = time.time() - self._start_time
+        # 5-90% of the overall bar is the correspondence build; 90-100% is
+        # the (much faster) per-morph loop in _apply_morphs below. A real
+        # percentage -- not a static number -- is what the owner asked for
+        # after the status-bar text alone still read as "nothing happening."
+        pct = 5 + int(85 * self._correspondence_progress)
+        context.window_manager.progress_update(pct)
         context.workspace.status_text_set(
-            f"Poser Morph Injection: building vertex correspondence... {elapsed:.0f}s (Esc to cancel)"
+            f"Poser Morph Injection: building vertex correspondence... {pct}% {elapsed:.0f}s (Esc to cancel)"
         )
 
         if self._thread.is_alive():
@@ -211,7 +229,9 @@ class OT_ApplyMorphInjection_Operator(bpy.types.Operator):
         empty_skipped = []
 
         for i, name in enumerate(morph_names):
-            wm.progress_update(50 + int(50 * i / n_morphs))
+            # 5-90% is the correspondence build (see modal()); this loop is
+            # the remaining 90-100%.
+            wm.progress_update(90 + int(10 * i / n_morphs))
 
             if is_jcm_shapekey(name):
                 jcm_skipped.append(name)

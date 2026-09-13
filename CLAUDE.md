@@ -145,6 +145,13 @@ don't resume it without a specific reason to.
   region individually and cheaply instead). See `docs/handoff-morph-injection.md`'s Phase 5.1/5.2
   sections for the full reasoning, including the specific tolerance values tuned against real
   Aiko3 density data, not just a synthetic benchmark.
+- Phase 5.3: `build_vertex_correspondence()` takes an optional `progress_callback(fraction)`,
+  called at its real phase boundaries (coarse alignment, pass 1, pass 2/refit) — genuine progress
+  through measured-cost phases, not a synthetic tick. The operator wires this to a plain attribute
+  written from the background thread and read by `modal()`'s timer tick on the main thread (no bpy
+  calls off the main thread), driving `wm.progress_update()` for a real percentage on the cursor —
+  matching **Import Poser FBX**'s own progress cursor — instead of the static 50% the Phase 5.1 fix
+  left in place.
 
 ## Testing
 
@@ -173,7 +180,8 @@ Everything else is manual smoke test only — no `bpy`-dependent code has automa
    reference `.obj` in the popup. Expect: new shape keys named after the package's morphs, a
    **Poser Morph Injection Report** text block (including a total-time line), `mesh["poser_reference_obj"]`
    set. Expect roughly 30-60s on a 70k-vertex figure, dominated by the one-time
-   vertex-correspondence build — the cursor shows busy (wait icon) and the status bar shows elapsed
+   vertex-correspondence build — the cursor shows a counting-up percentage (matching **Import
+   Poser FBX**'s own progress cursor) and the status bar shows both the percentage and elapsed
    seconds the whole time, window never greys out, Esc cancels cleanly. Re-run with the same
    package → reports "already present", no duplicate keys, same ~30-60s cost (no caching yet).
 

@@ -91,9 +91,18 @@ _TargetGrid = namedtuple(
 )
 
 
-def build_vertex_correspondence(source_points, target_points, match_epsilon=1e-3):
+def build_vertex_correspondence(source_points, target_points, match_epsilon=1e-3, progress_callback=None):
     """Match each `source_points` row to its corresponding `target_points` row,
     without assuming index alignment.
+
+    `progress_callback`, if given, is called with a float in [0, 1] at each of
+    this function's few real phase boundaries (coarse alignment, pass 1,
+    pass 2/refit) -- real progress through actual measured-cost phases, not a
+    fake ticking counter. It's called from whatever thread calls this
+    function; it must not touch bpy itself (this module stays bpy-free) --
+    callers that need to update Blender UI from it should just record the
+    fraction and let their own main-thread code act on it (see
+    operators/applyMorphInjection.py).
 
     Returns a dict:
         matched_index     -- int64 array, len(source_points); -1 where no
@@ -106,6 +115,11 @@ def build_vertex_correspondence(source_points, target_points, match_epsilon=1e-3
                               (len > 1 only)
     """
     transform, source_centroid, target_centroid, target_radius = _coarse_align(source_points, target_points)
+    # Real measured proportions on a 72k-vertex figure: coarse alignment is
+    # ~60% of the total, pass 1 nearly all the rest, pass 2/refit a sliver --
+    # these checkpoints reflect that, not an even split.
+    if progress_callback:
+        progress_callback(0.6)
     perm = transform["permutation"]
     signs = np.array(transform["signs"])
     scale = transform["scale"]
@@ -119,6 +133,8 @@ def build_vertex_correspondence(source_points, target_points, match_epsilon=1e-3
 
     aligned_source = permuted_signed_source * scale
     matched_index, distance = _query_grid(grid, aligned_source, rings=1)
+    if progress_callback:
+        progress_callback(0.95)
 
     # _coarse_align's scale is a global-statistics estimate (mean/RMS radius
     # ratio) -- accurate to roughly 1% on real meshes, which is good enough to
@@ -154,6 +170,9 @@ def build_vertex_correspondence(source_points, target_points, match_epsilon=1e-3
         if tgt_idx >= 0:
             groups[int(tgt_idx)].append(src_idx)
     duplicate_targets = {k: v for k, v in groups.items() if len(v) > 1}
+
+    if progress_callback:
+        progress_callback(1.0)
 
     return {
         "matched_index": matched_index,

@@ -437,6 +437,24 @@ importing a morph onto a separate geometry object instead of the active mesh, to
 raised during UAT, owner's own call to defer it (ties into the planned `mesh_tools` shape-key-export
 merge, not scoped here).
 
+### Phase 5.3 — a real percentage on the progress cursor ✅ shipped (2026-09-13)
+
+Phase 5.1's fix left the cursor's progress percentage stuck at a static 50% for the whole
+correspondence-build wait — the elapsed-time status text moved, but the percentage itself didn't,
+which didn't fully read as "something is happening." Owner asked for the same counting-up
+percentage cursor **Import Poser FBX** already shows during its own import steps.
+
+`build_vertex_correspondence()` gained an optional `progress_callback(fraction)` argument, called
+at its three real phase boundaries — after coarse alignment (~60% of the total on real Aiko3 data),
+after pass 1 (~95%), and at the very end (100%) — real progress through actual measured-cost
+phases, not a synthetic tick. The module stays `bpy`-free: the callback itself must not touch
+`bpy`, so the operator's callback just writes a plain `self._correspondence_progress` attribute
+from the background thread, and `modal()`'s timer tick (main thread) is what turns that into a real
+`wm.progress_update()` call and folds the percentage into the status-bar text alongside elapsed
+seconds. Verified directly against real Aiko3 data: callback fires `[0.6, 0.95, 1.0]` in order;
+re-verified end-to-end (real BrowHeavy injection, `touched=2295 unmapped=0`, idempotent re-run) —
+unaffected by the added instrumentation.
+
 ## Open decisions
 
 - ~~Phase 1: `mathutils.kdtree` vs. pure-numpy.~~ Resolved: pure numpy, stays pytest-testable.
