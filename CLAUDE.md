@@ -151,7 +151,9 @@ don't resume it without a specific reason to.
   written from the background thread and read by `modal()`'s timer tick on the main thread (no bpy
   calls off the main thread), driving `wm.progress_update()` for a real percentage on the cursor —
   matching **Import Poser FBX**'s own progress cursor — instead of the static 50% the Phase 5.1 fix
-  left in place.
+  left in place. Newly applied shape keys also now rest at `value = 0.0` — `shape_key_add()`
+  defaults to `1.0` (fully dialed in), which stacked badly when a package applies dozens of morphs
+  in one run.
 
 ## Testing
 

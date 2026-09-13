@@ -455,6 +455,13 @@ seconds. Verified directly against real Aiko3 data: callback fires `[0.6, 0.95, 
 re-verified end-to-end (real BrowHeavy injection, `touched=2295 unmapped=0`, idempotent re-run) —
 unaffected by the added instrumentation.
 
+**Also fixed alongside:** newly applied shape keys now rest at `value = 0.0`. `shape_key_add()`
+defaults a new key's value to `1.0` (fully dialed in) — harmless for one morph, but a package
+applying dozens at once (Test 2) was stacking all of them at full strength simultaneously. Owner's
+own words, on seeing it: "I'm assuming you set the value to 1 as a way to test that the morphs were
+working?" — no, that was just Blender's own `shape_key_add()` default, never touched deliberately
+until now. Morphs now rest at 0, like a Poser/DAZ dial, for the user to dial in.
+
 ## Open decisions
 
 - ~~Phase 1: `mathutils.kdtree` vs. pure-numpy.~~ Resolved: pure numpy, stays pytest-testable.

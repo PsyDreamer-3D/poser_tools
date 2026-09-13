@@ -256,6 +256,12 @@ class OT_ApplyMorphInjection_Operator(bpy.types.Operator):
 
             sk = obj.shape_key_add(name=name, from_mix=False)
             sk.data.foreach_set('co', result["positions"].ravel())
+            # shape_key_add() defaults a new key's value to 1.0 (fully dialed
+            # in) -- fine for one morph, but a package applying dozens at
+            # once would otherwise stack all of them at full strength
+            # simultaneously. Rest at 0, like a Poser/DAZ dial, and let the
+            # user dial each one in deliberately.
+            sk.value = 0.0
             applied += 1
             report_lines.append(
                 f"{name}: touched={result['touched_count']} "
