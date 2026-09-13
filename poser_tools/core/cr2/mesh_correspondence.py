@@ -20,22 +20,55 @@ points by position.
 Pure NumPy, no bpy and no mathutils.kdtree -- every function here takes/
 returns plain arrays so it's testable head-on with pytest and synthetic point
 clouds, the same shape as cr2_parser.py/name_match.py in this package.
+
+`_coarse_align`'s scoring stays on the per-point `_grid_nearest_neighbor`
+search; the two real full-mesh passes in `build_vertex_correspondence` use
+the vectorized `_query_grid` instead. See docs/handoff-morph-injection.md
+Phase 5.2 for why (a vectorized rewrite of the scoring search hit a real
+performance trap on non-uniform point clouds).
 """
 
 import itertools
-from collections import defaultdict
+from collections import defaultdict, namedtuple
 
 import numpy as np
 
-# Aim for roughly this many target points per grid cell -- few enough that a
-# cell's occupant list stays cheap to scan, many enough that we don't spend
-# most of the search expanding empty rings.
+# Aim for roughly this many target points per grid cell in the per-point
+# _grid_nearest_neighbor search below.
 _TARGET_POINTS_PER_CELL = 4.0
 
+# _query_grid's cell-id encoding: each axis offset into [0, _CELL_BASE), then
+# packed into one int64. _CELL_BASE**3 == 2**60, well under int64's 2**63.
+_CELL_BASE = 1 << 20
+_CELL_OFFSET = _CELL_BASE // 2
+# Floors how fine the *target* grid can get relative to its own extent, so a
+# tiny cell_size (tests use match_epsilon as low as 1e-6) can't push the
+# grid's span past _CELL_BASE.
+_MAX_GRID_SPAN = 4096
 
-def build_vertex_correspondence(source_points, target_points, match_epsilon=1e-3):
+_QUERY_CHUNK_SIZE = 8192
+
+# Tolerance for pass 1 (pre-refit) and pass 2 (post-refit) in
+# build_vertex_correspondence. Tuned against real, non-uniformly dense Aiko3
+# data, not a synthetic benchmark -- see docs/handoff-morph-injection.md
+# Phase 5.2 for the measurements behind these specific values.
+_PASS1_TOLERANCE_FACTOR = 0.01
+_PASS2_TOLERANCE_MARGIN = 1.5
+
+_TargetGrid = namedtuple(
+    "_TargetGrid",
+    ["target_points", "mins", "cell_size", "unique_ids", "starts", "counts", "sorted_target_idx"],
+)
+
+
+def build_vertex_correspondence(source_points, target_points, match_epsilon=1e-3, progress_callback=None):
     """Match each `source_points` row to its corresponding `target_points` row,
     without assuming index alignment.
+
+    `progress_callback`, if given, is called with a float in [0, 1] at each
+    real phase boundary (coarse alignment, pass 1, pass 2/refit). Called from
+    whatever thread calls this function -- must not touch bpy itself (see
+    operators/applyMorphInjection.py for how the caller handles that).
 
     Returns a dict:
         matched_index     -- int64 array, len(source_points); -1 where no
@@ -47,7 +80,11 @@ def build_vertex_correspondence(source_points, target_points, match_epsilon=1e-3
                               target matched by more than one source point
                               (len > 1 only)
     """
-    transform, source_centroid, target_centroid = _coarse_align(source_points, target_points)
+    transform, source_centroid, target_centroid, target_radius = _coarse_align(source_points, target_points)
+    # Checkpoints reflect real measured proportions (coarse align ~60%, not
+    # an even split).
+    if progress_callback:
+        progress_callback(0.6)
     perm = transform["permutation"]
     signs = np.array(transform["signs"])
     scale = transform["scale"]
@@ -56,8 +93,13 @@ def build_vertex_correspondence(source_points, target_points, match_epsilon=1e-3
     target_centered = target_points - target_centroid
     permuted_signed_source = source_centered[:, perm] * signs
 
+    pass1_cell_size = max(_PASS1_TOLERANCE_FACTOR * target_radius, match_epsilon)
+    grid = _build_target_grid(target_centered, pass1_cell_size)
+
     aligned_source = permuted_signed_source * scale
-    matched_index, distance = _grid_nearest_neighbor(aligned_source, target_centered)
+    matched_index, distance = _query_grid(grid, aligned_source, rings=1)
+    if progress_callback:
+        progress_callback(0.95)
 
     # _coarse_align's scale is a global-statistics estimate (mean/RMS radius
     # ratio) -- accurate to roughly 1% on real meshes, which is good enough to
@@ -78,7 +120,9 @@ def build_vertex_correspondence(source_points, target_points, match_epsilon=1e-3
         if denominator > 0:
             refined_scale = float(np.sum(src * tgt) / denominator)
             aligned_source = permuted_signed_source * refined_scale
-            matched_index, distance = _grid_nearest_neighbor(aligned_source, target_centered)
+            pass2_cell_size = max(_PASS2_TOLERANCE_MARGIN * match_epsilon, 1e-9)
+            grid = _build_target_grid(target_centered, pass2_cell_size)
+            matched_index, distance = _query_grid(grid, aligned_source, rings=1)
             scale = refined_scale
             transform = dict(transform, scale=scale)
 
@@ -91,6 +135,9 @@ def build_vertex_correspondence(source_points, target_points, match_epsilon=1e-3
         if tgt_idx >= 0:
             groups[int(tgt_idx)].append(src_idx)
     duplicate_targets = {k: v for k, v in groups.items() if len(v) > 1}
+
+    if progress_callback:
+        progress_callback(1.0)
 
     return {
         "matched_index": matched_index,
@@ -176,7 +223,7 @@ def _coarse_align(source, target, sample_size=500, seed=0):
                 best_score, best_perm, best_signs = score, perm, signs
 
     transform = {"permutation": best_perm, "signs": best_signs, "scale": float(scale)}
-    return transform, source_centroid, target_centroid
+    return transform, source_centroid, target_centroid, target_radius
 
 
 def _grid_nearest_neighbor(query_points, target_points, max_radius=None):
@@ -187,16 +234,20 @@ def _grid_nearest_neighbor(query_points, target_points, max_radius=None):
 
     `max_radius` caps how many rings the search is allowed to expand through
     before giving up on a query point; left as None it defaults to the
-    grid's own footprint (i.e. "search everywhere before giving up" -- what
-    the final, real match needs). `_coarse_align` passes a small explicit
-    cap instead: under a *wrong* permutation/sign candidate, points don't
-    correspond at all, so every one of its query points would otherwise
-    expand all the way out to that full-footprint radius before giving up --
-    paying for an exhaustive search 47 times over just to prove 47 of the 48
-    candidates are wrong. A small cap makes a wrong candidate fail fast
-    (most of its points find nothing within a few rings) while a correct
-    candidate -- whose points sit right on top of their match -- is
-    unaffected, since it never needs more than a ring or two anyway.
+    grid's own footprint (i.e. "search everywhere before giving up").
+    `_coarse_align` passes a small explicit cap instead: under a *wrong*
+    permutation/sign candidate, points don't correspond at all, so every one
+    of its query points would otherwise expand all the way out to that
+    full-footprint radius before giving up -- paying for an exhaustive
+    search 47 times over just to prove 47 of the 48 candidates are wrong. A
+    small cap makes a wrong candidate fail fast (most of its points find
+    nothing within a few rings) while a correct candidate -- whose points
+    sit right on top of their match -- is unaffected, since it never needs
+    more than a ring or two anyway.
+
+    Intentionally *not* vectorized like `_query_grid` below -- see
+    docs/handoff-morph-injection.md Phase 5.2 for why a vectorized rewrite of
+    this specific call was a real performance trap on non-uniform data.
 
     Returns (index, distance) int64/float64 arrays, len(query_points).
     `index` is -1 and `distance` is inf for a query point with no match.
@@ -268,5 +319,137 @@ def _grid_nearest_neighbor(query_points, target_points, max_radius=None):
         best_i = int(np.argmin(dists))
         matched_index[qi] = candidates[best_i]
         distance[qi] = dists[best_i]
+
+    return matched_index, distance
+
+
+def _encode_cells(cell_coords):
+    """Pack integer (cx, cy, cz) cell coordinates into one int64 id each.
+
+    A coordinate outside the safe offset window comes back as -1 (never
+    collides with a real id, always >= 0) -- a query point far enough from
+    the target cloud that it naturally resolves to "no candidates found" in
+    _query_grid, with no special-casing needed there.
+    """
+    shifted = cell_coords + _CELL_OFFSET
+    in_range = np.all((shifted >= 0) & (shifted < _CELL_BASE), axis=1)
+    safe_shifted = np.where(in_range[:, None], shifted, 0)
+    ids = (safe_shifted[:, 0] * _CELL_BASE + safe_shifted[:, 1]) * _CELL_BASE + safe_shifted[:, 2]
+    return np.where(in_range, ids, -1)
+
+
+def _build_target_grid(target_points, cell_size):
+    """Bucket target_points into a uniform grid, sorted by cell id so
+    _query_grid can look up a query point's neighbor cells with
+    np.searchsorted instead of a per-point Python dict lookup."""
+    n_target = len(target_points)
+    empty_i64 = np.empty(0, dtype=np.int64)
+    if n_target == 0:
+        return _TargetGrid(target_points, np.zeros(3), max(cell_size, 1e-9),
+                            empty_i64, empty_i64, empty_i64, empty_i64)
+
+    mins = target_points.min(axis=0)
+    extent = target_points.max(axis=0) - mins
+    cell_size = max(cell_size, float(np.max(extent)) / _MAX_GRID_SPAN, 1e-9)
+
+    cell_coords = np.floor((target_points - mins) / cell_size).astype(np.int64)
+    cell_ids = _encode_cells(cell_coords)
+
+    order = np.argsort(cell_ids, kind="stable")
+    sorted_ids = cell_ids[order]
+    unique_ids, starts, counts = np.unique(sorted_ids, return_index=True, return_counts=True)
+
+    return _TargetGrid(target_points, mins, cell_size, unique_ids, starts, counts, order)
+
+
+# The 27 (rings=1) neighbor-cell offsets, cached and reused across calls.
+_NEIGHBOR_OFFSETS_CACHE = {}
+
+
+def _neighbor_offsets(rings):
+    offsets = _NEIGHBOR_OFFSETS_CACHE.get(rings)
+    if offsets is None:
+        offsets = np.array(list(itertools.product(range(-rings, rings + 1), repeat=3)), dtype=np.int64)
+        _NEIGHBOR_OFFSETS_CACHE[rings] = offsets
+    return offsets
+
+
+def _query_grid(grid, query_points, rings=1):
+    """For each row in `query_points`, find its nearest row in `grid`'s
+    target points, searching a fixed (2*rings+1)**3 cell neighborhood --
+    vectorized across every query point at once (chunked to bound peak
+    memory), not a per-point Python loop.
+
+    Correctness: any point within Euclidean distance <= rings * cell_size
+    differs from the query's own cell by at most `rings` cells per axis, so
+    the neighborhood is guaranteed to contain it. Only ever called with
+    rings=1 here -- both real passes size cell_size to the exact tolerance
+    they need, so a single 3x3x3 lookup always suffices.
+
+    Returns (index, distance) int64/float64 arrays, len(query_points).
+    `index` is -1 and `distance` is inf for no match found.
+    """
+    n_query = len(query_points)
+    matched_index = np.full(n_query, -1, dtype=np.int64)
+    distance = np.full(n_query, np.inf, dtype=np.float64)
+    if n_query == 0 or len(grid.unique_ids) == 0:
+        return matched_index, distance
+
+    offsets = _neighbor_offsets(rings)
+    n_offsets = len(offsets)
+    n_unique = len(grid.unique_ids)
+
+    for chunk_start in range(0, n_query, _QUERY_CHUNK_SIZE):
+        chunk_end = min(chunk_start + _QUERY_CHUNK_SIZE, n_query)
+        chunk_points = query_points[chunk_start:chunk_end]
+        n_chunk = len(chunk_points)
+
+        query_cells = np.floor((chunk_points - grid.mins) / grid.cell_size).astype(np.int64)
+        neighbor_cells = (query_cells[:, None, :] + offsets[None, :, :]).reshape(-1, 3)
+        flat_ids = _encode_cells(neighbor_cells)
+
+        pos = np.searchsorted(grid.unique_ids, flat_ids)
+        pos_clipped = np.clip(pos, 0, n_unique - 1)
+        valid = (flat_ids >= 0) & (pos < n_unique) & (grid.unique_ids[pos_clipped] == flat_ids)
+
+        if not np.any(valid):
+            continue
+
+        query_idx_per_offset = np.repeat(np.arange(n_chunk), n_offsets)
+        valid_query_idx = query_idx_per_offset[valid]
+        valid_starts = grid.starts[pos_clipped[valid]]
+        valid_counts = grid.counts[pos_clipped[valid]]
+
+        total_candidates = int(valid_counts.sum())
+        if total_candidates == 0:
+            continue
+
+        # Ragged expansion: turn each (query, neighbor cell) hit -- which
+        # covers a *range* of `count` target points in sorted_target_idx --
+        # into one row per individual candidate target point.
+        cumsum = np.cumsum(valid_counts)
+        cell_of_candidate = np.repeat(np.arange(len(valid_counts)), valid_counts)
+        offset_within_cell = np.arange(total_candidates) - np.repeat(cumsum - valid_counts, valid_counts)
+        flat_sorted_pos = valid_starts[cell_of_candidate] + offset_within_cell
+
+        candidate_target_idx = grid.sorted_target_idx[flat_sorted_pos]
+        # valid_query_idx is non-decreasing (built from an arange-repeat,
+        # then boolean-masked, which preserves order), so indexing it by the
+        # also-non-decreasing cell_of_candidate keeps candidate_query_idx
+        # non-decreasing too -- no explicit sort needed to group by query.
+        candidate_query_idx = valid_query_idx[cell_of_candidate]
+
+        deltas = grid.target_points[candidate_target_idx] - chunk_points[candidate_query_idx]
+        dists = np.sqrt(np.sum(deltas * deltas, axis=1))
+
+        # Stable-sort by (query idx, distance) so each query's nearest
+        # candidate lands first within its own group, then take that first
+        # row per group with one np.unique call.
+        order = np.lexsort((dists, candidate_query_idx))
+        sorted_qidx = candidate_query_idx[order]
+        unique_qidx, first_pos = np.unique(sorted_qidx, return_index=True)
+
+        matched_index[chunk_start + unique_qidx] = candidate_target_idx[order][first_pos]
+        distance[chunk_start + unique_qidx] = dists[order][first_pos]
 
     return matched_index, distance

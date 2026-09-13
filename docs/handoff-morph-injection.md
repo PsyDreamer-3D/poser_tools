@@ -327,6 +327,141 @@ doesn't scale with how many morphs are in the package. A per-morph selection UI 
 on the slow part; the only lever that would (deferred, see "Explicitly not doing" below) is caching
 the correspondence across runs on the same mesh.
 
+### Phase 5.1 — stop the operator from looking hung ✅ shipped (2026-09-13)
+
+**Problem, found via real UAT (not a theory):** running the operator interactively made Blender's
+window go grey and unresponsive for the ~5 minutes `build_vertex_correspondence()` takes, with no
+progress feedback — indistinguishable from a real hang. Owner's own words: "anything longer than
+30 seconds to a minute is likely to make a user force-quit." Reproduced and confirmed the algorithm
+itself isn't at fault (283s, 100% of vertices matched, well inside the already-documented "~1-5
+min" range) — the bug is architectural: `execute()` called the slow function synchronously, so
+Blender's main thread couldn't process any events (repaint, progress bar, "still alive" heartbeat)
+for the whole call.
+
+**Fix:** `execute()` now branches on `bpy.app.background`. Interactively, the correspondence build
+runs on a daemon `threading.Thread` while a `wm.event_timer_add()`-driven `modal()` polls it,
+updating `context.workspace.status_text_set()` with elapsed seconds (and accepting Esc to abandon
+the wait — the thread itself keeps running silently to completion since Python threads can't be
+killed, but it never touches `bpy.data` so this is safe) so Blender's event loop keeps running the
+whole time instead of freezing. NumPy's C-level ops release the GIL, and CPython's own
+bytecode-level GIL switching keeps the thread from starving the main thread even in
+`_grid_nearest_neighbor`'s plain-Python loop — no changes needed to `core/cr2/mesh_correspondence.py`
+itself, which stays bpy-free and pytest-covered exactly as before.
+
+**Headless guard, and a real gotcha found while building it:** `context.window is None` is *not* a
+reliable way to detect `--background` mode — confirmed against this Blender build (5.2.1 LTS), a
+`Window` datablock exists even under `blender --background --factory-startup`. Going modal there
+would hang forever (nothing dispatches `TIMER` events without a real event loop). `bpy.app.background`
+is the correct, documented flag; `execute()` uses that instead, and the headless branch runs
+exactly the old synchronous path (needed for scripted `bpy.ops` verification like this repo's own
+e2e checks). Re-verified end-to-end: headless run of `poser.apply_morph_injection` against real
+Aiko3/BrowHeavy still produces `touched=2295 unmapped=0`, and a second call is still correctly
+idempotent (no duplicate shape key).
+
+**Not done:** no progress-callback/percentage instrumentation threaded through
+`mesh_correspondence.py` — elapsed-time status text plus a responsive UI is enough to stop the
+operator from *looking* hung; a real percentage isn't worth the added coupling. Correspondence
+caching across runs (see the open decision below) is a different, still-deferred optimization —
+it would speed up a second run, but the *first* run still has to look responsive while it works.
+
+### Phase 5.2 — make the correspondence build actually fast ✅ shipped (2026-09-13)
+
+**Problem:** Phase 5.1 stopped the operator from *looking* hung, but real UAT confirmed ~5 minutes
+is still too slow to ship, and separately noted the wait had "no signs anything was happening"
+even with the status-bar text. A dedicated Opus research pass profiled
+`core/cr2/mesh_correspondence.py` and found the real bottleneck: `_grid_nearest_neighbor`'s
+per-point Python loop pays ~750µs of interpreter overhead per query point for ~20µs of actual
+arithmetic, and a query point with no real match can cost 4.8s alone (the ring-expansion loop
+rebuilds its whole search cube from scratch at every radius, all the way to the grid's full
+footprint, before giving up on something `match_epsilon` was going to discard anyway).
+
+**What shipped, and what didn't (two real dead ends worth recording):**
+
+The agent's own verified prototype vectorized *everything*, including `_coarse_align`'s
+48-candidate scoring search (rebuilding it as a fixed-neighborhood or ring-escalating batched
+lookup). Reimplementing that here hit a real trap on both synthetic and **real Aiko3 data**: a
+uniform grid cell size that's fine on average can still land on a genuinely dense local region —
+measured directly on Aiko3, ~4,282 vertices sit inside a single 2.7cm cube near the hip/pelvis
+(vs. a median cell occupancy of ~5). A *vectorized batch* search sums candidate counts across every
+query point in the batch at once; a wrong candidate's sample points, still centered near the same
+origin as the real cloud regardless of the (wrong) axis permutation, can spuriously sweep up that
+one dense region once the search radius grows — costing minutes and multiple GB of temporary
+arrays for a batch that a *per-point* loop would have paid for individually and cheaply. Two
+attempts at fixing this (a fixed-ring lookup, then an adaptive per-point-group escalation) each
+reproduced the same blowup in a different shape before the real fix became clear: **don't vectorize
+`_coarse_align`'s scoring at all.** Real timing already showed it was never the bottleneck (~13-20s
+of the original ~283s) — it's left exactly as it was, per-point loop and all; only the two real
+full-mesh passes in `build_vertex_correspondence`, which *were* ~93% of the runtime, were rewritten.
+
+Those two passes vectorize cleanly because they no longer need to search "everywhere, then
+threshold" — each pass sizes its grid cell to the actual distance tolerance that pass needs (a
+sorted-cell-id grid + `np.searchsorted`, chunked, replacing the per-point loop), so a single fixed
+3×3×3-cell lookup is *provably* sufficient (a target within Euclidean distance ≤ `cell_size` cannot
+differ from the query's own cell by more than 1 along any axis) — no ring-expansion machinery
+needed there at all. Pass 1's tolerance (pre-refit, feeding the least-squares scale refit) needed
+its own real-data tuning for the same density reason: `0.02 × target_radius` (the agent's
+synthetic-benchmark suggestion) and an initially-chosen "safer" `0.05` both cost real minutes/GB on
+Aiko3's dense region — a *larger* tolerance directly means more candidates in that region's cells.
+Measured directly against real Aiko3 data: `0.005` and `0.01` both land **100%** of points within
+tolerance (i.e. neither shrinks the least-squares refit's trusted point set at all, vs. an
+effectively-unbounded old pass 1) at 2.45s and 11.76s respectively for the whole pass; `0.01`
+shipped as a safety margin over the tightest value that still worked, for figures whose
+coarse-alignment residual might be somewhat worse than Aiko3's. Pass 2's tolerance is tied directly
+to `match_epsilon` (with a small margin), which was never the concern.
+
+**Result, real Aiko3 + BrowHeavy, same headless verification as Phase 5.1:** `295.4s → 31.8s`
+(9.3x), `touched=2295 unmapped=0` — bit-identical to the pre-rewrite baseline — and the re-run is
+still correctly idempotent. Not the ~45x a synthetic benchmark alone suggested, but a real,
+verified number against production data, not a projection.
+
+**Known synthetic-only discrepancy (not seen in real data or the existing pytest suite):** a
+harsher-than-realistic synthetic stress test (a torso-like dense cluster with 3% of target points
+randomly deleted, simulating "many points with truly no correspondence") found 43 of 20,000 final
+matches differ from the old, unbounded-search implementation. Root cause: old pass 1's unbounded
+search always found *some* nearest neighbor for every point (however far/bad), so effectively every
+point counted as "trusted" for the scale refit; the new tolerance-bounded pass 1 correctly excludes
+points with no real match within tolerance from that trusted set, which very slightly shifts the
+refit's fitted scale in a scenario with enough genuinely-unmatched points feeding it. Arguably a
+*more* robust behavior (excluding garbage matches from a least-squares fit), not a regression — and
+it did not appear in the real Aiko3 verification (100% matched at pass 1, so nothing was excluded)
+or in any of the project's own pytest fixtures. Worth knowing if a future match-rate investigation
+finds a small discrepancy on unusually noisy data.
+
+**Also added per UAT feedback (Test 1/2):** the interactive wait now sets the window cursor to
+`'WAIT'` (reset to `'DEFAULT'` when done) alongside the existing status-bar text — a status-bar
+message alone was confirmed too easy to miss ("no signs that anything was happening"). The
+`"Poser Morph Injection Report"` text block now includes a `Total time: {elapsed:.1f}s` line.
+
+**Explicitly not done, still:** correspondence caching across runs (see the open decision below);
+importing a morph onto a separate geometry object instead of the active mesh, to apply later —
+raised during UAT, owner's own call to defer it (ties into the planned `mesh_tools` shape-key-export
+merge, not scoped here).
+
+### Phase 5.3 — a real percentage on the progress cursor ✅ shipped (2026-09-13)
+
+Phase 5.1's fix left the cursor's progress percentage stuck at a static 50% for the whole
+correspondence-build wait — the elapsed-time status text moved, but the percentage itself didn't,
+which didn't fully read as "something is happening." Owner asked for the same counting-up
+percentage cursor **Import Poser FBX** already shows during its own import steps.
+
+`build_vertex_correspondence()` gained an optional `progress_callback(fraction)` argument, called
+at its three real phase boundaries — after coarse alignment (~60% of the total on real Aiko3 data),
+after pass 1 (~95%), and at the very end (100%) — real progress through actual measured-cost
+phases, not a synthetic tick. The module stays `bpy`-free: the callback itself must not touch
+`bpy`, so the operator's callback just writes a plain `self._correspondence_progress` attribute
+from the background thread, and `modal()`'s timer tick (main thread) is what turns that into a real
+`wm.progress_update()` call and folds the percentage into the status-bar text alongside elapsed
+seconds. Verified directly against real Aiko3 data: callback fires `[0.6, 0.95, 1.0]` in order;
+re-verified end-to-end (real BrowHeavy injection, `touched=2295 unmapped=0`, idempotent re-run) —
+unaffected by the added instrumentation.
+
+**Also fixed alongside:** newly applied shape keys now rest at `value = 0.0`. `shape_key_add()`
+defaults a new key's value to `1.0` (fully dialed in) — harmless for one morph, but a package
+applying dozens at once (Test 2) was stacking all of them at full strength simultaneously. Owner's
+own words, on seeing it: "I'm assuming you set the value to 1 as a way to test that the morphs were
+working?" — no, that was just Blender's own `shape_key_add()` default, never touched deliberately
+until now. Morphs now rest at 0, like a Poser/DAZ dial, for the user to dial in.
+
 ## Open decisions
 
 - ~~Phase 1: `mathutils.kdtree` vs. pure-numpy.~~ Resolved: pure numpy, stays pytest-testable.
@@ -346,9 +481,14 @@ the correspondence across runs on the same mesh.
   full-figure scale — worth revisiting if a future session has reason to touch Phase 1's match-rate
   numbers again.
 - Correspondence caching across multiple `poser.apply_morph_injection` runs on the same mesh —
-  deferred; the ~5 minute real-run cost is dominated by one `build_vertex_correspondence()` call
-  regardless of package size, so this (not a per-morph picker) is the actual lever if speed becomes
-  a real complaint.
+  still deferred post-Phase 5.2; the real-run cost (now ~32s, down from ~5 minutes) is dominated by
+  one `build_vertex_correspondence()` call regardless of package size, so this remains the lever if
+  a *second* run's cost specifically becomes a real complaint — Phase 5.2 only fixed the first run.
+- Importing an injection package onto a *separate* geometry object (to apply as a shape key later,
+  rather than directly onto the currently-active mesh) — raised during Phase 5.2's UAT, owner's own
+  call to defer: ties into the planned `mesh_tools` merge, which will bring over the mirror-image
+  feature (exporting an existing shape key as its own geometry object). Not scoped until that
+  merge happens.
 
 ## Test data
 

@@ -126,6 +126,34 @@ don't resume it without a specific reason to.
   morph in the package in one run (skips JCM-named and already-present ones), reports to a
   `"Poser Morph Injection Report"` text block. Real end-to-end verified (real import + real
   operator call, not just registration).
+- Phase 5.1: the correspondence build no longer blocks Blender's UI while it runs. Real UAT showed
+  the original blocking call made Blender look hung (grey window, no progress feedback) well before
+  it finished. `execute()` now branches on `bpy.app.background` — interactively, the slow call runs
+  on a background `threading.Thread` while a `wm.event_timer_add()`-driven `modal()` polls it and
+  updates the status bar with elapsed time (Esc abandons the wait); headless (`--background`, or a
+  scripted `bpy.ops` call) stays fully synchronous, since nothing dispatches `TIMER` events there.
+  `context.window is None` is *not* a valid headless check — a `Window` datablock exists even under
+  `--background --factory-startup` on this Blender build; use `bpy.app.background`.
+- Phase 5.2: the correspondence build itself is now ~9x faster (real Aiko3+BrowHeavy:
+  295.4s → 31.8s, `touched=2295 unmapped=0` unchanged). `core/cr2/mesh_correspondence.py`'s two real
+  full-mesh passes were rewritten from a per-point Python loop to a vectorized, sorted-cell-grid
+  search (`_query_grid`/`_build_target_grid`), each pass sized to the actual distance tolerance it
+  needs rather than "search everywhere then threshold." `_coarse_align`'s 48-candidate scoring
+  search deliberately stayed on the *old* per-point loop — it was never the bottleneck (~13-20s of
+  the original 283s), and vectorizing it hit a real trap on real mesh data (a dense anatomical
+  region can make a vectorized batch's candidate count explode; a per-point loop pays for that
+  region individually and cheaply instead). See `docs/handoff-morph-injection.md`'s Phase 5.1/5.2
+  sections for the full reasoning, including the specific tolerance values tuned against real
+  Aiko3 density data, not just a synthetic benchmark.
+- Phase 5.3: `build_vertex_correspondence()` takes an optional `progress_callback(fraction)`,
+  called at its real phase boundaries (coarse alignment, pass 1, pass 2/refit) — genuine progress
+  through measured-cost phases, not a synthetic tick. The operator wires this to a plain attribute
+  written from the background thread and read by `modal()`'s timer tick on the main thread (no bpy
+  calls off the main thread), driving `wm.progress_update()` for a real percentage on the cursor —
+  matching **Import Poser FBX**'s own progress cursor — instead of the static 50% the Phase 5.1 fix
+  left in place. Newly applied shape keys also now rest at `value = 0.0` — `shape_key_add()`
+  defaults to `1.0` (fully dialed in), which stacked badly when a package applies dozens of morphs
+  in one run.
 
 ## Testing
 
@@ -152,9 +180,12 @@ Everything else is manual smoke test only — no `bpy`-dependent code has automa
    **Rename Weight Groups** applies the matching rename to vertex groups.
 5. Mesh selected → **Apply Morph Injection**, pick a real injection `.pz2` and the figure's
    reference `.obj` in the popup. Expect: new shape keys named after the package's morphs, a
-   **Poser Morph Injection Report** text block, `mesh["poser_reference_obj"]` set. This one is slow
-   (~1-5 min, dominated by the one-time vertex-correspondence build) — that's expected, not a hang.
-   Re-run with the same package → reports "already present", no duplicate keys.
+   **Poser Morph Injection Report** text block (including a total-time line), `mesh["poser_reference_obj"]`
+   set. Expect roughly 30-60s on a 70k-vertex figure, dominated by the one-time
+   vertex-correspondence build — the cursor shows a counting-up percentage (matching **Import
+   Poser FBX**'s own progress cursor) and the status bar shows both the percentage and elapsed
+   seconds the whole time, window never greys out, Esc cancels cleanly. Re-run with the same
+   package → reports "already present", no duplicate keys, same ~30-60s cost (no caching yet).
 
 For a quick check without Blender: `python -m py_compile` the tree, or import `poser_tools` under a
 stubbed `bpy` and call `register()`/`unregister()` — that catches class-tuple typos and bad import

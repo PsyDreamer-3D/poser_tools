@@ -1,6 +1,8 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 
 import os
+import threading
+import time
 
 import bpy
 import numpy as np
@@ -58,6 +60,7 @@ class OT_ApplyMorphInjection_Operator(bpy.types.Operator):
         layout.prop(self, "reference_obj_filepath")
 
     def execute(self, context):
+        self._op_start_time = time.time()
         obj = context.active_object
 
         if not os.path.isfile(self.injection_filepath):
@@ -88,66 +91,165 @@ class OT_ApplyMorphInjection_Operator(bpy.types.Operator):
         basis_positions = np.empty((len(basis_key.data), 3), dtype=np.float64)
         basis_key.data.foreach_get('co', basis_positions.ravel())
 
+        self._obj = obj
+        self._pkg = pkg
+        self._index = index
+        self._morph_names = morph_names
+        self._actor_obj_groups = actor_obj_groups
+        self._basis_positions = basis_positions
+        self._correspondence = None
+        self._thread_error = None
+        # Set via progress_callback from the background thread; modal() turns
+        # it into a real wm.progress_update() on the main thread.
+        self._correspondence_progress = 0.0
+
         wm = context.window_manager
         wm.progress_begin(0, 100)
+        wm.progress_update(5)
+
+        if bpy.app.background:
+            # Headless: no event loop to dispatch TIMER events, so going modal
+            # would hang forever. `context.window` isn't a reliable headless
+            # check on its own (see docs/handoff-morph-injection.md Phase 5.1).
+            try:
+                self._correspondence = build_vertex_correspondence(
+                    obj_verts, basis_positions, progress_callback=self._set_correspondence_progress
+                )
+                return self._apply_morphs(context)
+            finally:
+                wm.progress_end()
+
+        # Interactive: run the correspondence build on a background thread so
+        # a modal timer can keep Blender's UI responsive (see
+        # docs/handoff-morph-injection.md Phase 5.1 for why this is needed).
+        def _worker():
+            try:
+                self._correspondence = build_vertex_correspondence(
+                    obj_verts, basis_positions, progress_callback=self._set_correspondence_progress
+                )
+            except Exception as exc:
+                self._thread_error = exc
+
+        self._start_time = time.time()
+        self._thread = threading.Thread(target=_worker, daemon=True)
+        self._thread.start()
+        self._timer = wm.event_timer_add(0.15, window=context.window)
+        context.workspace.status_text_set(
+            "Poser Morph Injection: building vertex correspondence... 0% 0s (Esc to cancel)"
+        )
+        # Status text alone was confirmed too easy to miss -- the wait cursor
+        # is a harder-to-miss "busy" signal.
+        context.window.cursor_set('WAIT')
+        wm.modal_handler_add(self)
+        return {'RUNNING_MODAL'}
+
+    def _set_correspondence_progress(self, fraction):
+        self._correspondence_progress = fraction
+
+    def modal(self, context, event):
+        if event.type == 'ESC':
+            self._finish_modal(context)
+            context.window_manager.progress_end()
+            # The thread isn't forcibly killed -- it finishes in the
+            # background and its result is just never picked up. Safe: it
+            # never touches bpy.data.
+            self.report(
+                {'WARNING'},
+                "Apply Morph Injection cancelled -- no shape keys were added.",
+            )
+            return {'CANCELLED'}
+
+        if event.type != 'TIMER':
+            return {'PASS_THROUGH'}
+
+        elapsed = time.time() - self._start_time
+        # 5-90%: correspondence build; 90-100%: per-morph loop below.
+        pct = 5 + int(85 * self._correspondence_progress)
+        context.window_manager.progress_update(pct)
+        context.workspace.status_text_set(
+            f"Poser Morph Injection: building vertex correspondence... {pct}% {elapsed:.0f}s (Esc to cancel)"
+        )
+
+        if self._thread.is_alive():
+            return {'RUNNING_MODAL'}
+
+        self._finish_modal(context)
+
+        if self._thread_error is not None:
+            context.window_manager.progress_end()
+            self.report({'ERROR'}, f"Vertex correspondence build failed: {self._thread_error}")
+            return {'CANCELLED'}
+
+        try:
+            return self._apply_morphs(context)
+        finally:
+            context.window_manager.progress_end()
+
+    def _finish_modal(self, context):
+        context.window_manager.event_timer_remove(self._timer)
+        context.workspace.status_text_set(None)
+        context.window.cursor_set('DEFAULT')
+
+    def _apply_morphs(self, context):
+        obj = self._obj
+        index = self._index
+        morph_names = self._morph_names
+        actor_obj_groups = self._actor_obj_groups
+        basis_positions = self._basis_positions
+        correspondence = self._correspondence
+        pkg = self._pkg
+        n_morphs = len(morph_names)
+
+        wm = context.window_manager
         report_lines = []
         applied = 0
         jcm_skipped = []
         already_present = []
         empty_skipped = []
 
-        try:
-            # The slow step -- a few minutes on a 72k-vertex figure (confirmed via
-            # a real end-to-end run, docs/handoff-morph-injection.md Phase 5), and
-            # it doesn't get any faster with a smaller injection package -- this
-            # one call dominates regardless of how many morphs get applied after
-            # it. No caching across runs in this first cut; a blocking call with a
-            # progress bar matches OT_ImportPoserFBX's own precedent rather than
-            # introducing new threading this add-on doesn't have anywhere else.
-            correspondence = build_vertex_correspondence(obj_verts, basis_positions)
-            wm.progress_update(50)
+        for i, name in enumerate(morph_names):
+            wm.progress_update(90 + int(10 * i / n_morphs))
 
-            n_morphs = len(morph_names)
-            for i, name in enumerate(morph_names):
-                wm.progress_update(50 + int(50 * i / n_morphs))
+            if is_jcm_shapekey(name):
+                jcm_skipped.append(name)
+                continue
+            if name in obj.data.shape_keys.key_blocks:
+                already_present.append(name)
+                continue
 
-                if is_jcm_shapekey(name):
-                    jcm_skipped.append(name)
-                    continue
-                if name in obj.data.shape_keys.key_blocks:
-                    already_present.append(name)
-                    continue
+            group = match_channel_group(index, name)
+            result = build_shape_key_positions(
+                group, actor_obj_groups, basis_positions, correspondence
+            )
 
-                group = match_channel_group(index, name)
-                result = build_shape_key_positions(
-                    group, actor_obj_groups, basis_positions, correspondence
-                )
-
-                if result["touched_count"] == 0:
-                    empty_skipped.append(name)
-                    report_lines.append(
-                        f"{name}: skipped, nothing to apply "
-                        f"(pmd_deltas_skipped={result['pmd_deltas_skipped']}, "
-                        f"unmapped={result['unmapped_count']})"
-                    )
-                    continue
-
-                sk = obj.shape_key_add(name=name, from_mix=False)
-                sk.data.foreach_set('co', result["positions"].ravel())
-                applied += 1
+            if result["touched_count"] == 0:
+                empty_skipped.append(name)
                 report_lines.append(
-                    f"{name}: touched={result['touched_count']} "
-                    f"unmapped={result['unmapped_count']} "
-                    f"pmd_deltas_skipped={result['pmd_deltas_skipped']} "
-                    f"collisions_resolved={result['collisions_resolved']} "
-                    f"seam_collisions_skipped={result['seam_collisions_skipped']}"
+                    f"{name}: skipped, nothing to apply "
+                    f"(pmd_deltas_skipped={result['pmd_deltas_skipped']}, "
+                    f"unmapped={result['unmapped_count']})"
                 )
-        finally:
-            wm.progress_end()
+                continue
 
+            sk = obj.shape_key_add(name=name, from_mix=False)
+            sk.data.foreach_set('co', result["positions"].ravel())
+            # shape_key_add() defaults value to 1.0 -- rest at 0 like a
+            # Poser/DAZ dial instead.
+            sk.value = 0.0
+            applied += 1
+            report_lines.append(
+                f"{name}: touched={result['touched_count']} "
+                f"unmapped={result['unmapped_count']} "
+                f"pmd_deltas_skipped={result['pmd_deltas_skipped']} "
+                f"collisions_resolved={result['collisions_resolved']} "
+                f"seam_collisions_skipped={result['seam_collisions_skipped']}"
+            )
+
+        total_elapsed = time.time() - self._op_start_time
         header = [f"Injection file: {self.injection_filepath}",
                   f"Reference OBJ: {self.reference_obj_filepath}",
-                  f"Applied {applied}/{n_morphs} morph(s)."]
+                  f"Applied {applied}/{n_morphs} morph(s).",
+                  f"Total time: {total_elapsed:.1f}s"]
         if pkg["unresolved_paths"]:
             header.append(
                 f"{len(pkg['unresolved_paths'])} readScript reference(s) could not be resolved: "
