@@ -1,24 +1,67 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 
+import json
 import os
 import threading
 import time
 
 import bpy
 import numpy as np
-from bpy.props import StringProperty
+from bpy.props import CollectionProperty, StringProperty
 
+from ..core.cr2 import runtime_index
 from ..core.cr2.actor_vertex_index import load_obj_actor_vertex_groups
 from ..core.cr2.apply_injection import build_shape_key_positions
+from ..core.cr2.cr2_parser import CR2Parser, resolve_geom_file
 from ..core.cr2.injection_package import load_injection_package
 from ..core.cr2.mesh_correspondence import build_vertex_correspondence
-from ..core.cr2.name_match import build_channel_index, match_channel_group
+from ..core.cr2.name_match import build_channel_index, display_name_for, match_channel_group
 from ..core.cr2.obj_io import load_obj_vertex_positions
 from ..core.functionsShapeKeys import is_jcm_shapekey
 from ..core.utils import _write_report
+from ..properties.poserToolsPreferences import get_runtime_roots
 
 _REPORT_TEXT = "Poser Morph Injection Report"
 _REFERENCE_OBJ_PROP = "poser_reference_obj"
+_REFERENCE_CR2_PROP = "poser_reference_cr2"
+_INJECTED_MORPHS_PROP = "poser_injected_morphs"
+
+
+def load_injected_morphs_record(obj) -> dict:
+    """internal_name -> shape-key name, accumulated across every Apply run
+    on this mesh. A RemDeltas.* file carries no real `name` of its own
+    (Poser only needs it to match the channel it's zeroing, not to relabel
+    it), so operators/removeMorphInjection.py can't recover the shape key's
+    actual name from the file it was pointed at -- this record is what lets
+    it anyway."""
+    raw = obj.data.get(_INJECTED_MORPHS_PROP)
+    if not raw:
+        return {}
+    try:
+        return json.loads(raw).get("morphs", {})
+    except (ValueError, AttributeError):
+        return {}
+
+
+def _save_injected_morphs_record(obj, record: dict) -> None:
+    obj.data[_INJECTED_MORPHS_PROP] = json.dumps({"version": 1, "morphs": record})
+
+
+class PoserLibraryItem(bpy.types.PropertyGroup):
+    """One Runtime-indexed CR2/PZ2 file for the searchable pickers below.
+
+    name is category-qualified ("!DAZ/A3-H3MorExp1/Deltas/InjDeltas.Foo.pz2"),
+    not a bare filename -- DAZ products commonly reuse orchestrator names like
+    "! All Morphs.pz2" across different product folders, so prop_search()
+    entries need the folder path to stay unique and disambiguated.
+    """
+    name: StringProperty()
+    filepath: StringProperty()
+
+
+def _library_item_display_name(item: runtime_index.LibraryItem) -> str:
+    stem = f"{item.name}.{item.ext}"
+    return f"{item.category}/{stem}" if item.category else stem
 
 
 class OT_ApplyMorphInjection_Operator(bpy.types.Operator):
@@ -40,28 +83,98 @@ class OT_ApplyMorphInjection_Operator(bpy.types.Operator):
                     "onto this mesh",
         subtype='FILE_PATH',
     )
+    cr2_library_items: CollectionProperty(type=PoserLibraryItem)
+    injection_library_items: CollectionProperty(type=PoserLibraryItem)
+    selected_cr2_name: StringProperty(
+        name="Figure (CR2)",
+        description="Pick the figure from your Poser Runtime library -- its reference OBJ is "
+                    "resolved automatically from the CR2's own figureResFile",
+    )
+    selected_injection_name: StringProperty(
+        name="Injection Package",
+        description="Pick the injection package from your Poser Runtime library",
+    )
 
     @classmethod
     def poll(cls, context):
         return context.active_object is not None and context.active_object.type == 'MESH'
 
     def invoke(self, context, event):
+        obj = context.active_object
         # Remembered from a prior run on this mesh, if any -- re-applying a
         # second package to the same figure shouldn't have to re-browse for
         # its own reference OBJ every time.
-        self.reference_obj_filepath = context.active_object.get(_REFERENCE_OBJ_PROP, "")
+        self.reference_obj_filepath = obj.get(_REFERENCE_OBJ_PROP, "")
+
+        self.cr2_library_items.clear()
+        self.injection_library_items.clear()
+        self.selected_cr2_name = ""
+        self.selected_injection_name = ""
+
+        roots = get_runtime_roots(context)
+        if roots:
+            remembered_cr2 = obj.get(_REFERENCE_CR2_PROP, "")
+            for lib_item in runtime_index.get_all_items(roots):
+                display_name = _library_item_display_name(lib_item)
+                if lib_item.ext in ("cr2", "crz"):
+                    entry = self.cr2_library_items.add()
+                    entry.name = display_name
+                    entry.filepath = lib_item.filepath
+                    if remembered_cr2 and os.path.normcase(lib_item.filepath) == os.path.normcase(remembered_cr2):
+                        self.selected_cr2_name = display_name
+                elif lib_item.ext in ("pz2", "p2z"):
+                    entry = self.injection_library_items.add()
+                    entry.name = display_name
+                    entry.filepath = lib_item.filepath
+
         return context.window_manager.invoke_props_dialog(self, width=500)
 
     def draw(self, context):
         layout = self.layout
         layout.use_property_split = True
         layout.use_property_decorate = False
+
+        if self.cr2_library_items or self.injection_library_items:
+            layout.label(text="From your Poser Runtime library:")
+            if self.cr2_library_items:
+                layout.prop_search(self, "selected_cr2_name", self, "cr2_library_items")
+            if self.injection_library_items:
+                layout.prop_search(self, "selected_injection_name", self, "injection_library_items")
+            layout.separator()
+            layout.label(text="Or specify paths manually:")
+        else:
+            layout.label(text="No Poser Runtime folders configured -- see Preferences.", icon='INFO')
+
         layout.prop(self, "injection_filepath")
         layout.prop(self, "reference_obj_filepath")
 
     def execute(self, context):
         self._op_start_time = time.time()
         obj = context.active_object
+
+        if not self.injection_filepath and self.selected_injection_name:
+            item = self.injection_library_items.get(self.selected_injection_name)
+            if item is None:
+                self.report({'ERROR'}, f"{self.selected_injection_name!r} doesn't match a package in your Poser library.")
+                return {'CANCELLED'}
+            self.injection_filepath = item.filepath
+
+        cr2_filepath = ""
+        if not self.reference_obj_filepath and self.selected_cr2_name:
+            item = self.cr2_library_items.get(self.selected_cr2_name)
+            if item is None:
+                self.report({'ERROR'}, f"{self.selected_cr2_name!r} doesn't match a figure in your Poser library.")
+                return {'CANCELLED'}
+            cr2_filepath = item.filepath
+            figure = CR2Parser.parse_file(cr2_filepath)
+            resolve_geom_file(figure, cr2_filepath, extra_roots=get_runtime_roots(context))
+            if not (figure.geom_file and os.path.isfile(figure.geom_file)):
+                self.report(
+                    {'ERROR'},
+                    f"Could not resolve a reference OBJ from {os.path.basename(cr2_filepath)}'s figureResFile."
+                )
+                return {'CANCELLED'}
+            self.reference_obj_filepath = figure.geom_file
 
         if not os.path.isfile(self.injection_filepath):
             self.report({'ERROR'}, f"Injection file not found: {self.injection_filepath!r}")
@@ -70,9 +183,12 @@ class OT_ApplyMorphInjection_Operator(bpy.types.Operator):
             self.report({'ERROR'}, f"Reference OBJ not found: {self.reference_obj_filepath!r}")
             return {'CANCELLED'}
 
-        # Remember the reference OBJ for next time even if the rest of this
-        # run fails partway through -- it was still a correct answer.
+        # Remember the reference OBJ (and, if it came from the library
+        # picker, its CR2) for next time even if the rest of this run fails
+        # partway through -- it was still a correct answer.
         obj[_REFERENCE_OBJ_PROP] = self.reference_obj_filepath
+        if cr2_filepath:
+            obj[_REFERENCE_CR2_PROP] = cr2_filepath
 
         pkg = load_injection_package(self.injection_filepath)
         index = build_channel_index(pkg["figure"])
@@ -206,18 +322,26 @@ class OT_ApplyMorphInjection_Operator(bpy.types.Operator):
         jcm_skipped = []
         already_present = []
         empty_skipped = []
+        newly_applied = {}
 
-        for i, name in enumerate(morph_names):
+        for i, internal_name in enumerate(morph_names):
             wm.progress_update(90 + int(10 * i / n_morphs))
+
+            # The channel's own `name` property (e.g. "BrowHeavy") is what the
+            # created shape key is named -- internal_name (e.g. "PBMDC_39") is
+            # only the CR2's lookup key, not fit for a user-facing name.
+            name = display_name_for(index, internal_name)
 
             if is_jcm_shapekey(name):
                 jcm_skipped.append(name)
                 continue
-            if name in obj.data.shape_keys.key_blocks:
+            # Check internal_name too: a mesh from before this naming change
+            # may already carry the morph under its old raw-internal-name key.
+            if name in obj.data.shape_keys.key_blocks or internal_name in obj.data.shape_keys.key_blocks:
                 already_present.append(name)
                 continue
 
-            group = match_channel_group(index, name)
+            group = match_channel_group(index, internal_name)
             result = build_shape_key_positions(
                 group, actor_obj_groups, basis_positions, correspondence
             )
@@ -237,6 +361,7 @@ class OT_ApplyMorphInjection_Operator(bpy.types.Operator):
             # Poser/DAZ dial instead.
             sk.value = 0.0
             applied += 1
+            newly_applied[internal_name] = sk.name
             report_lines.append(
                 f"{name}: touched={result['touched_count']} "
                 f"unmapped={result['unmapped_count']} "
@@ -244,6 +369,11 @@ class OT_ApplyMorphInjection_Operator(bpy.types.Operator):
                 f"collisions_resolved={result['collisions_resolved']} "
                 f"seam_collisions_skipped={result['seam_collisions_skipped']}"
             )
+
+        if newly_applied:
+            record = load_injected_morphs_record(obj)
+            record.update(newly_applied)
+            _save_injected_morphs_record(obj, record)
 
         total_elapsed = time.time() - self._op_start_time
         header = [f"Injection file: {self.injection_filepath}",

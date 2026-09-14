@@ -64,6 +64,25 @@ def build_channel_index(figure: Figure) -> dict:
     return {"by_internal": by_internal, "by_display": by_display}
 
 
+def display_name_for(index: dict, internal_name: str) -> str:
+    """Human-readable label for internal_name, from the CR2 channel's own
+    `name` property (Channel.display_name) -- falls back to internal_name
+    itself if no channel in the group set one.
+
+    Injection-delta channels (core/cr2/injection_package.py) commonly use a
+    cryptic sequential internal_name (e.g. "PBMDC_39") with a real label in
+    `name` (e.g. "BrowHeavy") -- unlike a base figure's own FBM channels,
+    where `name` is often just a differently-cased variant of the same
+    convention (e.g. "PBMFullFigure" / "pFullFigure"), so this is only worth
+    calling where the channel's own label is wanted, not the FBX-baked name
+    (name_match.py's other lookups exist for that).
+    """
+    for _actor, ch in index["by_internal"].get(internal_name, []):
+        if ch.display_name:
+            return ch.display_name
+    return internal_name
+
+
 def match_channel_group(index: dict, name: str) -> list:
     """Resolve `name` to its channel group via the index from build_channel_index().
 

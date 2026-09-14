@@ -7,8 +7,10 @@ from .prefixArmatureBones import PrefixArmatureBones_Panel
 from .prefixWeightGroups import PrefixWeightGroups_Panel
 from .renameArmatureBones import RenameArmatureBones_Panel
 from .renameWeightGroups import RenameWeightGroups_Panel
+from .runtimePaths import POSER_UL_runtime_paths
 
 classes = (
+    POSER_UL_runtime_paths,
     ImportPoserFBX_Panel,
     FixPoserShapekeys_Panel,
     ApplyMorphInjection_Panel,

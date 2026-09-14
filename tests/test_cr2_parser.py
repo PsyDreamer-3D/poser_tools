@@ -6,7 +6,7 @@ Phase 5): CR2Parser._parse_channel() used to truncate and drop the body of any
 targetGeom channel whose internal_name contains a space.
 """
 
-from core.cr2.cr2_parser import CR2Parser
+from core.cr2.cr2_parser import CR2Parser, resolve_geom_file
 
 
 def _actor(text, name="BODY"):
@@ -164,3 +164,40 @@ def test_use_binary_morph_flag_distinguishes_pmd_referenced_channels():
     assert by_name["Shldr_Gap_ADJ_R"].uses_binary_morph is True
     assert by_name["Shldr_Gap_ADJ_R"].deltas == []
     assert by_name["PlainDial"].uses_binary_morph is False
+
+
+def test_resolve_geom_file_resolves_figureresfile_to_real_obj(tmp_path):
+    """resolve_geom_file() (core/cr2/runtime_index.py-adjacent morph-injection
+    UX: pick a figure's CR2, derive its reference OBJ automatically) used to
+    silently no-op -- it imported a PoserPathResolver from a core/cr2/obj_loader.py
+    module that doesn't exist in poser_tools (only cr2_importer has that file).
+    Confirms the fix (routing through poser_paths.resolve_poser_path instead)
+    actually resolves a real path."""
+    root = tmp_path / "MyPoserLib"
+    cr2_path = root / "Runtime" / "libraries" / "Character" / "MyFigure.cr2"
+    cr2_path.parent.mkdir(parents=True)
+
+    obj_path = root / "Runtime" / "Geometries" / "MyFigure" / "MyFigure.obj"
+    obj_path.parent.mkdir(parents=True)
+    obj_path.write_text("")
+
+    figure = CR2Parser.parse_text(
+        "{ figureResFile :Runtime:Geometries:MyFigure:MyFigure.obj }",
+        source_file=str(cr2_path),
+    )
+    assert figure.geom_file == ":Runtime:Geometries:MyFigure:MyFigure.obj"
+
+    resolve_geom_file(figure, str(cr2_path))
+    assert figure.geom_file == str(obj_path.resolve())
+
+
+def test_resolve_geom_file_leaves_unresolvable_path_untouched(tmp_path):
+    cr2_path = tmp_path / "MyPoserLib" / "Runtime" / "libraries" / "MyFigure.cr2"
+    cr2_path.parent.mkdir(parents=True)
+
+    figure = CR2Parser.parse_text(
+        "{ figureResFile :Runtime:Geometries:Missing.obj }",
+        source_file=str(cr2_path),
+    )
+    resolve_geom_file(figure, str(cr2_path))
+    assert figure.geom_file == ":Runtime:Geometries:Missing.obj"

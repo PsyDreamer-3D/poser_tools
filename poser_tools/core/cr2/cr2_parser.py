@@ -1034,26 +1034,21 @@ class CR2Parser:
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _resolve_geom_file(figure: Figure, source_path: str,
+def resolve_geom_file(figure: Figure, source_path: str,
                        extra_roots: list = None) -> None:
     """
-    Resolve figure.geom_file from a Poser colon-path to an absolute
-    filesystem path, modifying the Figure in-place.
+    Resolve figure.geom_file (a figureResFile colon-path) to an absolute
+    filesystem path, modifying the Figure in-place. source_path is the CR2
+    file figure was parsed from -- used to find the Runtime root.
     """
     if not figure.geom_file:
         return
     if os.path.isabs(figure.geom_file) and os.path.isfile(figure.geom_file):
         return
-    try:
-        from .obj_loader import PoserPathResolver
-    except ImportError:
-        try:
-            from obj_loader import PoserPathResolver  # type: ignore
-        except ImportError:
-            return
-    resolved = PoserPathResolver.resolve(figure.geom_file,
-                                         reference_file=source_path,
-                                         extra_roots=extra_roots or [])
+    from .poser_paths import resolve_poser_path
+    resolved = resolve_poser_path(figure.geom_file,
+                                   reference_file=source_path,
+                                   extra_roots=extra_roots or [])
     if resolved:
         figure.geom_file = resolved
 

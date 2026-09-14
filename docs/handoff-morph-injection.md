@@ -462,6 +462,161 @@ own words, on seeing it: "I'm assuming you set the value to 1 as a way to test t
 working?" — no, that was just Blender's own `shape_key_add()` default, never touched deliberately
 until now. Morphs now rest at 0, like a Poser/DAZ dial, for the user to dial in.
 
+### Phase 5.4 — human-readable shape-key names ✅ shipped (2026-09-13)
+
+Injected morphs were coming in named after the CR2 channel's `internal_name` — a cryptic
+sequential code like `PBMDC_39` — instead of anything a user would recognize. The channel's own
+`name` property (`core/cr2/cr2_parser.py`'s existing `Channel.display_name` field) already carries
+the real label; it was just never preferred over `internal_name` for the *created* shape key,
+because `core/cr2/name_match.py`'s index was originally built for the opposite direction (Phase 5's
+FBX-name matching problem: resolving an already-FBX-baked shape-key name, whichever of the two the
+exporter happened to pick, back to its CR2 channel group).
+
+Confirmed against real injection files in `Test_Poser_Assets`'s content library
+(`InjDeltas.DC_*.pz2`): `targetGeom PBMDC_39` / `name BrowHeavy`, `targetGeom PBMDC_44` /
+`name H3NsDragon`, etc. — every sampled injection-delta channel has a real label distinct from its
+internal code. (Base-figure FBM channels are a different story — `PBMFullFigure` / `name
+pFullFigure` is just the same p-prefix convention in both fields — so this only matters for the
+injection path, not FBX-import consolidation, which is untouched.)
+
+`core/cr2/name_match.py` gained `display_name_for(index, internal_name)`: returns the first
+non-empty `display_name` found across the channel's per-actor group, falling back to
+`internal_name` if none set. `operators/applyMorphInjection.py`'s `_apply_morphs()` still looks up
+each channel group by `internal_name` (the CR2's real key) but names the created shape key, and
+runs the JCM/already-applied checks, against the resolved display name. The already-applied check
+also still checks `internal_name` — a mesh injected before this change carries the morph under its
+old raw name, and re-running shouldn't create a second copy under the new one.
+
+One real quirk this surfaced: `InjDeltas.DC_49_Mandible.pz2` declares `targetGeom PBMDC_49` twice
+(once per actor) with *different* `name` values (`pMandible`, then `Mandible`) — confirms
+`name_match.py`'s existing "first one seen wins if a figure is inconsistent" comment is a real,
+observed case, not just defensive wording.
+
+Verified end-to-end in headless Blender (real Aiko3 import + real BrowHeavy injection): shape key
+comes in as `BrowHeavy`, not `PBMDC_39`; re-running the same injection reports it already present
+(no duplicate) instead of creating a second copy.
+
+### Phase 5.5 — browse the Poser Runtime library instead of two raw file paths ✅ shipped (2026-09-13)
+
+`Apply Morph Injection` required hand-navigating a native OS file dialog twice — once for the
+injection `.pz2`, once for the figure's reference `.obj` — every time, even though both live
+somewhere inside a Runtime folder structure the owner already has organized. Investigated
+`cr2_importer`'s own "Poser Library" browser (`core/runtime_index.py`, `properties/preferences.py`,
+`operators/pref_ops.py`, `core/pz2_parser.py`'s `pz2_sniff`) to see what was directly reusable — its
+scan/cache architecture and multi-root preferences pattern were a good fit; its full
+UIList/thumbnail/background-scan browser panel was not (it exists to browse figures, props, hair,
+poses, and materials all at once — more machinery than a two-field picker needs).
+
+**New `core/cr2/runtime_index.py`** (MIT, adapted): same JSON-cache/incremental-mtime-diffing scan
+as cr2_importer's version, but with two deliberate simplifications. First, no top-level
+library-folder allowlist — cr2_importer only walks 10 canonical category folders and explicitly
+skips vendor-prefixed folders like `!DAZ`, but that's exactly where real injection content lives
+(`Runtime/libraries/!DAZ/A3-H3MorExp1/Deltas/InjDeltas.*.pz2`); this walks the whole
+`Runtime/Libraries/` tree. Second, no thumbnail scanning — the picker this feeds is a text search
+dropdown, not a thumbnail grid, so there's no consumer for one. Extensions narrowed to
+`.cr2`/`.crz` (figures) + `.pz2`/`.p2z` (injection candidates); no content-sniffing to classify
+`.pz2` files further (owner's call — real injection files are conventionally named
+`InjDeltas.*`/`Inj*`, so search-as-you-type is enough, confirmed against real product libraries).
+Dropping content-sniffing and thumbnails also meant dropping cr2_importer's background-thread scan
+— a plain `os.walk()` (incrementally cached) is fast enough to run synchronously in `invoke()`.
+
+**New `core/cr2/poser_library_prefs.py`** (GPL, original — no cr2_importer equivalent): Poser
+itself already tracks every registered content folder in `LibraryPrefs.xml`, written/read by Poser
+on every launch. Confirmed against the owner's real, live file
+(`~/.wine-poser13/.../AppData/Roaming/Poser/13/LibraryPrefs.xml`, 20 registered folders) and an
+older archived one (schema unchanged since at least Poser 5, 2005). `find_library_prefs_files()`
+locates the *live* file via the standard per-platform/Wine preferences location (POSIX + Wine:
+`~/.wine*/drive_c/users/*/AppData/Roaming/Poser/*/LibraryPrefs.xml`; native Windows:
+`%APPDATA%\Poser\*\LibraryPrefs.xml`) — deliberately not a filesystem-wide search, since a stale
+copy can be sitting inside old archived content (observed in the wild) and must never be mistaken
+for current. `parse_content_folders()` reads every `<ContentFolder folder="...">`, strips the
+trailing `Runtime/libraries` segment, and — only on POSIX, only for a drive-lettered path —
+translates Wine's drive-letter convention: `Z:` → `/` (Wine's standard default mapping, verified
+against the real file), any other letter (typically `C:`) resolved against the *same* Wine
+prefix's own `drive_c`, derived from the XML file's own path rather than a guessed default prefix.
+Anything that doesn't resolve to a real directory is silently skipped (a moved drive, removed
+content, a legacy schema's bare relative path, an old file's drive letter with no Wine mapping).
+
+**Fixed real, pre-existing dead code along the way**: `core/cr2/cr2_parser.py`'s
+`_resolve_geom_file()` (now public `resolve_geom_file()`) already did exactly the resolution this
+feature needs — turn a parsed `Figure.geom_file` (the `figureResFile` colon-path) into a real OBJ
+path — but imported a `PoserPathResolver` from a `core/cr2/obj_loader.py` module that only exists in
+`cr2_importer`, not `poser_tools`. It silently no-op'd (caught the `ImportError`, returned) because
+nothing called it. Fixed to route through `poser_paths.resolve_poser_path()`, the module that
+actually exists.
+
+**`operators/applyMorphInjection.py`**: new `PoserLibraryItem` (category-qualified `name` —
+`"!DAZ/A3-H3MorExp1/Deltas/InjDeltas.Foo.pz2"`, not a bare filename, since DAZ products commonly
+reuse orchestrator/morph names like `"BrowHeavy.pz2"` across completely unrelated product folders,
+confirmed directly: the real library has *five* distinct `BrowHeavy.pz2` files across different
+vendor folders) backs two new `prop_search()` dropdowns — the same searchable-dropdown mechanism
+behind Blender's own Material/Vertex Group/Shape Key pickers — for the figure's CR2 and the
+injection package, populated from `runtime_index.get_all_items()` in `invoke()`. Picking a figure
+resolves its reference OBJ automatically via `CR2Parser.parse_file()` +
+`resolve_geom_file()` — no manual OBJ browsing at all when a Runtime root is configured. The
+existing raw `injection_filepath`/`reference_obj_filepath` fields stay as a manual override
+(unchanged behavior for no-Runtime-root setups or content outside it) and always win if filled in.
+The picked CR2 is remembered on the mesh (`poser_reference_cr2`, parallel to the existing
+`poser_reference_obj`) so a re-run pre-fills the same figure.
+
+**New add-on preferences** (`properties/poserToolsPreferences.py`, `operators/runtimePaths.py`):
+multiple registered Runtime roots (`PoserRuntimePathItem` list, add/remove/reorder — mirrors
+cr2_importer's own preferences pattern), plus a `poser.runtime_roots_import_from_poser` button that
+imports roots from `LibraryPrefs.xml` in one shot instead of retyping each one. New operators use
+`poser.runtime_root_*` idnames rather than cr2_importer's exact `poser.runtime_path_*` — both
+add-ons share the bare `poser.*` operator namespace and could plausibly be installed side by side.
+
+Verified end-to-end against real content (not synthetic fixtures): imported the owner's actual,
+live `LibraryPrefs.xml` (20 roots resolved, including the real `Base Figures` folder); scanned
+22,419 real CR2/PZ2 files across those roots; resolved a real Aiko3 CR2's `figureResFile` to its
+real, correct OBJ path with zero manual input; ran a full real injection through the resolved path,
+`touched=2436 unmapped=0`, matching the same pipeline's established correctness elsewhere in this
+doc. `.venv/bin/python -m pytest` — 76 passed (21 new: `poser_library_prefs`, `runtime_index`, two
+`resolve_geom_file` cases), including real-file tests against the owner's live install that skip
+cleanly on a machine without it.
+
+## Phase 6 — Remove Morph Injection ✅ shipped (2026-09-13)
+
+Owner asked how a "remove injection" would work, given Poser ships a `RemDeltas.*.pz2` next to
+almost every `InjDeltas.*.pz2`. Inspected a real pair directly
+(`!DAZ/A3-H3MorExp1/Deltas/{Inj,Rem}Deltas.DC_39_BrowHeavy.pz2`): a Rem file re-declares the exact
+same `targetGeom` channel as its Inj counterpart, with zero deltas and no `deltas{}` block at all —
+Poser's own "remove" isn't a real undo, it's just overwriting the channel with nothing. The
+Blender-native translation isn't "zero the shape key's data" (an inert always-0 key is just
+clutter) — it's deleting the matching shape key outright, which needs none of Apply's
+vertex-correspondence machinery at all: removal is pure name-matching, not geometry, so no
+reference OBJ, no background thread, no progress modal.
+
+**New `operators/removeMorphInjection.py`** (`poser.remove_morph_injection`): loads a `.pz2` via
+the same `injection_package.py`/`name_match.py` pipeline Apply already uses (transparently follows
+orchestrators too), reads its channel list, and removes any matching shape key from the active
+mesh. Reuses the same Runtime-library `prop_search()` picker pattern from Phase 5.5 (one field, no
+CR2 picker needed) plus a manual-path fallback.
+
+**Real bug found via real content, not synthetic tests**: matching by `display_name_for()` against
+the *picked* file's own channels works fine for an Inj file, but not a Rem file — a Rem file's
+`name` property is always the literal placeholder `-` (confirmed: every real Rem file uses it), so
+resolving names purely from whatever file the user pointed Remove at would try to match a shape key
+literally called `"-"` and fail every time. Fixed by giving Apply a memory: `_apply_morphs()` now
+records `internal_name -> shape-key name` for every morph it actually creates, in a JSON blob on
+`mesh["poser_injected_morphs"]` (same `mesh`-not-`ShapeKey` reasoning as
+`poser_shapekey_merges`/`poser_reference_obj` — `bpy.types.ShapeKey` has no ID properties). Remove
+prefers this recorded name (works no matter which of the pair — Inj or Rem — the user points it
+at), falling back to `display_name_for()` on the picked file itself (works when Remove is pointed
+at an Inj file, or any file with real names, on a mesh with no such record yet — e.g. shape keys
+that predate this change). A resolved name of literal `-` falls back to the internal name for the
+report line only (`"PBMDC_39: not present"`, not `"-: not present"`) — cosmetic, doesn't change
+whether anything actually gets removed. The record entry is popped once its shape key is actually
+removed, so it doesn't linger pointing at a key that no longer exists.
+
+Verified end-to-end against real content: applied real `InjDeltas.DC_39_BrowHeavy.pz2` (creates
+`BrowHeavy`), removed it via the real `RemDeltas.DC_39_BrowHeavy.pz2` counterpart (shape key gone,
+1/1 removed); ran Remove again on the same package (0/1, correctly reports "not present", no
+error); re-applied and removed again via the *original* Inj file instead of the Rem one (also
+works, confirming either file resolves correctly). No new pytest coverage needed — no new
+`core/cr2/` module, purely `bpy`-dependent operator code reusing already-tested pure-Python pieces
+(same manual-smoke-test convention as Apply itself).
+
 ## Open decisions
 
 - ~~Phase 1: `mathutils.kdtree` vs. pure-numpy.~~ Resolved: pure numpy, stays pytest-testable.
