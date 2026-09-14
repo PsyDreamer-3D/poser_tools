@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 
+import json
 import os
 import threading
 import time
@@ -23,6 +24,27 @@ from ..properties.poserToolsPreferences import get_runtime_roots
 _REPORT_TEXT = "Poser Morph Injection Report"
 _REFERENCE_OBJ_PROP = "poser_reference_obj"
 _REFERENCE_CR2_PROP = "poser_reference_cr2"
+_INJECTED_MORPHS_PROP = "poser_injected_morphs"
+
+
+def load_injected_morphs_record(obj) -> dict:
+    """internal_name -> shape-key name, accumulated across every Apply run
+    on this mesh. A RemDeltas.* file carries no real `name` of its own
+    (Poser only needs it to match the channel it's zeroing, not to relabel
+    it), so operators/removeMorphInjection.py can't recover the shape key's
+    actual name from the file it was pointed at -- this record is what lets
+    it anyway."""
+    raw = obj.data.get(_INJECTED_MORPHS_PROP)
+    if not raw:
+        return {}
+    try:
+        return json.loads(raw).get("morphs", {})
+    except (ValueError, AttributeError):
+        return {}
+
+
+def _save_injected_morphs_record(obj, record: dict) -> None:
+    obj.data[_INJECTED_MORPHS_PROP] = json.dumps({"version": 1, "morphs": record})
 
 
 class PoserLibraryItem(bpy.types.PropertyGroup):
@@ -300,6 +322,7 @@ class OT_ApplyMorphInjection_Operator(bpy.types.Operator):
         jcm_skipped = []
         already_present = []
         empty_skipped = []
+        newly_applied = {}
 
         for i, internal_name in enumerate(morph_names):
             wm.progress_update(90 + int(10 * i / n_morphs))
@@ -338,6 +361,7 @@ class OT_ApplyMorphInjection_Operator(bpy.types.Operator):
             # Poser/DAZ dial instead.
             sk.value = 0.0
             applied += 1
+            newly_applied[internal_name] = sk.name
             report_lines.append(
                 f"{name}: touched={result['touched_count']} "
                 f"unmapped={result['unmapped_count']} "
@@ -345,6 +369,11 @@ class OT_ApplyMorphInjection_Operator(bpy.types.Operator):
                 f"collisions_resolved={result['collisions_resolved']} "
                 f"seam_collisions_skipped={result['seam_collisions_skipped']}"
             )
+
+        if newly_applied:
+            record = load_injected_morphs_record(obj)
+            record.update(newly_applied)
+            _save_injected_morphs_record(obj, record)
 
         total_elapsed = time.time() - self._op_start_time
         header = [f"Injection file: {self.injection_filepath}",

@@ -8,7 +8,7 @@ from ..properties.poserToolsPreferences import get_runtime_roots
 
 class ApplyMorphInjection_Panel(bpy.types.Panel):
     bl_idname = "VIEW_3D_PT_ApplyMorphInjection_Panel"
-    bl_label = "Apply Morph Injection"
+    bl_label = "Morph Injection"
     bl_category = _TAB
     bl_space_type = "VIEW_3D"
     bl_region_type = "UI"
@@ -24,3 +24,9 @@ class ApplyMorphInjection_Panel(bpy.types.Panel):
         row = layout.row()
         row.scale_y = 1.5
         row.operator("poser.apply_morph_injection")  # defined in operators/applyMorphInjection.py
+
+        layout.separator()
+        layout.label(text="Remove a previously injected package's morphs", icon='INFO')
+        row = layout.row()
+        row.scale_y = 1.5
+        row.operator("poser.remove_morph_injection")  # defined in operators/removeMorphInjection.py

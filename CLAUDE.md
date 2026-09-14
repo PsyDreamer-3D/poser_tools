@@ -185,6 +185,16 @@ don't resume it without a specific reason to.
   a real pre-existing function fixed in the same change — it imported a module that only exists in
   `cr2_importer`, so it silently no-op'd until now). The raw manual-path fields are unchanged and
   still win if filled in, so nothing breaks for a setup with no Runtime root configured.
+- Phase 6: **Remove Morph Injection** (`poser.remove_morph_injection`,
+  `operators/removeMorphInjection.py`) reverses an injection by name-matching, not geometry — no
+  reference OBJ, no vertex-correspondence build. Poser's own `RemDeltas.*.pz2` files (shipped
+  alongside most `InjDeltas.*.pz2` ones) just re-declare the same channel with zero deltas and a
+  literal `name -` placeholder; since that carries no real name to match against, `_apply_morphs()`
+  now records `internal_name -> shape-key name` on `mesh["poser_injected_morphs"]` for every morph
+  it creates, and Remove prefers that record over the picked file's own (possibly placeholder) name.
+  Works whether pointed at the original Inj file or its Rem counterpart. Reuses the same
+  Runtime-library `prop_search()` picker from Phase 5.5 and the existing
+  `injection_package.py`/`name_match.py` pipeline — no new `core/cr2/` module.
 
 ## Testing
 
@@ -225,6 +235,10 @@ Everything else is manual smoke test only — no `bpy`-dependent code has automa
    elapsed seconds the whole time, window never greys out, Esc cancels cleanly. Re-run on the same
    mesh → the figure picker pre-fills the previous choice, reports "already present" for the same
    package, no duplicate keys, same ~30-60s cost (no caching yet).
+6. Same mesh → **Remove Morph Injection**, pick the same package's `RemDeltas.*` file (or the
+   original `InjDeltas.*` one — either works) via the same searchable dropdown. Expect: near-instant
+   (no correspondence build), the matching shape key(s) gone, a **Poser Morph Removal Report** text
+   block. Re-run with the same package → reports 0 removed / already not present, no error.
 
 For a quick check without Blender: `python -m py_compile` the tree, or import `poser_tools` under a
 stubbed `bpy` and call `register()`/`unregister()` — that catches class-tuple typos and bad import

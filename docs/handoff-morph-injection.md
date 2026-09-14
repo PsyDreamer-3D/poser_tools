@@ -575,6 +575,48 @@ doc. `.venv/bin/python -m pytest` — 76 passed (21 new: `poser_library_prefs`, 
 `resolve_geom_file` cases), including real-file tests against the owner's live install that skip
 cleanly on a machine without it.
 
+## Phase 6 — Remove Morph Injection ✅ shipped (2026-09-13)
+
+Owner asked how a "remove injection" would work, given Poser ships a `RemDeltas.*.pz2` next to
+almost every `InjDeltas.*.pz2`. Inspected a real pair directly
+(`!DAZ/A3-H3MorExp1/Deltas/{Inj,Rem}Deltas.DC_39_BrowHeavy.pz2`): a Rem file re-declares the exact
+same `targetGeom` channel as its Inj counterpart, with zero deltas and no `deltas{}` block at all —
+Poser's own "remove" isn't a real undo, it's just overwriting the channel with nothing. The
+Blender-native translation isn't "zero the shape key's data" (an inert always-0 key is just
+clutter) — it's deleting the matching shape key outright, which needs none of Apply's
+vertex-correspondence machinery at all: removal is pure name-matching, not geometry, so no
+reference OBJ, no background thread, no progress modal.
+
+**New `operators/removeMorphInjection.py`** (`poser.remove_morph_injection`): loads a `.pz2` via
+the same `injection_package.py`/`name_match.py` pipeline Apply already uses (transparently follows
+orchestrators too), reads its channel list, and removes any matching shape key from the active
+mesh. Reuses the same Runtime-library `prop_search()` picker pattern from Phase 5.5 (one field, no
+CR2 picker needed) plus a manual-path fallback.
+
+**Real bug found via real content, not synthetic tests**: matching by `display_name_for()` against
+the *picked* file's own channels works fine for an Inj file, but not a Rem file — a Rem file's
+`name` property is always the literal placeholder `-` (confirmed: every real Rem file uses it), so
+resolving names purely from whatever file the user pointed Remove at would try to match a shape key
+literally called `"-"` and fail every time. Fixed by giving Apply a memory: `_apply_morphs()` now
+records `internal_name -> shape-key name` for every morph it actually creates, in a JSON blob on
+`mesh["poser_injected_morphs"]` (same `mesh`-not-`ShapeKey` reasoning as
+`poser_shapekey_merges`/`poser_reference_obj` — `bpy.types.ShapeKey` has no ID properties). Remove
+prefers this recorded name (works no matter which of the pair — Inj or Rem — the user points it
+at), falling back to `display_name_for()` on the picked file itself (works when Remove is pointed
+at an Inj file, or any file with real names, on a mesh with no such record yet — e.g. shape keys
+that predate this change). A resolved name of literal `-` falls back to the internal name for the
+report line only (`"PBMDC_39: not present"`, not `"-: not present"`) — cosmetic, doesn't change
+whether anything actually gets removed. The record entry is popped once its shape key is actually
+removed, so it doesn't linger pointing at a key that no longer exists.
+
+Verified end-to-end against real content: applied real `InjDeltas.DC_39_BrowHeavy.pz2` (creates
+`BrowHeavy`), removed it via the real `RemDeltas.DC_39_BrowHeavy.pz2` counterpart (shape key gone,
+1/1 removed); ran Remove again on the same package (0/1, correctly reports "not present", no
+error); re-applied and removed again via the *original* Inj file instead of the Rem one (also
+works, confirming either file resolves correctly). No new pytest coverage needed — no new
+`core/cr2/` module, purely `bpy`-dependent operator code reusing already-tested pure-Python pieces
+(same manual-smoke-test convention as Apply itself).
+
 ## Open decisions
 
 - ~~Phase 1: `mathutils.kdtree` vs. pure-numpy.~~ Resolved: pure numpy, stays pytest-testable.
