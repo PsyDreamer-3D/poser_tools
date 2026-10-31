@@ -55,6 +55,17 @@ jobs:
             --source-dir "${{ github.event.repository.name }}" \
             --output-dir dist
 
+      # index.json makes each release a Blender remote repository. Users add
+      # .../releases/latest/download/index.json once and Blender offers
+      # updates from then on; the index's relative "./<zip>" archive_url
+      # resolves into the same release. Blender's own generator is used
+      # because its schema (schema_version, archive_size, permissions, ...)
+      # is what Blender validates when syncing. Only works for public repos:
+      # GitHub returns 404 for anonymous downloads of private release assets.
+      - name: Generate extension repository index
+        run: |
+          blender --command extension server-generate --repo-dir dist
+
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v3
         with:
@@ -63,8 +74,10 @@ jobs:
           draft: false
           prerelease: false
 
-      - name: Upload extension zip to release
+      - name: Upload extension zip and index to release
         uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ github.ref_name }}
-          files: dist/*.zip
+          files: |
+            dist/*.zip
+            dist/index.json

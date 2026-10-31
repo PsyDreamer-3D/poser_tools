@@ -7,6 +7,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- Releases include an `index.json`, so the add-on can be added in Blender as a remote repository (`https://github.com/PsyDreamer-3D/poser_tools/releases/latest/download/index.json`) and Blender offers updates. Replaces `scripts/generate_index.py`, whose index Blender refused to sync (no `schema_version` or `archive_size`); the release workflow now uses Blender's own `extension server-generate`.
+
 ### Changed
 - Shape-key consolidation now runs **automatically on import** (new **Consolidate Shape Keys** option in the Import Poser FBX dialog, on by default; **Legacy Daz3D Figure** checkbox alongside it). The standalone **Fix Poser Shapekeys** button is now for re-running or for meshes imported another way.
 - **Fix Poser Shapekeys** now deletes joint-corrective morphs (JCMs, `JCM…`). FBX export bakes the shape but drops the bone-driven relationship that fires it, so a JCM shape key on the imported mesh can't function — it was only cluttering the list (156 of 196 keys on LaFemme). The report lists every one removed.
