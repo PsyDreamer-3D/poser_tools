@@ -7,6 +7,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- Releases include an `index.json`, so the add-on can be added in Blender as a remote repository (`https://github.com/PsyDreamer-3D/poser_tools/releases/latest/download/index.json`) and Blender offers updates. Replaces `scripts/generate_index.py`, whose index Blender refused to sync (no `schema_version` or `archive_size`); the release workflow now uses Blender's own `extension server-generate`.
+
 ### Changed
 - Added `core/cr2/` — a CR2 (Poser Character Resource) parser adapted from the now-unmaintained `cr2_importer` project, with a bug fixed (channel names containing spaces, e.g. `Blink Right`, were silently dropped). Internal groundwork for cross-referencing morph names against the source `.cr2`; no user-facing operator yet. First `pytest` suite in the repo (`tests/`), covering this parser.
 - `core/cr2/name_match.py`: resolves a morph name to its full set of per-actor CR2 channels (a name almost never identifies a single channel — Poser splits a body-wide morph across every actor it touches), trying `internal_name` then `display_name`. Internal groundwork, no user-facing operator yet.
