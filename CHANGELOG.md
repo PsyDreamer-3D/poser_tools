@@ -30,6 +30,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Blender 5.1.2 can crash importing a multi-figure FBX (hair or clothing alongside the figure). This is an upstream bug in `BM_mesh_bm_from_me()`, [fixed in Blender 5.2](https://projects.blender.org/blender/blender/pulls/156302) and not backported; `poser_tools` has no workaround.
 
 ### Fixed
+- **Apply Morph Injection** no longer silently loads nothing from morph packages whose `readScript` paths differ in case from the folders on disk (e.g. `:Runtime:Libraries:Pose:` vs. `libraries/pose`), which is routine in real Poser content and fatal on case-sensitive filesystems (Linux). One real package, `! All Head Morphs.pz2`, resolved 1 of 257 files and applied none of its morphs; it now resolves all of them. The same fix lets a figure's reference `.obj` be found when its CR2 path differs in case.
 - **Prefix Armature Bones** button is no longer permanently greyed out — its `poll()` compared the active object to a string instead of checking `.type == 'ARMATURE'`.
 
 ---

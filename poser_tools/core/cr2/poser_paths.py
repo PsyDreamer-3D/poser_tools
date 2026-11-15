@@ -47,8 +47,50 @@ def _colon_path_to_parts(colon_path: str) -> list:
     return [p for p in parts if p]
 
 
-def resolve_poser_path(colon_path: str, reference_file: str, extra_roots=None) -> Optional[str]:
+def _listing(directory: str, dir_cache: Optional[dict]) -> dict:
+    """{lowercased name: [real names, sorted]} for `directory`; {} if unreadable."""
+    if dir_cache is not None and directory in dir_cache:
+        return dir_cache[directory]
+    try:
+        names = sorted(os.listdir(directory))
+    except OSError:
+        names = []
+    folded: dict = {}
+    for name in names:
+        folded.setdefault(name.lower(), []).append(name)
+    if dir_cache is not None:
+        dir_cache[directory] = folded
+    return folded
+
+
+def _resolve_ignoring_case(root: str, parts: list, dir_cache: Optional[dict]) -> Optional[str]:
+    """Walk `parts` down from `root`, matching each component ignoring case.
+
+    An exact-case entry wins over a case-variant sibling. The walk does not
+    backtrack: if "Pose" and "pose" both exist and the exact one lacks the
+    file, a hit under the other is not found -- content that duplicates a
+    folder differing only by case can't exist on the case-insensitive
+    filesystems Poser content is authored on.
+    """
+    current = root
+    for part in parts:
+        matches = _listing(current, dir_cache).get(part.lower())
+        if not matches:
+            return None
+        current = os.path.join(current, part if part in matches else matches[0])
+    return current if os.path.isfile(current) else None
+
+
+def resolve_poser_path(colon_path: str, reference_file: str, extra_roots=None,
+                       dir_cache: Optional[dict] = None) -> Optional[str]:
     """Resolve a Poser colon-path to an absolute filesystem path.
+
+    Poser content is authored on case-insensitive filesystems, so a colon-path's
+    casing routinely differs from what's on disk (":Runtime:Libraries:Pose:" vs.
+    a real "libraries/pose"). On a case-sensitive filesystem a literal lookup
+    misses those, so an exact match is tried first and, failing that, each
+    component is matched ignoring case. The returned path uses the on-disk
+    casing.
 
     Args:
         colon_path: e.g. ":Runtime:libraries:!DAZ:...:InjDeltas.X.pz2"
@@ -58,27 +100,35 @@ def resolve_poser_path(colon_path: str, reference_file: str, extra_roots=None) -
         extra_roots: additional Poser content roots to also try (each one
             the directory that contains its own Runtime folder). Not used by
             any caller yet -- kept for a future addon-preferences setting.
+        dir_cache: optional dict the caller owns, reused across calls to avoid
+            re-listing the same directories (an orchestrator can reference
+            hundreds of files in a handful of folders). Entries are never
+            invalidated, so scope it to one load, not the whole session.
 
-    Returns the first candidate that exists on disk, or None.
+    Returns the first match that exists on disk, or None.
     """
     parts = _colon_path_to_parts(colon_path)
     if not parts:
         return None
     relative = os.path.join(*parts)
 
-    candidates = []
+    roots = []
 
     root = find_runtime_root(reference_file)
     if root:
-        candidates.append(os.path.join(root, relative))
+        roots.append(root)
 
     if extra_roots:
-        for extra_root in extra_roots:
-            if extra_root:
-                candidates.append(os.path.join(extra_root, relative))
+        roots.extend(extra_root for extra_root in extra_roots if extra_root)
 
-    for candidate in candidates:
+    for root in roots:
+        candidate = os.path.join(root, relative)
         if os.path.isfile(candidate):
             return os.path.abspath(candidate)
+
+    for root in roots:
+        found = _resolve_ignoring_case(root, parts, dir_cache)
+        if found:
+            return os.path.abspath(found)
 
     return None

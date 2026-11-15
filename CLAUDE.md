@@ -195,6 +195,13 @@ don't resume it without a specific reason to.
   Works whether pointed at the original Inj file or its Rem counterpart. Reuses the same
   Runtime-library `prop_search()` picker from Phase 5.5 and the existing
   `injection_package.py`/`name_match.py` pipeline — no new `core/cr2/` module.
+- Phase 7.0: `core/cr2/poser_paths.resolve_poser_path()` matches colon-path components **ignoring
+  case** (exact match first, on-disk casing returned). Real orchestrators write
+  `:Runtime:Libraries:Pose:` for a folder that is `libraries/pose` on disk, so on a case-sensitive
+  filesystem a literal lookup missed ~71% of failing `readScript` targets and Apply silently loaded
+  nothing for e.g. `! All Head Morphs.pz2` (256 of 257 unresolved). `load_injection_package()`
+  passes a per-load `dir_cache`. Phase 7 (thumbnail library via Blender's Asset Shelf) is scoped in
+  `docs/handoff-morph-injection.md`; only 7.0 is built.
 
 ## Testing
 

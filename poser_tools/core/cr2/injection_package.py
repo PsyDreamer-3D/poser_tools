@@ -51,11 +51,14 @@ def load_injection_package(path: str) -> dict:
     """
     figure = Figure(source_file=path)
     unresolved_paths = []
-    _load_into(path, figure, unresolved_paths, seen=set())
+    # One cache per load: a big orchestrator names hundreds of files in a
+    # handful of folders, and re-listing them per target dominates the cost.
+    _load_into(path, figure, unresolved_paths, seen=set(), dir_cache={})
     return {"figure": figure, "unresolved_paths": unresolved_paths}
 
 
-def _load_into(path: str, combined: Figure, unresolved_paths: list, seen: set) -> None:
+def _load_into(path: str, combined: Figure, unresolved_paths: list, seen: set,
+               dir_cache: dict) -> None:
     real_path = os.path.realpath(path)
     if real_path in seen:
         return
@@ -81,8 +84,8 @@ def _load_into(path: str, combined: Figure, unresolved_paths: list, seen: set) -
         if tok != "readScript" or i + 1 >= len(tokens):
             continue
         colon_path = tokens[i + 1]
-        resolved = resolve_poser_path(colon_path, path)
+        resolved = resolve_poser_path(colon_path, path, dir_cache=dir_cache)
         if resolved is None:
             unresolved_paths.append(colon_path)
             continue
-        _load_into(resolved, combined, unresolved_paths, seen)
+        _load_into(resolved, combined, unresolved_paths, seen, dir_cache)

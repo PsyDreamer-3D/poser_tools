@@ -43,6 +43,41 @@ def test_plain_leaf_file_parses_directly(tmp_path):
     assert result["figure"].actors[0].channels[0].internal_name == "Foo"
 
 
+def test_orchestrator_resolves_readscript_paths_whose_case_differs_from_disk(tmp_path):
+    # Real packages write ":Runtime:Libraries:Pose:..." for a folder that is
+    # "libraries/pose" on disk; a case-sensitive filesystem must still follow it.
+    runtime = tmp_path / "MyLib" / "Runtime"
+    orchestrator = runtime / "libraries" / "pose" / "Pack" / "! All.pz2"
+    _write(orchestrator, """\
+        {
+        version { number 4.01 }
+        readScript ":Runtime:Libraries:Pose:Leaves:INJDELTAS.FOO.PZ2"
+        readScript ":Runtime:Libraries:Pose:Leaves:Missing.pz2"
+        }
+        """)
+    _write(runtime / "libraries" / "pose" / "Leaves" / "InjDeltas.Foo.pz2", """\
+        {
+        version { number 4.01 }
+        actor head:1
+            {
+            channels
+                {
+                targetGeom Foo
+                    {
+                    name Foo
+                    deltas { d 0 0.1 0.2 0.3 }
+                    }
+                }
+            }
+        }
+        """)
+
+    result = load_injection_package(str(orchestrator))
+    assert [a.name for a in result["figure"].actors] == ["head"]
+    # Only the genuinely absent file is reported, with the path as written.
+    assert result["unresolved_paths"] == [":Runtime:Libraries:Pose:Leaves:Missing.pz2"]
+
+
 def test_orchestrator_follows_readscript_and_merges_actors(tmp_path):
     runtime = tmp_path / "MyLib" / "Runtime"
     pose_dir = runtime / "libraries" / "pose" / "Pack"
