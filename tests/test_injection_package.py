@@ -240,3 +240,86 @@ def test_real_orchestrator_package_resolves_and_merges():
         if ch.internal_name == "PBMDC_39"
     )
     assert len(brow_heavy.deltas) > 0
+
+
+_LEAF = """\
+    {
+    version { number 4.01 }
+    actor head:1
+        {
+        channels
+            {
+            targetGeom Foo
+                {
+                name Foo
+                deltas { d 0 0.1 0.2 0.3 }
+                }
+            }
+        }
+    }
+    """
+
+
+def test_orchestrator_finds_readscript_files_in_another_configured_root(tmp_path):
+    # The package lives in one library and names a file that exists only in another.
+    lib_a, lib_b = tmp_path / "LibA", tmp_path / "LibB"
+    orchestrator = lib_a / "Runtime" / "libraries" / "pose" / "Pack" / "! All.pz2"
+    _write(orchestrator, """\
+        {
+        version { number 4.01 }
+        readScript ":Runtime:libraries:!DAZ:Deltas:InjDeltas.Foo.pz2"
+        }
+        """)
+    _write(lib_b / "Runtime" / "libraries" / "!DAZ" / "Deltas" / "InjDeltas.Foo.pz2", _LEAF)
+
+    without = load_injection_package(str(orchestrator))
+    assert without["unresolved_paths"] == [":Runtime:libraries:!DAZ:Deltas:InjDeltas.Foo.pz2"]
+    assert without["figure"].actors == []
+
+    found = load_injection_package(str(orchestrator), extra_roots=[str(lib_b)])
+    assert found["unresolved_paths"] == []
+    assert [a.name for a in found["figure"].actors] == ["head"]
+
+
+def test_extra_roots_apply_through_nested_orchestrators_and_ignore_case(tmp_path):
+    # A (entry) -> B (nested orchestrator, found in LibB) -> leaf found in LibC, with
+    # the colon-paths' case differing from disk at every hop.
+    lib_a, lib_b, lib_c = tmp_path / "LibA", tmp_path / "LibB", tmp_path / "LibC"
+    entry = lib_a / "Runtime" / "libraries" / "pose" / "Entry.pz2"
+    _write(entry, """\
+        {
+        version { number 4.01 }
+        readScript ":Runtime:Libraries:!DAZ:Nested.pz2"
+        }
+        """)
+    _write(lib_b / "Runtime" / "libraries" / "!DAZ" / "Nested.pz2", """\
+        {
+        version { number 4.01 }
+        readScript ":RUNTIME:libraries:!daz:deltas:injdeltas.foo.pz2"
+        }
+        """)
+    _write(lib_c / "Runtime" / "libraries" / "!DAZ" / "Deltas" / "InjDeltas.Foo.pz2", _LEAF)
+
+    result = load_injection_package(str(entry), extra_roots=[str(lib_b), str(lib_c)])
+    assert result["unresolved_paths"] == []
+    assert [a.name for a in result["figure"].actors] == ["head"]
+
+
+def test_real_package_resolves_files_from_another_configured_root():
+    # "Custom Character Sets/.../!INJ Freja.pz2" names two files that live under the
+    # separate "Base Figures" content root, so it only loads when that root is searched.
+    if not os.path.isdir(_REAL_CONTENT_ROOT):
+        pytest.skip(f"Real Poser content mount not found at {_REAL_CONTENT_ROOT}")
+    package = os.path.join(
+        _REAL_CONTENT_ROOT, "Custom Character Sets", "Runtime", "libraries", "Pose",
+        "! Eldritch", "Freja", "!INJ Freja.pz2",
+    )
+    base_figures = os.path.join(_REAL_CONTENT_ROOT, "Base Figures")
+    if not (os.path.isfile(package) and os.path.isdir(base_figures)):
+        pytest.skip("Real package or Base Figures root not found at expected path")
+
+    assert len(load_injection_package(package)["unresolved_paths"]) == 2
+
+    result = load_injection_package(package, extra_roots=[base_figures])
+    assert result["unresolved_paths"] == []
+    assert len(result["figure"].actors) > 0

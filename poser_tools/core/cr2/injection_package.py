@@ -25,7 +25,7 @@ from .poser_io import read_poser_file
 from .poser_paths import resolve_poser_path
 
 
-def load_injection_package(path: str) -> dict:
+def load_injection_package(path: str, extra_roots=None) -> dict:
     """Load one morph-package file, resolving it fully into a single Figure.
 
     A plain inline-delta file is parsed and returned as-is. An orchestrator
@@ -41,6 +41,12 @@ def load_injection_package(path: str) -> dict:
     toggle, no deltas) parses fine and folds in like any other leaf file; it's
     naturally inert downstream since its channel carries no deltas.
 
+    `extra_roots` are the user's other Poser content roots (each the folder
+    that contains a Runtime folder), searched after the referencing file's own
+    Runtime. A package routinely lives in one library and names files in
+    another (a product's pose entry in one folder, its figure's deltas under
+    "Base Figures"), so without them those references go unresolved.
+
     Returns:
         {
             "figure": Figure,           -- combined actors from every file
@@ -53,12 +59,12 @@ def load_injection_package(path: str) -> dict:
     unresolved_paths = []
     # One cache per load: a big orchestrator names hundreds of files in a
     # handful of folders, and re-listing them per target dominates the cost.
-    _load_into(path, figure, unresolved_paths, seen=set(), dir_cache={})
+    _load_into(path, figure, unresolved_paths, seen=set(), dir_cache={}, extra_roots=extra_roots)
     return {"figure": figure, "unresolved_paths": unresolved_paths}
 
 
 def _load_into(path: str, combined: Figure, unresolved_paths: list, seen: set,
-               dir_cache: dict) -> None:
+               dir_cache: dict, extra_roots=None) -> None:
     real_path = os.path.realpath(path)
     if real_path in seen:
         return
@@ -84,8 +90,10 @@ def _load_into(path: str, combined: Figure, unresolved_paths: list, seen: set,
         if tok != "readScript" or i + 1 >= len(tokens):
             continue
         colon_path = tokens[i + 1]
-        resolved = resolve_poser_path(colon_path, path, dir_cache=dir_cache)
+        resolved = resolve_poser_path(
+            colon_path, path, extra_roots=extra_roots, dir_cache=dir_cache
+        )
         if resolved is None:
             unresolved_paths.append(colon_path)
             continue
-        _load_into(resolved, combined, unresolved_paths, seen, dir_cache)
+        _load_into(resolved, combined, unresolved_paths, seen, dir_cache, extra_roots)

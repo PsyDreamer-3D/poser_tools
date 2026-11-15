@@ -200,7 +200,11 @@ don't resume it without a specific reason to.
   `:Runtime:Libraries:Pose:` for a folder that is `libraries/pose` on disk, so on a case-sensitive
   filesystem a literal lookup missed ~71% of failing `readScript` targets and Apply silently loaded
   nothing for e.g. `! All Head Morphs.pz2` (256 of 257 unresolved). `load_injection_package()`
-  passes a per-load `dir_cache`. Phase 7 (thumbnail library via Blender's Asset Shelf) is scoped in
+  passes a per-load `dir_cache`. 7.0b: `load_injection_package(path, extra_roots)` searches the add-on
+  preferences' Runtime roots (Apply and Remove pass `get_runtime_roots(context)`) after the file's
+  own Runtime, since a package often names files that live in a different library, and a package
+  that yields no morphs because its files weren't found now says so (`no_morphs_report()`). Phase 7
+  (thumbnail library via Blender's Asset Shelf) is scoped in
   `docs/handoff-morph-injection.md`; only 7.0 is built.
 
 ## Testing

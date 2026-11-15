@@ -31,6 +31,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 - **Apply Morph Injection** no longer silently loads nothing from morph packages whose `readScript` paths differ in case from the folders on disk (e.g. `:Runtime:Libraries:Pose:` vs. `libraries/pose`), which is routine in real Poser content and fatal on case-sensitive filesystems (Linux). One real package, `! All Head Morphs.pz2`, resolved 1 of 257 files and applied none of its morphs; it now resolves all of them. The same fix lets a figure's reference `.obj` be found when its CR2 path differs in case.
+- **Apply** and **Remove Morph Injection** now look for a package's referenced files in every Poser Runtime folder added under Preferences, not only the one the package sits in. Many packages live in one library and name files in another (a product's entry in a custom folder, its figure's deltas under `Base Figures`), and those references were never found, even with the folder added. When none of a package's files can be found, the error now says so and points at the Runtime-folder preference instead of reporting "no morphs found".
 - **Prefix Armature Bones** button is no longer permanently greyed out — its `poll()` compared the active object to a string instead of checking `.type == 'ARMATURE'`.
 
 ---

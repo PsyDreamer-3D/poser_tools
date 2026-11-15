@@ -15,6 +15,7 @@ from .applyMorphInjection import (
     _library_item_display_name,
     _save_injected_morphs_record,
     load_injected_morphs_record,
+    no_morphs_report,
 )
 
 _REPORT_TEXT = "Poser Morph Removal Report"
@@ -88,12 +89,14 @@ class OT_RemoveMorphInjection_Operator(bpy.types.Operator):
             self.report({'ERROR'}, f"Injection file not found: {self.injection_filepath!r}")
             return {'CANCELLED'}
 
-        pkg = load_injection_package(self.injection_filepath)
+        pkg = load_injection_package(
+            self.injection_filepath, extra_roots=get_runtime_roots(context)
+        )
         index = build_channel_index(pkg["figure"])
         internal_names = list(index["by_internal"].keys())
 
         if not internal_names:
-            self.report({'WARNING'}, "No targetGeom morphs found in this package.")
+            self.report(*no_morphs_report(pkg))
             return {'CANCELLED'}
 
         shapekeys = obj.data.shape_keys.key_blocks
