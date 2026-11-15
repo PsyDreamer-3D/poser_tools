@@ -168,6 +168,9 @@ don't resume it without a specific reason to.
 - Phase 5.4: injected shape keys are named after the CR2 channel's own `name` property (e.g.
   `BrowHeavy`) instead of its cryptic `internal_name` (e.g. `PBMDC_39`) — `core/cr2/name_match.py`'s
   `display_name_for()` resolves it, falling back to `internal_name` if a channel never set one.
+  When a group's actors disagree on the label, the one on the channel with the most deltas wins,
+  not the first listed (a small `p`-prefixed partial actor often comes first: `pEarDeer` on the
+  neck, `EarDeer` on the head).
   `internal_name` is still the actual CR2 lookup key and is still checked (alongside the display
   name) for "already applied" idempotency, so a mesh injected before this change doesn't get a
   duplicate morph under the new name.
@@ -193,7 +196,9 @@ don't resume it without a specific reason to.
   literal `name -` placeholder; since that carries no real name to match against, `_apply_morphs()`
   now records `internal_name -> shape-key name` on `mesh["poser_injected_morphs"]` for every morph
   it creates, and Remove prefers that record over the picked file's own (possibly placeholder) name.
-  Works whether pointed at the original Inj file or its Rem counterpart. Reuses the same
+  Works whether pointed at the original Inj file or its Rem counterpart — except two vendor Rem
+  files (`DC_40_EarDeer`, `DC_42_EarFeline`) that name a different channel than their Inj file;
+  use the Inj file for those (deliberately not worked around, see the handoff doc). Reuses the same
   Runtime-library `prop_search()` picker from Phase 5.5 and the existing
   `injection_package.py`/`name_match.py` pipeline — no new `core/cr2/` module.
 - Phase 7.0: `core/cr2/poser_paths.resolve_poser_path()` matches colon-path components **ignoring

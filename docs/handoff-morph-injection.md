@@ -490,7 +490,21 @@ old raw name, and re-running shouldn't create a second copy under the new one.
 One real quirk this surfaced: `InjDeltas.DC_49_Mandible.pz2` declares `targetGeom PBMDC_49` twice
 (once per actor) with *different* `name` values (`pMandible`, then `Mandible`) — confirms
 `name_match.py`'s existing "first one seen wins if a figure is inconsistent" comment is a real,
-observed case, not just defensive wording.
+observed case, not just defensive wording. **First-seen turned out to be the wrong tiebreak for the
+shape-key name; see "Correction" below.**
+
+**Correction (2026-11-15): the label comes from the channel with the most deltas, not the first.**
+Owner UAT applied `InjDeltas.DC_40_EarDeer.pz2` and got a shape key named `pEarDeer`. The file
+lists a small partial actor first (`neck`, 891 deltas, `name pEarDeer`) and the main one second
+(`head`, 38,284 deltas, `name EarDeer`); first-seen picked the partial's `p`-prefixed variant.
+`display_name_for()` now takes the label of the group's channel carrying the most deltas (the
+morph's main body), keeping file order on ties and skipping channels with no label. Measured over
+every `InjDeltas.*` in `A3-H3MorExp1/Deltas` (16 files), exactly five names change, all losing a
+`p`: EarDeer, EarDragon, EarFeline, EarFin, Mandible. The other eleven were already unambiguous.
+Alternatives considered: stripping a leading `p` from any name (rejected: `p` is also a legitimate
+first letter, and it guesses at a convention instead of reading the data), and preferring the
+non-`p` name (same objection). Meshes injected before this keep their old `pEarDeer` key; Remove
+still finds it through `mesh["poser_injected_morphs"]`, which stores the key name actually created.
 
 Verified end-to-end in headless Blender (real Aiko3 import + real BrowHeavy injection): shape key
 comes in as `BrowHeavy`, not `PBMDC_39`; re-running the same injection reports it already present
@@ -616,6 +630,18 @@ error); re-applied and removed again via the *original* Inj file instead of the 
 works, confirming either file resolves correctly). No new pytest coverage needed — no new
 `core/cr2/` module, purely `bpy`-dependent operator code reusing already-tested pure-Python pieces
 (same manual-smoke-test convention as Apply itself).
+
+**Known content defect: two `RemDeltas.*` files name a different channel than their `InjDeltas.*`
+(found 2026-11-15, owner UAT).** `RemDeltas.DC_40_EarDeer.pz2` declares `PBMDC_40`, but
+`InjDeltas.DC_40_EarDeer.pz2` declares `PBMDC_01`; `DC_42_EarFeline` likewise (`PBMDC_42` vs.
+`PBMDC_02`). Remove matches by channel name, so pointing it at the Rem file reports "Not present"
+and removes nothing; pointing it at the Inj file works. Scanned every Inj/Rem pair under the
+owner's whole content drive: 2 of 2,305 pairs mismatch, both in `!DAZ/A3-H3MorExp1/Deltas`. Cause unknown;
+probably a vendor authoring slip (I haven't checked what Poser itself does with these Rem files).
+**Decision: not worked around.** A sibling-lookup fallback (when a Rem file's channels match
+nothing, read the same-named Inj file in its folder) is ~15 lines, but it would paper over
+two broken files with logic every other Remove run pays for, and the Inj file already works.
+Revisit if more mismatches turn up in other vendors' content.
 
 ## Phase 7 — Thumbnail library for picking packages (scoping, 2026-11-14; 7.0 and 7.0b done, 7.1+ not started)
 
