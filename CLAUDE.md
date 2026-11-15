@@ -114,7 +114,8 @@ naming-correspondence numbers and the `cr2_importer` parser bug write-up. Read t
 `docs/handoff-morph-injection.md` — a separate, bigger capability than consolidation: importing a
 3rd-party Poser morph package (`.pz2` injection template) and adding its morphs as *new* shape keys
 to an already-imported mesh, not just grouping ones the FBX export already baked. Builds on
-`core/cr2/`. Phases 1-3 and 5 are shipped; Phase 4 (PMD binary reader) is **paused indefinitely** —
+`core/cr2/`. Phases 1-3, 5 and 6 are shipped, plus Phase 7.0/7.0b (path resolution); the rest of
+Phase 7 is scoped, not built. Phase 4 (PMD binary reader) is **paused indefinitely** —
 don't resume it without a specific reason to.
 
 - Phase 1 (vertex correspondence: `core/cr2/obj_io.py` + `core/cr2/mesh_correspondence.py`) matches

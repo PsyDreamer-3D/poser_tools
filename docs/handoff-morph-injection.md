@@ -617,7 +617,7 @@ works, confirming either file resolves correctly). No new pytest coverage needed
 `core/cr2/` module, purely `bpy`-dependent operator code reusing already-tested pure-Python pieces
 (same manual-smoke-test convention as Apply itself).
 
-## Phase 7 — Thumbnail library for picking packages (scoping, 2026-11-14; 7.0 done, 7.1+ not started)
+## Phase 7 — Thumbnail library for picking packages (scoping, 2026-11-14; 7.0 and 7.0b done, 7.1+ not started)
 
 **Goal.** Replace the two `prop_search()` dropdowns with a thumbnail grid for choosing injection and
 removal packages from the owner's Poser Runtime libraries, using Blender's Asset Shelf. The
