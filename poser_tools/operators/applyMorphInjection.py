@@ -60,6 +60,43 @@ def _save_injected_morphs_record(obj, record: dict) -> None:
     obj.data[_INJECTED_MORPHS_PROP] = json.dumps({"version": 1, "morphs": record})
 
 
+# The last report this add-on's apply/picker operators made, kept so an operator that starts
+# another one with bpy.ops can show it. An operator called from Python keeps its own reports
+# off the UI (WARNING/INFO are not shown anywhere, ERROR becomes an exception in the caller),
+# which made "Nothing to apply" and every other message from the picker vanish when it was
+# started from Apply's dialog.
+_last_report = None
+
+
+def say(operator, types, message):
+    """operator.report(), remembered for call_nested()."""
+    global _last_report
+    _last_report = (types, message)
+    operator.report(types, message)
+
+
+def call_nested(operator, op_call, **kwargs):
+    """Run another operator with bpy.ops and show what it reported, from `operator`.
+
+    `operator` must be one the UI invoked itself, so its reports are shown. An ERROR report
+    raises RuntimeError out of bpy.ops; that is swallowed only when the nested operator
+    reported something, since any other RuntimeError is a real failure.
+    """
+    global _last_report
+    _last_report = None
+    try:
+        result = op_call('INVOKE_DEFAULT', **kwargs)
+    except RuntimeError:
+        if _last_report is None:
+            raise
+        result = {'CANCELLED'}
+    if _last_report is not None:
+        # Left set on purpose: this operator may itself have been nested, and its caller
+        # needs the same message.
+        operator.report(*_last_report)
+    return result
+
+
 def no_morphs_report(pkg) -> tuple:
     """(report level, message) for a package that yielded no morphs.
 
@@ -198,7 +235,7 @@ class OT_ApplyMorphInjection_Operator(bpy.types.Operator):
         if not self.injection_filepath and self.selected_injection_name:
             item = self.injection_library_items.get(self.selected_injection_name)
             if item is None:
-                self.report({'ERROR'}, f"{self.selected_injection_name!r} doesn't match a package in your Poser library.")
+                say(self, {'ERROR'}, f"{self.selected_injection_name!r} doesn't match a package in your Poser library.")
                 return {'CANCELLED'}
             self.injection_filepath = item.filepath
 
@@ -206,13 +243,13 @@ class OT_ApplyMorphInjection_Operator(bpy.types.Operator):
         if not self.reference_obj_filepath and self.selected_cr2_name:
             item = self.cr2_library_items.get(self.selected_cr2_name)
             if item is None:
-                self.report({'ERROR'}, f"{self.selected_cr2_name!r} doesn't match a figure in your Poser library.")
+                say(self, {'ERROR'}, f"{self.selected_cr2_name!r} doesn't match a figure in your Poser library.")
                 return {'CANCELLED'}
             cr2_filepath = item.filepath
             figure = CR2Parser.parse_file(cr2_filepath)
             resolve_geom_file(figure, cr2_filepath, extra_roots=get_runtime_roots(context))
             if not (figure.geom_file and os.path.isfile(figure.geom_file)):
-                self.report(
+                say(self,
                     {'ERROR'},
                     f"Could not resolve a reference OBJ from {os.path.basename(cr2_filepath)}'s figureResFile."
                 )
@@ -220,10 +257,10 @@ class OT_ApplyMorphInjection_Operator(bpy.types.Operator):
             self.reference_obj_filepath = figure.geom_file
 
         if not os.path.isfile(self.injection_filepath):
-            self.report({'ERROR'}, f"Injection file not found: {self.injection_filepath!r}")
+            say(self, {'ERROR'}, f"Injection file not found: {self.injection_filepath!r}")
             return {'CANCELLED'}
         if not os.path.isfile(self.reference_obj_filepath):
-            self.report({'ERROR'}, f"Reference OBJ not found: {self.reference_obj_filepath!r}")
+            say(self, {'ERROR'}, f"Reference OBJ not found: {self.reference_obj_filepath!r}")
             return {'CANCELLED'}
 
         # Remember the reference OBJ (and, if it came from the library
@@ -235,8 +272,8 @@ class OT_ApplyMorphInjection_Operator(bpy.types.Operator):
 
         if self.use_morph_picker and not self.selected_morphs:
             # Which morphs to apply is the picker's question; it comes back here with the answer.
-            bpy.ops.poser.pick_injection_morphs(
-                'INVOKE_DEFAULT',
+            call_nested(
+                self, bpy.ops.poser.pick_injection_morphs,
                 injection_filepath=self.injection_filepath,
                 reference_obj_filepath=self.reference_obj_filepath,
             )
@@ -246,7 +283,7 @@ class OT_ApplyMorphInjection_Operator(bpy.types.Operator):
             selected = json.loads(self.selected_morphs) if self.selected_morphs else None
             only_leaves = json.loads(self.selected_leaves) if self.selected_leaves else None
         except ValueError as exc:
-            self.report({'ERROR'}, f"Couldn't read the selected morphs: {exc}")
+            say(self, {'ERROR'}, f"Couldn't read the selected morphs: {exc}")
             return {'CANCELLED'}
 
         pkg = load_injection_package(
@@ -264,9 +301,9 @@ class OT_ApplyMorphInjection_Operator(bpy.types.Operator):
 
         if not morph_names:
             if selected is not None:
-                self.report({'WARNING'}, f"None of the {len(selected)} selected morph(s) could be read from the package's files.")
+                say(self, {'WARNING'}, f"None of the {len(selected)} selected morph(s) could be read from the package's files.")
             else:
-                self.report(*no_morphs_report(pkg))
+                say(self, *no_morphs_report(pkg))
             return {'CANCELLED'}
         self._selection_count = None if selected is None else len(selected)
 
@@ -363,7 +400,7 @@ class OT_ApplyMorphInjection_Operator(bpy.types.Operator):
                 return None
             return unpack_correspondence(bytes(entry["data"]), n_source, n_target)
         except (KeyError, TypeError, AttributeError, ValueError) as exc:
-            self.report({'WARNING'}, f"Ignoring the cached vertex correspondence: {exc}")
+            say(self, {'WARNING'}, f"Ignoring the cached vertex correspondence: {exc}")
             self._rebuild_reason = f"the cached copy was unusable: {exc}"
             return None
 
@@ -379,7 +416,7 @@ class OT_ApplyMorphInjection_Operator(bpy.types.Operator):
             }
             note += "; cached on the mesh for next time"
         except (ValueError, TypeError, OverflowError, RuntimeError) as exc:
-            self.report({'WARNING'}, f"Couldn't cache the vertex correspondence on the mesh: {exc}")
+            say(self, {'WARNING'}, f"Couldn't cache the vertex correspondence on the mesh: {exc}")
             note += f"; NOT cached: {exc}"
         self._correspondence_note = note
 
@@ -390,7 +427,7 @@ class OT_ApplyMorphInjection_Operator(bpy.types.Operator):
             # The thread isn't forcibly killed -- it finishes in the
             # background and its result is just never picked up. Safe: it
             # never touches bpy.data.
-            self.report(
+            say(self,
                 {'WARNING'},
                 "Apply Morph Injection cancelled -- no shape keys were added.",
             )
@@ -414,7 +451,7 @@ class OT_ApplyMorphInjection_Operator(bpy.types.Operator):
 
         if self._thread_error is not None:
             context.window_manager.progress_end()
-            self.report({'ERROR'}, f"Vertex correspondence build failed: {self._thread_error}")
+            say(self, {'ERROR'}, f"Vertex correspondence build failed: {self._thread_error}")
             return {'CANCELLED'}
 
         try:
@@ -523,7 +560,7 @@ class OT_ApplyMorphInjection_Operator(bpy.types.Operator):
 
         summary = f"Applied {applied}/{n_morphs} morph(s) from {os.path.basename(self.injection_filepath)}"
         has_warning = bool(pkg["unresolved_paths"] or empty_skipped or self._missing_selected)
-        self.report(
+        say(self,
             {'WARNING'} if has_warning else {'INFO'},
             f"{summary} — see the '{_REPORT_TEXT}' text block.",
         )

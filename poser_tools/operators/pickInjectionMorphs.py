@@ -9,7 +9,7 @@ from bpy.props import BoolProperty, CollectionProperty, IntProperty, StringPrope
 from ..core.cr2.injection_scan import classify_morphs, estimate_apply, scan_injection_package
 from ..core.functionsShapeKeys import is_jcm_shapekey
 from ..properties.poserToolsPreferences import get_runtime_roots
-from .applyMorphInjection import _CORRESPONDENCE_PROP, no_morphs_report
+from .applyMorphInjection import _CORRESPONDENCE_PROP, call_nested, no_morphs_report, say
 
 
 class PoserMorphRow(bpy.types.PropertyGroup):
@@ -70,7 +70,7 @@ class OT_PickInjectionMorphs_Operator(bpy.types.Operator):
         obj = context.active_object
         scan = scan_injection_package(self.injection_filepath, extra_roots=get_runtime_roots(context))
         if not scan["morphs"]:
-            self.report(*no_morphs_report(scan))
+            say(self, *no_morphs_report(scan))
             return {'CANCELLED'}
 
         existing = obj.data.shape_keys.key_blocks.keys() if obj.data.shape_keys else []
@@ -79,7 +79,7 @@ class OT_PickInjectionMorphs_Operator(bpy.types.Operator):
 
         if not choosable:
             reasons = sorted({status for _m, status in classified})
-            self.report(
+            say(self,
                 {'WARNING'},
                 f"Nothing to apply from {os.path.basename(self.injection_filepath)}: "
                 f"all {len(classified)} morph(s) are {', '.join(reasons)}.",
@@ -125,7 +125,7 @@ class OT_PickInjectionMorphs_Operator(bpy.types.Operator):
     def execute(self, context):
         picked = [r for r in self.rows if r.selected and not r.locked]
         if not picked:
-            self.report({'WARNING'}, "No morphs chosen -- nothing applied.")
+            say(self, {'WARNING'}, "No morphs chosen -- nothing applied.")
             return {'CANCELLED'}
         return self._apply([(r.internal_name, r.leaves.split("\n")) for r in picked])
 
@@ -134,8 +134,8 @@ class OT_PickInjectionMorphs_Operator(bpy.types.Operator):
         leaves = []
         for _internal_name, paths in picked:
             leaves.extend(p for p in paths if p not in leaves)
-        bpy.ops.poser.apply_morph_injection(
-            'INVOKE_DEFAULT',
+        call_nested(
+            self, bpy.ops.poser.apply_morph_injection,
             injection_filepath=self.injection_filepath,
             reference_obj_filepath=self.reference_obj_filepath,
             selected_morphs=json.dumps([internal_name for internal_name, _paths in picked]),
