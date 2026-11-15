@@ -47,6 +47,22 @@ def _save_injected_morphs_record(obj, record: dict) -> None:
     obj.data[_INJECTED_MORPHS_PROP] = json.dumps({"version": 1, "morphs": record})
 
 
+def no_morphs_report(pkg) -> tuple:
+    """(report level, message) for a package that yielded no morphs.
+
+    When the cause is files the loader couldn't find, say so: "no morphs found"
+    sends the user looking at the package instead of at their Runtime folders.
+    """
+    unresolved = pkg["unresolved_paths"]
+    if unresolved:
+        return {'ERROR'}, (
+            f"None of this package's {len(unresolved)} referenced file(s) could be found "
+            f"(e.g. {unresolved[0]}). Add the Poser Runtime folder that contains them under "
+            "Preferences > Add-ons > Poser Tools."
+        )
+    return {'WARNING'}, "No targetGeom morphs found in this package."
+
+
 class PoserLibraryItem(bpy.types.PropertyGroup):
     """One Runtime-indexed CR2/PZ2 file for the searchable pickers below.
 
@@ -190,12 +206,14 @@ class OT_ApplyMorphInjection_Operator(bpy.types.Operator):
         if cr2_filepath:
             obj[_REFERENCE_CR2_PROP] = cr2_filepath
 
-        pkg = load_injection_package(self.injection_filepath)
+        pkg = load_injection_package(
+            self.injection_filepath, extra_roots=get_runtime_roots(context)
+        )
         index = build_channel_index(pkg["figure"])
         morph_names = list(index["by_internal"].keys())
 
         if not morph_names:
-            self.report({'WARNING'}, "No targetGeom morphs found in this injection package.")
+            self.report(*no_morphs_report(pkg))
             return {'CANCELLED'}
 
         obj_verts = load_obj_vertex_positions(self.reference_obj_filepath)

@@ -1,6 +1,6 @@
 # Poser Tools
 
-Blender 4.4+ add-on (extension, `id = "poser_tools"`, GPL-3.0-or-later). All source lives in `poser_tools/`.
+Blender 5.0.1+ add-on (extension, `id = "poser_tools"`, GPL-3.0-or-later). All source lives in `poser_tools/`.
 
 House conventions — no `bpy.ops` for data mutation, bmesh vertex-first deletion, diagnostics via
 `bpy.data.texts` instead of `print()`, the `core/`/`operators/`/`properties/`/`ui/` split with
@@ -114,7 +114,8 @@ naming-correspondence numbers and the `cr2_importer` parser bug write-up. Read t
 `docs/handoff-morph-injection.md` — a separate, bigger capability than consolidation: importing a
 3rd-party Poser morph package (`.pz2` injection template) and adding its morphs as *new* shape keys
 to an already-imported mesh, not just grouping ones the FBX export already baked. Builds on
-`core/cr2/`. Phases 1-3 and 5 are shipped; Phase 4 (PMD binary reader) is **paused indefinitely** —
+`core/cr2/`. Phases 1-3, 5 and 6 are shipped, plus Phase 7.0/7.0b (path resolution); the rest of
+Phase 7 is scoped, not built. Phase 4 (PMD binary reader) is **paused indefinitely** —
 don't resume it without a specific reason to.
 
 - Phase 1 (vertex correspondence: `core/cr2/obj_io.py` + `core/cr2/mesh_correspondence.py`) matches
@@ -195,6 +196,17 @@ don't resume it without a specific reason to.
   Works whether pointed at the original Inj file or its Rem counterpart. Reuses the same
   Runtime-library `prop_search()` picker from Phase 5.5 and the existing
   `injection_package.py`/`name_match.py` pipeline — no new `core/cr2/` module.
+- Phase 7.0: `core/cr2/poser_paths.resolve_poser_path()` matches colon-path components **ignoring
+  case** (exact match first, on-disk casing returned). Real orchestrators write
+  `:Runtime:Libraries:Pose:` for a folder that is `libraries/pose` on disk, so on a case-sensitive
+  filesystem a literal lookup missed ~71% of failing `readScript` targets and Apply silently loaded
+  nothing for e.g. `! All Head Morphs.pz2` (256 of 257 unresolved). `load_injection_package()`
+  passes a per-load `dir_cache`. 7.0b: `load_injection_package(path, extra_roots)` searches the add-on
+  preferences' Runtime roots (Apply and Remove pass `get_runtime_roots(context)`) after the file's
+  own Runtime, since a package often names files that live in a different library, and a package
+  that yields no morphs because its files weren't found now says so (`no_morphs_report()`). Phase 7
+  (thumbnail library via Blender's Asset Shelf) is scoped in
+  `docs/handoff-morph-injection.md`; only 7.0 is built.
 
 ## Testing
 

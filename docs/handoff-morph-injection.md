@@ -617,6 +617,247 @@ works, confirming either file resolves correctly). No new pytest coverage needed
 `core/cr2/` module, purely `bpy`-dependent operator code reusing already-tested pure-Python pieces
 (same manual-smoke-test convention as Apply itself).
 
+## Phase 7 — Thumbnail library for picking packages (scoping, 2026-11-14; 7.0 and 7.0b done, 7.1+ not started)
+
+**Goal.** Replace the two `prop_search()` dropdowns with a thumbnail grid for choosing injection and
+removal packages from the owner's Poser Runtime libraries, using Blender's Asset Shelf. The
+dropdowns stay as the fallback.
+
+### What a feasibility pass established (all headless unless marked *owner-verified*)
+
+- **The asset system only knows datablocks in `.blend` files.** There is no "virtual asset" for a
+  `.pz2`, and Python can't add ID types: `bpy.utils.register_class` accepts a fixed list (Panel,
+  UIList, Menu, Header, Operator, KeyingSetInfo, RenderEngine, AssetShelf, FileHandler,
+  PropertyGroup, AddonPreferences, NodeTree, Node, NodeSocket, Gizmo, GizmoGroup), and the ID types
+  are closed. So the library is a **generated index**: one stand-in datablock per Poser file.
+- **Stand-in type is `Image`.** `Action` is rejected: the built-in Pose Library shelf's
+  `asset_poll` is `asset.id_type == 'ACTION'`, so every stand-in would appear as a pose.
+  `Mesh`/`Text` can be marked as assets but `preview_ensure()` returns `None`, so no thumbnail.
+  `NodeTree` feeds Blender's modifier/node Add menus. Thumbnail-capable types, identical on
+  5.0.1/5.2.4/5.3: Action, Collection (not 5.0.1), Image, Light, Material, NodeTree, Object, Scene,
+  Texture, World. Image has no Python-side consumer in Blender's own scripts; its C-side drag/drop
+  behavior is the part not inspectable headless (*owner-verified:* Image assets behave normally in
+  the Asset Browser).
+- **Thumbnails.** The Poser `.png` is set via `preview_ensure()` + `image_pixels_float` and survives
+  `bpy.data.libraries.write` and a fresh-process reload, with no subprocess workaround
+  (`cr2_importer`'s subprocess patch solves a different problem: saving an imported figure as an
+  asset). Poser thumbnails are ~91px.
+- **Scale.** 10,000 stand-ins: ~4s to build, 7 MB, <1s to read. The real 3,144-entry library:
+  ~7s, 31 MB.
+- **Payload.** Custom keys on `asset.asset_data` (not the ID) survive write/reload; ID-level custom
+  props are unreachable from a non-local `AssetRepresentation`. `catalog_simple_name` stays blank
+  when `catalog_id` is set from Python (Blender fills it only via its own catalog UI), so don't
+  read it; the catalog tree itself works from `blender_assets.cats.txt`.
+- **Names are not identity.** ID names are unique per `.blend`, and 1,411 of 3,144 entries (45%)
+  share a name with another (`BrowHeavy` ×5, `00`/`01`/… ×11). The prototype's `~N` suffixes
+  (`BrowHeavy~5`) are unacceptable as display names.
+- **The shelf (*owner-verified on 5.3*).** A Python `AssetShelf` appears whenever *its own* `poll`
+  passes (the pose shelf's Pose-mode rule is its own poll, not an API limit; mine shows for any
+  active mesh). `wm.call_asset_shelf_popover` opens it as a popup. A single click calls
+  `bl_activate_operator` with `context.asset` set; the operator received the entry name, tags and
+  path. Registration also checked on 5.2.4 and 5.0.1. `template_asset_view` was removed in 5.0,
+  so a grid cannot be embedded in our own popup: shelf popover or Asset Browser only.
+
+### Prerequisite bug found: orchestrator paths are case-sensitive
+
+`core/cr2/poser_paths.resolve_poser_path()` uses `os.path.isfile` on the literal colon-path, but
+real content mixes `:Runtime:Libraries:Pose:` with on-disk `libraries/pose`. Of 1,246 `readScript`
+targets that failed, **881 (71%) resolve once matched case-insensitively.** Real consequence today:
+`! All Head Morphs.pz2` has 257 targets; the shipped `load_injection_package()` leaves 256
+unresolved and loads zero actors, so **Apply Morph Injection applies nothing for it** (the earlier
+BrowHeavy test worked only because that path happened to be all-lowercase). `cr2_importer`'s
+`PoserPathResolver` had a lowercase fallback that the trimmed port dropped. This is a Linux-only
+symptom on case-sensitive filesystems, and it was the first thing to fix (7.0).
+
+**7.0 (done).** `resolve_poser_path()` now tries the exact path first (unchanged behavior), then
+matches each component ignoring case and returns the on-disk casing. An optional `dir_cache`
+(caller-owned) avoids re-listing folders; `load_injection_package()` creates one per load. The walk
+doesn't backtrack between case-variant sibling folders (can't occur on the case-insensitive
+filesystems Poser content is authored on). Real-data result: `! All Head Morphs.pz2` went from 256
+of 257 targets unresolved and 0 actors to 0 unresolved, 642 actors, 259 morph names;
+`All Head.pz2` has 1 unresolved, a file that is genuinely absent from the library. Seven new tests
+(synthetic trees, a cache test, a loader test, and a real-library regression that skips when the
+content mount is absent); the real-data test and the synthetic ones fail against the old resolver.
+Also benefits `cr2_parser.resolve_geom_file()` (`figureResFile` → OBJ), which shares the resolver.
+
+### Classification (the real risk, independent of UI)
+
+A library entry is rarely the file that holds deltas. `INJ Base V4.pz2` is an orchestrator that
+`readScript`s `InjDeltas.V4BaseAll.pz2`, itself an orchestrator over ~85 leaf files, so the rule
+must **recurse** (depth-capped, cycle-guarded, case-insensitive; the loader already does this).
+Prototype rule: follow `readScript` to the leaf files, sniff each (≤16 KB), then bucket:
+
+| Bucket (3,144 thumbnailed, plain-text entries) | Count |
+|---|--:|
+| Injection: ≥1 leaf with real deltas, all targets resolve | 1,754 (+6 with missing targets) |
+| Removal: leaves are all zero-delta / `name -` | 581 (+5 with missing targets) |
+| Pose/expression: dials morph *values*, carries no deltas | 701 |
+| All targets missing *from the file's own Runtime* (see correction below) | 62 |
+| Injection via `.pmd` (Phase 4, unsupported) | 28 |
+| Other (unexamined) | 7 |
+
+Caveats, so nobody over-trusts the table:
+- "Injection" is an upper bound. 1,285 of its 1,760 entries mix injection and removal leaves
+  (980 with neutral names, e.g. `All Glute-Hip-Abs`: 38 + 38; 303 named `INJ …`; 2 named `REM …`),
+  and `REM Base V4` is classified as injection because 152 of its leaves carry real deltas
+  (unexplained). Leaf evidence alone can't label inj vs. rem, so name tokens (`INJ`/`REM`) should
+  break ties.
+- **Remove only needs channel names**, so one asset can offer both actions; the badge is a hint,
+  not a gate.
+- Not classified: **2,553 compressed (`.p2z`/gzip) files, 2,232 with thumbnails.** They need
+  `read_poser_file()` to sniff. v1 scope is a decision (below).
+- Thumbnails live on user-facing entries, not leaves: only 38 of 2,970 delta-bearing files have
+  one, versus 2,369 of 4,122 orchestrators.
+- **Thumbnail-less entries and `.rsr`.** Of 21,076 `.pz2`/`.p2z` files, 10,719 have no
+  `.png`/`.jpg`; 1,670 of those have a same-named `.rsr`. These are **not** renamed BMPs (nor
+  `.ico`, despite a leading `00 00 01 00`): all 41 sampled are classic Mac OS resource forks, each
+  with a single `PICT` (QuickDraw picture, 91×91, ~21 KB). ImageMagick decodes one correctly, but
+  Blender can't (it "loads" them as 0×0), and Blender's bundled Python has no PICT decoder, so
+  recovering them means a small PICT v2 bitmap decoder in the add-on. Deferred; v1 uses a
+  placeholder.
+
+**Correction: most "missing" targets live in another configured runtime.** The classification
+above resolved each file's targets against *its own* Runtime only, and I labelled the 62
+all-missing packages "content not installed". Re-run against all 20 roots in the owner's
+`LibraryPrefs.xml`, **2,872 of 2,921 missing targets (98%) are found in the `Base Figures` root**,
+and 67 of the 73 flagged entries become complete. Only 6 stay incomplete: 3 are missing a single
+file each (the V3/M3 head packages, all lacking `InjDeltas.HdJapanese.pz2`, a file that exists
+nowhere in the library) and 3 are genuinely absent (`The Freak REM`, `claws-INJ`/`claws-REM`). The
+add-on has the same blind spot: `load_injection_package()` (used by Apply *and* Remove) is never
+passed the configured Runtime roots, although `resolve_geom_file()` and the pickers are, so adding
+the missing runtime in Preferences would not help today. Fix = **7.0b** below. The classifier and
+index must resolve against the same configured roots, so "incomplete" depends on configuration and
+the index must rebuild when the roots change; the unresolved list could also point at a root from
+`LibraryPrefs.xml` that isn't configured yet.
+
+### Proposed architecture (files, not yet written)
+
+- `core/cr2/poser_paths.py`: case-insensitive resolution with a per-directory listing cache.
+  Pure Python, pytest.
+- `core/cr2/library_index.py` (new, pure Python, MIT-adapted from `runtime_index.py`'s scan/cache
+  idea): walk configured roots → entries `{root, rel_path, kind, status, thumb, catalog}`;
+  recursion/classification above; incremental by mtime. pytest against synthetic trees plus the
+  real library when present.
+- `operators/buildLibraryIndex.py` (new): background thread + modal timer (same pattern as Apply),
+  writes the stand-in `.blend`(s) and `blender_assets.cats.txt` under
+  `bpy.utils.user_resource('CONFIG')`: **never into the Poser folders.** Registers the library
+  with `asset_libraries.new(name=..., directory=...)`, keyword args only (5.3 added optional
+  parameters).
+- `ui/`: `POSER_AST_injections` shelf (poll: mesh active; `filter_image`; `asset_poll` on a `poser`
+  tag; `NO_ASSET_DRAG`), a sidebar button for the popover, and a Rebuild button + status in the
+  add-on preferences.
+- `operators/applyMorphInjection.py` / `removeMorphInjection.py`: accept `(root, rel_path)` from the
+  clicked asset's metadata and resolve it through the configured roots.
+- Docs and `CLAUDE.md` updated per phase, as usual.
+
+### Measured cost of applying a package (2026-11-14, Blender 5.3, Aiko3, 72,712 verts)
+
+`! All Morphs.pz2` (A3/H3, 18 morphs): load+parse 0.3s; correspondence build **33.8s**; per morph
+**~24 ms** (11 ms to build positions + 13 ms to add the shape key); whole package 34.5s. So the
+"30+ seconds per morph" is really **30+ seconds per Apply *run***: the correspondence build repeats
+on every run, so adding morphs one at a time pays it every time, while a whole package pays it
+once. Peak RSS was 2.7 GB, almost all from the FBX import, not from applying.
+Not measured: applying the 259-morph Victoria 3 head package (no V3 figure here). Its *load* is
+16.4s (257 leaf files, ~64 ms each, dominated by delta parsing), and per-morph cost should scale
+linearly but I haven't seen it. Implications:
+
+- **Correspondence caching is now a real need**, not a someday item: it's what fixes one-at-a-time use.
+- **A morph picker is still worth building**, for a different reason: a package can add hundreds of
+  shape keys at once (clutter), and package load time grows with file count. If the picker knows
+  which leaf file holds each morph, Apply can parse **only the selected leaves** (257 files → a few).
+
+### Phasing (each its own atomic PR). Proposed order, pending owner OK
+
+The cache and the picker fix today's pain and don't depend on the library, so they move ahead of it.
+
+- **7.0** ✅ Case-insensitive resolver + tests. Fixes Apply today.
+- **7.0b** ✅ Search the configured Runtime roots when loading a package: `load_injection_package(path,
+  extra_roots=None)` threaded through the recursion, and Apply/Remove pass
+  `get_runtime_roots(context)`. The same root list must feed the index later. Three tests (two
+  synthetic, including a nested orchestrator across three roots with case differences at every hop;
+  one real: `Custom Character Sets/.../!INJ Freja.pz2`, whose 2 files live under `Base Figures`) that
+  fail without the change. Verified end to end on 5.3.0 and 5.0.1 with a throwaway orchestrator in
+  a second root naming the real BrowHeavy leaf: no roots → cancelled with the new message; roots
+  configured → applied (value 0) and removed. Also changed: a package yielding no morphs *because
+  its files weren't found* now reports an ERROR naming the count, the first path and the
+  Preferences setting, instead of "no targetGeom morphs found" (which pointed at the package, not
+  at the configuration). The headless check monkeypatches `get_runtime_roots`; the preferences
+  reader itself is unchanged and was not exercised here.
+- **7.1** Correspondence cache. Store the reference-OBJ→mesh index map on the mesh (≈290 KB as
+  int32, compressed), validated against vertex count and a spot hash of the basis positions so a
+  changed mesh can't reuse a stale map. Expected: re-run cost drops from ~34s to roughly the
+  load/validate time (unmeasured).
+- **7.2** Morph picker. After a package is chosen, a dialog lists its morphs (display names via
+  `display_name_for`; status new / already present / JCM-skipped) with checkboxes, Blender's
+  built-in UIList filter box, select all/none; Apply handles only the selection and parses only
+  those leaf files. Needs a cheap channel-declaration scan (names + owning leaf file, no deltas),
+  also needed by 7.6.
+- **7.3** Classifier + index builder, no UI (per-folder `.blend` files, flags, placeholders).
+  Verify against the real library and headless on 5.0.1/5.2.4/5.3.
+- **7.4** Shelf + activate operator → opens the (7.2) dialog pre-filled. Dropdowns stay for setups
+  with no Runtime roots or no index built yet.
+- **7.5** Figure shelf: pick a CR2 with a thumbnail, sets `poser_reference_cr2`.
+- **7.6** Phase 5 tie-in: resolved morph names in the asset description, searchable in the browser.
+
+### Decisions
+
+**Resolved (owner, 2026-11-14):**
+
+1. **Which entries appear.** Poses and expressions are hidden. Poser pose assets have already
+   proven painful to translate into Blender's coordinate system, and expressions fall in the same
+   bucket for now. `.pmd` packages are out of scope and hidden (Phase 4 stays paused).
+2. **A click** opens the Apply popup pre-filled with the package (Apply mutates the mesh, so one
+   extra click is the safer default). Applying directly can come later.
+3. **Entries with no thumbnail** get a placeholder (see the `.rsr` finding above).
+4. **One index `.blend` per source folder.**
+5. **Incomplete packages are shown and flagged**, not hidden. They remain loadable; Apply already
+   skips unresolvable `readScript` targets and reports them. Packages with *every* target missing
+   load nothing and are hidden. Flag = a dimmed thumbnail with a red frame, an `incomplete` tag, and
+   "[INCOMPLETE: N of M files missing]" in the description. Judged against the *configured* roots
+   (see the correction above): with all 20 of the owner's roots that is 3 flagged entries (1 missing
+   file each) and 3 hidden, not the 11 and 62 the own-runtime-only run suggested; the demo library
+   still reflects the own-runtime-only numbers.
+6. **Minimum Blender version is 5.0.1.** Supported by the API history: `AssetShelf.filter_*` and
+   `bl_drag_operator` were added in **5.0**, so the shelf as prototyped cannot exist on 4.x. Nothing
+   in 5.1 to 5.3 is needed (5.1 added `ShapeKey.select`/`Object.shape_keys_selected`, which could
+   later enable "remove the selected morphs"; 5.2/5.3 changed remote/project asset libraries,
+   irrelevant here). `blender_version_min` (manifest, `bl_info`, README, `CLAUDE.md`) is now 5.0.1, which
+   drops 4.4/4.5 users (they stay on 1.0.1). With a 5.0.1 floor the `hasattr(AssetShelf)` gate
+   is unnecessary.
+7. **Compressed (`.p2z`/gzip) entries are deferred.**
+
+**Deferred idea.** Expressions act on morph channels only, so they could in principle be applied as
+shape-key *values* on a figure, unlike poses. A separate feature (it touches `targetGeom` *value*
+channels, not deltas), not part of Phase 7.
+
+**Open: same names across folders.** One file per folder removes the datablock collision (names
+are unique within a folder), but names still repeat *across* files: 409 names, e.g. `Emaciated` ×8
+and `BrowHeavy` ×5. The repeats are different products, not noise: the five `BrowHeavy` are A3/H3,
+David Head INJ, David Head **REM**, V3 Features and Michael 4. The folder is what tells them apart.
+Candidate handling, cheapest first: (a) plain names; the catalog tree (folder) and the tooltip
+(description = path) carry the product; (b) additionally suffix only the colliding names with the
+parent folder, `BrowHeavy (!V3 Features INJ)`; (c) use the package's resolved morph names (7.6) as
+the label where the entry name is generic. Not decided: waiting on the owner to look at the demo
+(plain names, per-folder files) in the live shelf. Untested: how the Asset Browser/shelf list
+same-named assets from different files.
+
+### Not doing, and why
+
+- Custom ID/asset types: impossible from Python (above).
+- `.pmd` packages: Phase 4 is paused; they are hidden from the library, not applied.
+- Writing the index into the user's Poser content: it's their library; the index is derived data.
+- Embedding the thumbnail grid in our own popup: `template_asset_view` was removed in 5.0.
+
+### Still unverified
+
+Live reading of custom `asset_data` keys through the shelf's `asset.metadata` (same struct; the
+updated demo script now displays them on click, so the owner's next run will show it); shelf
+behavior for same-named assets across files; the Asset Browser with 10k+ Image assets in a real
+session; applying the 259-morph Victoria 3 head package (no V3 figure here, so per-morph cost at
+that size is extrapolated); the asset API's stability (5.3 added projects/remote-library
+parameters; additive so far). Prototype scripts live in the session scratchpad and are not
+committed.
+
 ## Open decisions
 
 - ~~Phase 1: `mathutils.kdtree` vs. pure-numpy.~~ Resolved: pure numpy, stays pytest-testable.
