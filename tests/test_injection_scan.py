@@ -192,3 +192,11 @@ def test_estimate_scales_with_deltas_morphs_and_vertices():
     assert size == 2 * 72_712 * 12
     assert estimate_apply([], 72_712) == (0.0, 0)
 
+
+def test_a_p_prefixed_label_counts_as_present_when_the_baked_key_has_no_p():
+    # FBX consolidation strips the partial marker from keys it promotes to standalone morphs,
+    # while a package's main channel can still be labelled "pBarbarian" (StephPetite Body: 46 of 95).
+    from core.cr2.injection_scan import STATUS_PRESENT, classify_morphs
+    morphs = [_morph("PBMBarbarian", "pBarbarian"), _morph("PBMRuben", "pRubenesque")]
+    result = classify_morphs(morphs, ["Basis", "Barbarian"], lambda n: False)
+    assert [s for _m, s in result] == [STATUS_PRESENT, ""]

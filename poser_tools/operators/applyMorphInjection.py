@@ -20,7 +20,12 @@ from ..core.cr2.correspondence_cache import (
 from ..core.cr2.cr2_parser import CR2Parser, resolve_geom_file
 from ..core.cr2.injection_package import load_injection_package
 from ..core.cr2.mesh_correspondence import build_vertex_correspondence
-from ..core.cr2.name_match import build_channel_index, display_name_for, match_channel_group
+from ..core.cr2.name_match import (
+    build_channel_index,
+    display_name_for,
+    match_channel_group,
+    present_name_candidates,
+)
 from ..core.cr2.obj_io import load_obj_vertex_positions
 from ..core.functionsShapeKeys import is_jcm_shapekey
 from ..core.utils import _write_report
@@ -452,9 +457,9 @@ class OT_ApplyMorphInjection_Operator(bpy.types.Operator):
             if is_jcm_shapekey(name):
                 jcm_skipped.append(name)
                 continue
-            # Check internal_name too: a mesh from before this naming change
-            # may already carry the morph under its old raw-internal-name key.
-            if name in obj.data.shape_keys.key_blocks or internal_name in obj.data.shape_keys.key_blocks:
+            # Not just `name`: the mesh may carry the morph under its old raw
+            # internal name, or (from the FBX) without a leading "p".
+            if any(n in obj.data.shape_keys.key_blocks for n in present_name_candidates(name, internal_name)):
                 already_present.append(name)
                 continue
 

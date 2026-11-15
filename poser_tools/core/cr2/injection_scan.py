@@ -22,7 +22,7 @@ import re
 from dataclasses import dataclass, field
 
 from .injection_package import resolve_package_files
-from .name_match import pick_display_name
+from .name_match import pick_display_name, present_name_candidates
 from .poser_io import read_poser_file
 
 _BRACE_RE = re.compile(r'[{}]')
@@ -188,14 +188,16 @@ def classify_morphs(morphs, existing_names, is_jcm) -> list:
     `existing_names` are the mesh's current shape-key names, `is_jcm` the add-on's
     own JCM predicate (passed in to keep this module free of Blender imports).
     A mesh injected before shape keys were named by label may carry a morph under
-    its internal name, so that counts as present too (same rule as Apply).
+    its internal name, and so does the bare form of a `p`-prefixed label
+    (name_match.present_name_candidates), so that counts as present too, the
+    same rule as Apply.
     """
     existing = set(existing_names)
     result = []
     for morph in morphs:
         if is_jcm(morph.display_name):
             status = STATUS_JCM
-        elif morph.display_name in existing or morph.internal_name in existing:
+        elif any(n in existing for n in present_name_candidates(morph.display_name, morph.internal_name)):
             status = STATUS_PRESENT
         elif morph.uses_binary_morph:
             status = STATUS_BINARY

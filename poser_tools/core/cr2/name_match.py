@@ -32,6 +32,8 @@ Channel list was fine for Phase 5's original purpose (grouping FBX-baked
 shape-key names, actor-agnostic) but not for actually applying deltas.
 """
 
+import re
+
 from .cr2_parser import Figure
 
 
@@ -88,6 +90,24 @@ def display_name_for(index: dict, internal_name: str) -> str:
     candidates = [(len(ch.deltas), ch.display_name)
                   for _actor, ch in index["by_internal"].get(internal_name, [])]
     return pick_display_name(candidates) or internal_name
+
+
+def present_name_candidates(display_name: str, internal_name: str) -> list:
+    """Shape-key names under which a morph may already be on a mesh.
+
+    The label and the internal name (a mesh injected before keys were named by
+    label carries the latter). A label with Poser/DAZ's leading `p` partial
+    marker also counts as its stripped form: a figure's FBX bakes the morph
+    under the bare name, because shape-key consolidation strips the `p` from the
+    standalone keys it promotes, while a package's main channel can be labelled
+    `pBarbarian`. Without this, 46 of the 95 morphs in StephPetite's Body package
+    read as new on a mesh that already has them.
+    """
+    names = [display_name, internal_name]
+    stripped = re.sub(r"^p(?=[A-Z])", "", display_name, count=1)
+    if stripped != display_name:
+        names.append(stripped)
+    return names
 
 
 def pick_display_name(candidates) -> str:
