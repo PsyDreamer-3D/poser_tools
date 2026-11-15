@@ -766,6 +766,49 @@ linearly but I haven't seen it. Implications:
   shape keys at once (clutter), and package load time grows with file count. If the picker knows
   which leaf file holds each morph, Apply can parse **only the selected leaves** (257 files → a few).
 
+### 7.1 as built: the correspondence cache (2026-11-15)
+
+Apply now reuses the vertex correspondence instead of rebuilding it when the inputs are unchanged.
+Measured on real Aiko3 + `InjDeltas.DC_39_BrowHeavy.pz2`: cold run 33.4s (5.3) / 29.5s (5.0.1);
+**warm run 0.4s / 0.5s, 63-80x faster**, with the shape-key positions bit-identical to the cold run.
+
+Design, and where it departs from the sketch in the phasing list below:
+
+- **Keyed on the exact inputs, not a spot check.** `core/cr2/correspondence_cache.py`
+  (`correspondence_key`) is a SHA-256 over a format version, `match_epsilon`, and the bytes of the
+  reference-OBJ vertices and the mesh's basis positions. An edited mesh or a different reference
+  OBJ is simply a different key, so a stale map can't be applied silently; the earlier plan's "vertex
+  count plus a spot hash" was weaker and no simpler. Verified: a 0.5 mm edit to one vertex forces a
+  rebuild and the report says why.
+- **Stored on the mesh, not on disk.** `mesh["poser_correspondence"] = {"key", "data"}`; `data` is
+  an `npz` (`matched_index` as int32, `distance` as float64, the transform). It travels with the
+  `.blend`, needs no cache directory, pruning or per-version config path, and a custom-property
+  *group* makes the Custom Properties panel show an "Edit Value" button instead of drawing the blob.
+  A save/reload round trip is exact on 5.3 and 5.0.1. Size on the real figure is 620 KB (against
+  ~190 MB of shape keys once a big package is applied). `distance` stays float64 because collision
+  resolution compares it; the cached result is a drop-in equal of a fresh one
+  (`duplicate_targets` is rebuilt from `matched_index` by the same `find_duplicate_targets()`).
+- **A disk cache is possible later, for a case this doesn't cover**: re-importing the same FBX into
+  a new file. The cache key came out **identical on Blender 5.3.0 and 5.0.1**, so the FBX import is
+  bit-identical across those versions and a content-keyed disk cache would hit across sessions.
+  Not built: the mesh-level cache already covers repeated use of one mesh, and a disk cache adds a
+  directory to manage.
+- **Failure is reported, never silent.** An unreadable blob (corrupt, wrong format version, wrong
+  size, out-of-range vertex index) is warned about, the correspondence is rebuilt, and the cache is
+  overwritten with the good copy. `unpack_correspondence()` bounds-checks `matched_index` (it later
+  indexes mesh arrays) and loads with `allow_pickle=False`: a blob can arrive in a `.blend` from
+  anyone. Only the exception *type* goes in the user-facing message; numpy's own text for non-npz
+  bytes suggests `allow_pickle=True`.
+- The report gains a **Vertex correspondence:** line: "reused from this mesh's cache", or "built in
+  Ns; cached on the mesh for next time", with the reason when a cached copy was rejected.
+- Tests: 15 in `tests/test_correspondence_cache.py` (key sensitivity, exact round trip against a
+  real build, unmatched points and duplicates, and every rejection path). The real-figure runs
+  above are headless on 5.3.0 and 5.0.1.
+- **Not verified:** the interactive path (background thread plus modal timer) can't run headless.
+  It calls the same `_remember_correspondence()` from `modal()` once the thread ends; read through,
+  not exercised. A manual run in the UI is the check: the first Apply shows the percentage cursor,
+  a second Apply of another package on the same mesh should finish in a moment.
+
 ### Phasing (each its own atomic PR). Proposed order, pending owner OK
 
 The cache and the picker fix today's pain and don't depend on the library, so they move ahead of it.
@@ -783,10 +826,7 @@ The cache and the picker fix today's pain and don't depend on the library, so th
   Preferences setting, instead of "no targetGeom morphs found" (which pointed at the package, not
   at the configuration). The headless check monkeypatches `get_runtime_roots`; the preferences
   reader itself is unchanged and was not exercised here.
-- **7.1** Correspondence cache. Store the reference-OBJ→mesh index map on the mesh (≈290 KB as
-  int32, compressed), validated against vertex count and a spot hash of the basis positions so a
-  changed mesh can't reuse a stale map. Expected: re-run cost drops from ~34s to roughly the
-  load/validate time (unmeasured).
+- **7.1** ✅ Correspondence cache (details below).
 - **7.2** Morph picker. After a package is chosen, a dialog lists its morphs (display names via
   `display_name_for`; status new / already present / JCM-skipped) with checkboxes, Blender's
   built-in UIList filter box, select all/none; Apply handles only the selection and parses only
@@ -876,10 +916,8 @@ committed.
   BrowHeavy morph through the *real* import+apply pipeline got zero collisions. Not re-verified at
   full-figure scale — worth revisiting if a future session has reason to touch Phase 1's match-rate
   numbers again.
-- Correspondence caching across multiple `poser.apply_morph_injection` runs on the same mesh —
-  still deferred post-Phase 5.2; the real-run cost (now ~32s, down from ~5 minutes) is dominated by
-  one `build_vertex_correspondence()` call regardless of package size, so this remains the lever if
-  a *second* run's cost specifically becomes a real complaint — Phase 5.2 only fixed the first run.
+- ~~Correspondence caching across multiple `poser.apply_morph_injection` runs on the same mesh.~~
+  Done in Phase 7.1: the owner's one-at-a-time use made the repeated ~34s build the real complaint.
 - Importing an injection package onto a *separate* geometry object (to apply as a shape key later,
   rather than directly onto the currently-active mesh) — raised during Phase 5.2's UAT, owner's own
   call to defer: ties into the planned `mesh_tools` merge, which will bring over the mirror-image
