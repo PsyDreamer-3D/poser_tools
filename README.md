@@ -6,7 +6,7 @@ A collection of tools to make working with rigged figures exported from Poser as
 
 ## Requirements
 
-- Blender 4.4.0 or later
+- Blender 5.0.1 or later
 - Licensed under [GPL-3.0-or-later](https://spdx.org/licenses/GPL-3.0-or-later.html)
 
 ---

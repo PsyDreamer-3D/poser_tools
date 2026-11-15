@@ -821,8 +821,8 @@ The cache and the picker fix today's pain and don't depend on the library, so th
    `bl_drag_operator` were added in **5.0**, so the shelf as prototyped cannot exist on 4.x. Nothing
    in 5.1 to 5.3 is needed (5.1 added `ShapeKey.select`/`Object.shape_keys_selected`, which could
    later enable "remove the selected morphs"; 5.2/5.3 changed remote/project asset libraries,
-   irrelevant here). The manifest and docs still say 4.4, so bumping `blender_version_min` is its
-   own change (drops 4.4/4.5 users), not yet made. With a 5.0.1 floor the `hasattr(AssetShelf)` gate
+   irrelevant here). `blender_version_min` (manifest, `bl_info`, README, `CLAUDE.md`) is now 5.0.1, which
+   drops 4.4/4.5 users (they stay on 1.0.1). With a 5.0.1 floor the `hasattr(AssetShelf)` gate
    is unnecessary.
 7. **Compressed (`.p2z`/gzip) entries are deferred.**
 

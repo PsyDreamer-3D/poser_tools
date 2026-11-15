@@ -1,6 +1,6 @@
 # Poser Tools
 
-Blender 4.4+ add-on (extension, `id = "poser_tools"`, GPL-3.0-or-later). All source lives in `poser_tools/`.
+Blender 5.0.1+ add-on (extension, `id = "poser_tools"`, GPL-3.0-or-later). All source lives in `poser_tools/`.
 
 House conventions — no `bpy.ops` for data mutation, bmesh vertex-first deletion, diagnostics via
 `bpy.data.texts` instead of `print()`, the `core/`/`operators/`/`properties/`/`ui/` split with
