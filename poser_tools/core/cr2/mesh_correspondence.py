@@ -130,12 +130,6 @@ def build_vertex_correspondence(source_points, target_points, match_epsilon=1e-3
     matched_index = matched_index.copy()
     matched_index[unmatched] = -1
 
-    groups = defaultdict(list)
-    for src_idx, tgt_idx in enumerate(matched_index):
-        if tgt_idx >= 0:
-            groups[int(tgt_idx)].append(src_idx)
-    duplicate_targets = {k: v for k, v in groups.items() if len(v) > 1}
-
     if progress_callback:
         progress_callback(1.0)
 
@@ -143,8 +137,19 @@ def build_vertex_correspondence(source_points, target_points, match_epsilon=1e-3
         "matched_index": matched_index,
         "distance": distance,
         "transform": transform,
-        "duplicate_targets": duplicate_targets,
+        "duplicate_targets": find_duplicate_targets(matched_index),
     }
+
+
+def find_duplicate_targets(matched_index):
+    """{target_index: [source_index, ...]} for every target matched by more
+    than one source point. Derived purely from `matched_index`, so a cached
+    correspondence rebuilds it instead of storing it."""
+    groups = defaultdict(list)
+    for src_idx, tgt_idx in enumerate(matched_index):
+        if tgt_idx >= 0:
+            groups[int(tgt_idx)].append(src_idx)
+    return {k: v for k, v in groups.items() if len(v) > 1}
 
 
 def _coarse_align(source, target, sample_size=500, seed=0):

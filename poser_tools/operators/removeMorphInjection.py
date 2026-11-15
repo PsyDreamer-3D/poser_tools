@@ -6,7 +6,7 @@ import bpy
 from bpy.props import CollectionProperty, StringProperty
 
 from ..core.cr2 import runtime_index
-from ..core.cr2.injection_package import load_injection_package
+from ..core.cr2.injection_package import load_injection_package, paired_injection_path
 from ..core.cr2.name_match import build_channel_index, display_name_for
 from ..core.utils import _write_report
 from ..properties.poserToolsPreferences import get_runtime_roots
@@ -102,8 +102,16 @@ class OT_RemoveMorphInjection_Operator(bpy.types.Operator):
         shapekeys = obj.data.shape_keys.key_blocks
         injected_record = load_injected_morphs_record(obj)
         removed = []
-        not_found = []
+        not_found = []   # (internal_name, shown name) pairs, so a fallback can retire entries
         record_changed = False
+
+        def remove_morph(internal_name, name):
+            nonlocal record_changed
+            obj.shape_key_remove(shapekeys[name])
+            removed.append(name)
+            if injected_record.pop(internal_name, None) is not None:
+                record_changed = True
+
         for internal_name in internal_names:
             # A RemDeltas.* file carries no real `name` of its own (Poser
             # only needs it to match and zero the channel, not to relabel
@@ -122,12 +130,38 @@ class OT_RemoveMorphInjection_Operator(bpy.types.Operator):
             if not name or name == "Basis":
                 continue
             if name in shapekeys:
-                obj.shape_key_remove(shapekeys[name])
-                removed.append(name)
-                if injected_record.pop(internal_name, None) is not None:
-                    record_changed = True
+                remove_morph(internal_name, name)
             else:
-                not_found.append(name)
+                not_found.append((internal_name, name))
+
+        # Two real RemDeltas.* files name a different channel than their
+        # InjDeltas.* pair (docs/handoff-morph-injection.md, Phase 6), so their
+        # channels match nothing on the mesh. Only when a Rem file matched
+        # nothing at all, fall back to the channels of the Inj file with the
+        # same name: Poser pairs the two by file name, and the Inj file's
+        # channels are the ones Apply recorded.
+        fallback_notes = []
+        unmatched = {internal for internal, _name in not_found}
+        for leaf in pkg["leaf_paths"] if unmatched else []:
+            paired = paired_injection_path(leaf)
+            if paired is None:
+                continue
+            leaf_channels = set(build_channel_index(load_injection_package(leaf)["figure"])["by_internal"])
+            if not leaf_channels or not leaf_channels <= unmatched:
+                continue
+            paired_index = build_channel_index(load_injection_package(paired)["figure"])
+            hits = 0
+            for internal_name in paired_index["by_internal"]:
+                name = injected_record.get(internal_name) or display_name_for(paired_index, internal_name)
+                if name and name != "Basis" and name in shapekeys:
+                    remove_morph(internal_name, name)
+                    hits += 1
+            if hits:
+                not_found = [(i, n) for i, n in not_found if i not in leaf_channels]
+                fallback_notes.append(
+                    f"{os.path.basename(leaf)} names channel(s) {sorted(leaf_channels)} that "
+                    f"{os.path.basename(paired)} doesn't; removed by the Inj file's channels instead."
+                )
 
         if record_changed:
             _save_injected_morphs_record(obj, injected_record)
@@ -141,8 +175,9 @@ class OT_RemoveMorphInjection_Operator(bpy.types.Operator):
                 f"{len(pkg['unresolved_paths'])} readScript reference(s) could not be resolved: "
                 f"{pkg['unresolved_paths']}"
             )
+        header.extend(fallback_notes)
         lines = header + ["", "Removed:", *[f"  {n}" for n in removed],
-                           "", "Not present (nothing to remove):", *[f"  {n}" for n in not_found]]
+                           "", "Not present (nothing to remove):", *[f"  {n}" for _i, n in not_found]]
         _write_report(context, _REPORT_TEXT, lines)
 
         summary = f"Removed {len(removed)}/{len(internal_names)} morph(s) from {os.path.basename(self.injection_filepath)}"

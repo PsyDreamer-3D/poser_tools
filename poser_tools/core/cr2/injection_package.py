@@ -53,18 +53,46 @@ def load_injection_package(path: str, extra_roots=None) -> dict:
             "unresolved_paths": [str],  -- readScript targets that couldn't be
                                            resolved to a real file on disk;
                                            reported, not silently dropped
+            "leaf_paths": [str],        -- every file that was actually parsed
+                                           (the file itself for a plain package)
         }
     """
     figure = Figure(source_file=path)
     unresolved_paths = []
+    leaf_paths = []
     # One cache per load: a big orchestrator names hundreds of files in a
     # handful of folders, and re-listing them per target dominates the cost.
-    _load_into(path, figure, unresolved_paths, seen=set(), dir_cache={}, extra_roots=extra_roots)
-    return {"figure": figure, "unresolved_paths": unresolved_paths}
+    _load_into(path, figure, unresolved_paths, leaf_paths, seen=set(), dir_cache={},
+               extra_roots=extra_roots)
+    return {"figure": figure, "unresolved_paths": unresolved_paths, "leaf_paths": leaf_paths}
 
 
-def _load_into(path: str, combined: Figure, unresolved_paths: list, seen: set,
-               dir_cache: dict, extra_roots=None) -> None:
+def paired_injection_path(removal_path: str):
+    """The `InjDeltas.X` file next to a `RemDeltas.X` one, or None.
+
+    Poser ships the two as a pair, matched by file name. Remove normally works
+    from the channel names inside the picked file, but two real Rem files
+    (docs/handoff-morph-injection.md, Phase 6) name a different channel than
+    their Inj file, so the filename pairing is the only link left. Case is
+    ignored, like every other path lookup here.
+    """
+    folder, name = os.path.split(removal_path)
+    prefix = "remdeltas."
+    if not name.lower().startswith(prefix):
+        return None
+    wanted = ("injdeltas." + name[len(prefix):]).lower()
+    try:
+        siblings = os.listdir(folder or ".")
+    except OSError:
+        return None
+    for sibling in siblings:
+        if sibling.lower() == wanted:
+            return os.path.join(folder, sibling)
+    return None
+
+
+def _load_into(path: str, combined: Figure, unresolved_paths: list, leaf_paths: list,
+               seen: set, dir_cache: dict, extra_roots=None) -> None:
     real_path = os.path.realpath(path)
     if real_path in seen:
         return
@@ -80,6 +108,7 @@ def _load_into(path: str, combined: Figure, unresolved_paths: list, seen: set,
         # never combined.actor_map, so a same-named actor declared in two
         # different leaf files just means actor_map keeps whichever was
         # processed last; both actor objects still exist in .actors.
+        leaf_paths.append(path)
         sub_figure = CR2Parser.parse_text(text, source_file=path)
         combined.actors.extend(sub_figure.actors)
         for actor in sub_figure.actors:
@@ -96,4 +125,4 @@ def _load_into(path: str, combined: Figure, unresolved_paths: list, seen: set,
         if resolved is None:
             unresolved_paths.append(colon_path)
             continue
-        _load_into(resolved, combined, unresolved_paths, seen, dir_cache, extra_roots)
+        _load_into(resolved, combined, unresolved_paths, leaf_paths, seen, dir_cache, extra_roots)

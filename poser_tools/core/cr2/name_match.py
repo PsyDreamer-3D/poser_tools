@@ -71,16 +71,25 @@ def display_name_for(index: dict, internal_name: str) -> str:
 
     Injection-delta channels (core/cr2/injection_package.py) commonly use a
     cryptic sequential internal_name (e.g. "PBMDC_39") with a real label in
-    `name` (e.g. "BrowHeavy") -- unlike a base figure's own FBM channels,
+    `name` (e.g. "BrowHeavy") -- unlike a base figure's own FBX-baked channels,
     where `name` is often just a differently-cased variant of the same
     convention (e.g. "PBMFullFigure" / "pFullFigure"), so this is only worth
     calling where the channel's own label is wanted, not the FBX-baked name
     (name_match.py's other lookups exist for that).
+
+    A group's actors can disagree on the label, and the first one in file order
+    is not reliable: real packages list a small partial actor (neck, 891 deltas)
+    ahead of the main one (head, 38k deltas), and the partial's own label is
+    the "p"-prefixed variant ("pEarDeer" vs. "EarDeer"). The channel carrying
+    the most deltas is the morph's main body, so its label wins; ties (and
+    channels with no deltas of their own, e.g. a binary-morph reference) keep
+    file order.
     """
-    for _actor, ch in index["by_internal"].get(internal_name, []):
-        if ch.display_name:
-            return ch.display_name
-    return internal_name
+    named = [ch for _actor, ch in index["by_internal"].get(internal_name, []) if ch.display_name]
+    if not named:
+        return internal_name
+    # max() returns the first of equal keys, which is what keeps file order on ties.
+    return max(named, key=lambda ch: len(ch.deltas)).display_name
 
 
 def match_channel_group(index: dict, name: str) -> list:

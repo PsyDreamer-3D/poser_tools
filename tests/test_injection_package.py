@@ -6,7 +6,7 @@ import textwrap
 
 import pytest
 
-from core.cr2.injection_package import load_injection_package
+from core.cr2.injection_package import load_injection_package, paired_injection_path
 
 _REAL_CONTENT_ROOT = (
     "/run/media/jess-green/236a91c9-2598-40dd-b968-9c0f0be8a903/Artwork/Poser Content"
@@ -323,3 +323,39 @@ def test_real_package_resolves_files_from_another_configured_root():
     result = load_injection_package(package, extra_roots=[base_figures])
     assert result["unresolved_paths"] == []
     assert len(result["figure"].actors) > 0
+
+
+def test_leaf_paths_lists_every_parsed_file_but_not_the_orchestrator(tmp_path):
+    runtime = tmp_path / "Runtime" / "libraries"
+    runtime.mkdir(parents=True)
+    leaf_text = "{\nactor head:1\n\t{\n\tchannels\n\t\t{\n\t\ttargetGeom X\n\t\t\t{\n\t\t\tname X\n\t\t\t}\n\t\t}\n\t}\n}\n"
+    for name in ("a.pz2", "b.pz2"):
+        (runtime / name).write_text(leaf_text)
+    orchestrator = runtime / "! All.pz2"
+    orchestrator.write_text('{\nreadScript ":Runtime:libraries:a.pz2"\nreadScript ":Runtime:libraries:b.pz2"\n}\n')
+
+    result = load_injection_package(str(orchestrator))
+    assert sorted(os.path.basename(p) for p in result["leaf_paths"]) == ["a.pz2", "b.pz2"]
+    # A plain package is its own single leaf.
+    single = str(runtime / "a.pz2")
+    assert load_injection_package(single)["leaf_paths"] == [single]
+
+
+def test_paired_injection_path_matches_by_file_name_ignoring_case(tmp_path):
+    inj = tmp_path / "INJDELTAS.DC_42_EarFeline.pz2"
+    inj.write_text("{}")
+    rem = tmp_path / "RemDeltas.DC_42_EarFeline.pz2"
+    rem.write_text("{}")
+    assert paired_injection_path(str(rem)) == str(inj)
+
+
+@pytest.mark.parametrize("name", ["InjDeltas.Foo.pz2", "Foo.pz2"])
+def test_paired_injection_path_only_applies_to_removal_files(tmp_path, name):
+    (tmp_path / name).write_text("{}")
+    assert paired_injection_path(str(tmp_path / name)) is None
+
+
+def test_paired_injection_path_is_none_when_there_is_no_pair(tmp_path):
+    rem = tmp_path / "RemDeltas.Lonely.pz2"
+    rem.write_text("{}")
+    assert paired_injection_path(str(rem)) is None
