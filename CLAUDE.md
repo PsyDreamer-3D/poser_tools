@@ -196,9 +196,10 @@ don't resume it without a specific reason to.
   literal `name -` placeholder; since that carries no real name to match against, `_apply_morphs()`
   now records `internal_name -> shape-key name` on `mesh["poser_injected_morphs"]` for every morph
   it creates, and Remove prefers that record over the picked file's own (possibly placeholder) name.
-  Works whether pointed at the original Inj file or its Rem counterpart — except two vendor Rem
-  files (`DC_40_EarDeer`, `DC_42_EarFeline`) that name a different channel than their Inj file;
-  use the Inj file for those (deliberately not worked around, see the handoff doc). Reuses the same
+  Works whether pointed at the original Inj file or its Rem counterpart. Two vendor Rem files
+  (`DC_40_EarDeer`, `DC_42_EarFeline`) name a different channel than their Inj file, so a Rem file
+  that matches nothing falls back to its same-named `InjDeltas.*` sibling (`paired_injection_path()`).
+  Reuses the same
   Runtime-library `prop_search()` picker from Phase 5.5 and the existing
   `injection_package.py`/`name_match.py` pipeline — no new `core/cr2/` module.
 - Phase 7.0: `core/cr2/poser_paths.resolve_poser_path()` matches colon-path components **ignoring

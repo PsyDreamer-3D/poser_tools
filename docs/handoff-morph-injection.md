@@ -638,10 +638,20 @@ works, confirming either file resolves correctly). No new pytest coverage needed
 and removes nothing; pointing it at the Inj file works. Scanned every Inj/Rem pair under the
 owner's whole content drive: 2 of 2,305 pairs mismatch, both in `!DAZ/A3-H3MorExp1/Deltas`. Cause unknown;
 probably a vendor authoring slip (I haven't checked what Poser itself does with these Rem files).
-**Decision: not worked around.** A sibling-lookup fallback (when a Rem file's channels match
-nothing, read the same-named Inj file in its folder) is ~15 lines, but it would paper over
-two broken files with logic every other Remove run pays for, and the Inj file already works.
-Revisit if more mismatches turn up in other vendors' content.
+**Decision, reversed the same day: work around it.** The first call was to leave it: a sibling-lookup
+fallback seemed like logic every Remove run would pay for, to paper over two broken files, and the
+Inj file already worked. Owner UAT then hit it on *both* broken pairs (EarDeer, then EarFeline, the
+second time after restarting Blender, so not a stale session), and the Rem file is the one Poser
+users naturally pick. A workaround that needs the user to know which two of 2,305 files are broken
+isn't one. Built it narrowly so ordinary runs don't pay: `injection_package.paired_injection_path()`
+maps `RemDeltas.X` to the `InjDeltas.X` in the same folder (case-insensitive), and
+`load_injection_package()` now also returns `leaf_paths` (the files actually parsed, so it works
+through an orchestrator too). Remove uses the pair only for a Rem file **all** of whose channels
+matched nothing on the mesh; the report says which file was substituted. A healthy pair never
+touches the fallback (verified: BrowHeavy), and a file with no Inj sibling behaves as before.
+Verified headless on the real Aiko3: applied EarFeline, EarDeer and BrowHeavy, then removed each
+via its `RemDeltas.*`; all three gone, the record empty, and a repeat run reports "not present"
+with no error.
 
 ## Phase 7 — Thumbnail library for picking packages (scoping, 2026-11-14; 7.0 and 7.0b done, 7.1+ not started)
 
