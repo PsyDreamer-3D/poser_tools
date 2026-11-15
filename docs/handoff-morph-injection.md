@@ -692,7 +692,7 @@ Prototype rule: follow `readScript` to the leaf files, sniff each (≤16 KB), th
 | Injection: ≥1 leaf with real deltas, all targets resolve | 1,754 (+6 with missing targets) |
 | Removal: leaves are all zero-delta / `name -` | 581 (+5 with missing targets) |
 | Pose/expression: dials morph *values*, carries no deltas | 701 |
-| All targets missing (content not installed) | 62 |
+| All targets missing *from the file's own Runtime* (see correction below) | 62 |
 | Injection via `.pmd` (Phase 4, unsupported) | 28 |
 | Other (unexamined) | 7 |
 
@@ -715,6 +715,20 @@ Caveats, so nobody over-trusts the table:
   Blender can't (it "loads" them as 0×0), and Blender's bundled Python has no PICT decoder, so
   recovering them means a small PICT v2 bitmap decoder in the add-on. Deferred; v1 uses a
   placeholder.
+
+**Correction: most "missing" targets live in another configured runtime.** The classification
+above resolved each file's targets against *its own* Runtime only, and I labelled the 62
+all-missing packages "content not installed". Re-run against all 20 roots in the owner's
+`LibraryPrefs.xml`, **2,872 of 2,921 missing targets (98%) are found in the `Base Figures` root**,
+and 67 of the 73 flagged entries become complete. Only 6 stay incomplete: 3 are missing a single
+file each (the V3/M3 head packages, all lacking `InjDeltas.HdJapanese.pz2`, a file that exists
+nowhere in the library) and 3 are genuinely absent (`The Freak REM`, `claws-INJ`/`claws-REM`). The
+add-on has the same blind spot: `load_injection_package()` (used by Apply *and* Remove) is never
+passed the configured Runtime roots, although `resolve_geom_file()` and the pickers are, so adding
+the missing runtime in Preferences would not help today. Fix = **7.0b** below. The classifier and
+index must resolve against the same configured roots, so "incomplete" depends on configuration and
+the index must rebuild when the roots change; the unresolved list could also point at a root from
+`LibraryPrefs.xml` that isn't configured yet.
 
 ### Proposed architecture (files, not yet written)
 
@@ -757,6 +771,18 @@ linearly but I haven't seen it. Implications:
 The cache and the picker fix today's pain and don't depend on the library, so they move ahead of it.
 
 - **7.0** ✅ Case-insensitive resolver + tests. Fixes Apply today.
+- **7.0b** ✅ Search the configured Runtime roots when loading a package: `load_injection_package(path,
+  extra_roots=None)` threaded through the recursion, and Apply/Remove pass
+  `get_runtime_roots(context)`. The same root list must feed the index later. Three tests (two
+  synthetic, including a nested orchestrator across three roots with case differences at every hop;
+  one real: `Custom Character Sets/.../!INJ Freja.pz2`, whose 2 files live under `Base Figures`) that
+  fail without the change. Verified end to end on 5.3.0 and 5.0.1 with a throwaway orchestrator in
+  a second root naming the real BrowHeavy leaf: no roots → cancelled with the new message; roots
+  configured → applied (value 0) and removed. Also changed: a package yielding no morphs *because
+  its files weren't found* now reports an ERROR naming the count, the first path and the
+  Preferences setting, instead of "no targetGeom morphs found" (which pointed at the package, not
+  at the configuration). The headless check monkeypatches `get_runtime_roots`; the preferences
+  reader itself is unchanged and was not exercised here.
 - **7.1** Correspondence cache. Store the reference-OBJ→mesh index map on the mesh (≈290 KB as
   int32, compressed), validated against vertex count and a spot hash of the basis positions so a
   changed mesh can't reuse a stale map. Expected: re-run cost drops from ~34s to roughly the
@@ -786,9 +812,11 @@ The cache and the picker fix today's pain and don't depend on the library, so th
 4. **One index `.blend` per source folder.**
 5. **Incomplete packages are shown and flagged**, not hidden. They remain loadable; Apply already
    skips unresolvable `readScript` targets and reports them. Packages with *every* target missing
-   (62) load nothing and are hidden. Flag = a dimmed thumbnail with a red frame, an `incomplete`
-   tag, and "[INCOMPLETE: N of M files missing]" in the description. (Some are mostly empty:
-   `+BishiM3Body 04 INJ` has 2 of 78 files present.)
+   load nothing and are hidden. Flag = a dimmed thumbnail with a red frame, an `incomplete` tag, and
+   "[INCOMPLETE: N of M files missing]" in the description. Judged against the *configured* roots
+   (see the correction above): with all 20 of the owner's roots that is 3 flagged entries (1 missing
+   file each) and 3 hidden, not the 11 and 62 the own-runtime-only run suggested; the demo library
+   still reflects the own-runtime-only numbers.
 6. **Minimum Blender version is 5.0.1.** Supported by the API history: `AssetShelf.filter_*` and
    `bl_drag_operator` were added in **5.0**, so the shelf as prototyped cannot exist on 4.x. Nothing
    in 5.1 to 5.3 is needed (5.1 added `ShapeKey.select`/`Object.shape_keys_selected`, which could
