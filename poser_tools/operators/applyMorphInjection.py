@@ -12,6 +12,11 @@ from bpy.props import CollectionProperty, StringProperty
 from ..core.cr2 import runtime_index
 from ..core.cr2.actor_vertex_index import load_obj_actor_vertex_groups
 from ..core.cr2.apply_injection import build_shape_key_positions
+from ..core.cr2.correspondence_cache import (
+    correspondence_key,
+    pack_correspondence,
+    unpack_correspondence,
+)
 from ..core.cr2.cr2_parser import CR2Parser, resolve_geom_file
 from ..core.cr2.injection_package import load_injection_package
 from ..core.cr2.mesh_correspondence import build_vertex_correspondence
@@ -25,6 +30,9 @@ _REPORT_TEXT = "Poser Morph Injection Report"
 _REFERENCE_OBJ_PROP = "poser_reference_obj"
 _REFERENCE_CR2_PROP = "poser_reference_cr2"
 _INJECTED_MORPHS_PROP = "poser_injected_morphs"
+# {"key": <correspondence_key>, "data": <packed bytes>} on the mesh. A group, so the
+# Custom Properties panel shows an "Edit Value" button instead of drawing the blob.
+_CORRESPONDENCE_PROP = "poser_correspondence"
 
 
 def load_injected_morphs_record(obj) -> dict:
@@ -231,7 +239,11 @@ class OT_ApplyMorphInjection_Operator(bpy.types.Operator):
         self._morph_names = morph_names
         self._actor_obj_groups = actor_obj_groups
         self._basis_positions = basis_positions
-        self._correspondence = None
+        self._correspondence_key = correspondence_key(obj_verts, basis_positions)
+        self._rebuild_reason = None
+        self._correspondence = self._cached_correspondence(
+            obj, len(obj_verts), len(basis_positions)
+        )
         self._thread_error = None
         # Set via progress_callback from the background thread; modal() turns
         # it into a real wm.progress_update() on the main thread.
@@ -241,14 +253,24 @@ class OT_ApplyMorphInjection_Operator(bpy.types.Operator):
         wm.progress_begin(0, 100)
         wm.progress_update(5)
 
+        if self._correspondence is not None:
+            # Same reference OBJ and an untouched mesh: skip the ~30s build.
+            self._correspondence_note = "reused from this mesh's cache"
+            try:
+                return self._apply_morphs(context)
+            finally:
+                wm.progress_end()
+
         if bpy.app.background:
             # Headless: no event loop to dispatch TIMER events, so going modal
             # would hang forever. `context.window` isn't a reliable headless
             # check on its own (see docs/handoff-morph-injection.md Phase 5.1).
             try:
+                started = time.time()
                 self._correspondence = build_vertex_correspondence(
                     obj_verts, basis_positions, progress_callback=self._set_correspondence_progress
                 )
+                self._remember_correspondence(obj, time.time() - started)
                 return self._apply_morphs(context)
             finally:
                 wm.progress_end()
@@ -279,6 +301,41 @@ class OT_ApplyMorphInjection_Operator(bpy.types.Operator):
 
     def _set_correspondence_progress(self, fraction):
         self._correspondence_progress = fraction
+
+    def _cached_correspondence(self, obj, n_source, n_target):
+        """The correspondence cached on the mesh if it still applies, else None.
+
+        A key mismatch is the normal "mesh or reference OBJ changed" case. A
+        blob that matches its key but can't be read is reported, then rebuilt.
+        """
+        entry = obj.data.get(_CORRESPONDENCE_PROP)
+        if entry is None:
+            return None
+        try:
+            if entry["key"] != self._correspondence_key:
+                self._rebuild_reason = "the mesh or reference OBJ changed since the cached copy"
+                return None
+            return unpack_correspondence(bytes(entry["data"]), n_source, n_target)
+        except (KeyError, TypeError, AttributeError, ValueError) as exc:
+            self.report({'WARNING'}, f"Ignoring the cached vertex correspondence: {exc}")
+            self._rebuild_reason = f"the cached copy was unusable: {exc}"
+            return None
+
+    def _remember_correspondence(self, obj, seconds):
+        """Cache a freshly built correspondence on the mesh (main thread only: touches bpy data)."""
+        note = f"built in {seconds:.1f}s"
+        if self._rebuild_reason:
+            note += f" ({self._rebuild_reason})"
+        try:
+            obj.data[_CORRESPONDENCE_PROP] = {
+                "key": self._correspondence_key,
+                "data": pack_correspondence(self._correspondence),
+            }
+            note += "; cached on the mesh for next time"
+        except (ValueError, TypeError, OverflowError, RuntimeError) as exc:
+            self.report({'WARNING'}, f"Couldn't cache the vertex correspondence on the mesh: {exc}")
+            note += f"; NOT cached: {exc}"
+        self._correspondence_note = note
 
     def modal(self, context, event):
         if event.type == 'ESC':
@@ -315,6 +372,7 @@ class OT_ApplyMorphInjection_Operator(bpy.types.Operator):
             return {'CANCELLED'}
 
         try:
+            self._remember_correspondence(self._obj, time.time() - self._start_time)
             return self._apply_morphs(context)
         finally:
             context.window_manager.progress_end()
@@ -397,7 +455,8 @@ class OT_ApplyMorphInjection_Operator(bpy.types.Operator):
         header = [f"Injection file: {self.injection_filepath}",
                   f"Reference OBJ: {self.reference_obj_filepath}",
                   f"Applied {applied}/{n_morphs} morph(s).",
-                  f"Total time: {total_elapsed:.1f}s"]
+                  f"Total time: {total_elapsed:.1f}s",
+                  f"Vertex correspondence: {self._correspondence_note}"]
         if pkg["unresolved_paths"]:
             header.append(
                 f"{len(pkg['unresolved_paths'])} readScript reference(s) could not be resolved: "

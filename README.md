@@ -80,7 +80,7 @@ Adds the morphs from a 3rd-party Poser morph package (an "injection" `.pz2`, the
 
 **Apply Morph Injection** (sidebar → **Morph Injection**): select the figure's mesh and click it, then pick the figure (its CR2) and the injection package from the searchable lists built from your Runtime folders. The figure's reference `.obj` is found through the CR2, so there's nothing else to browse for. Without Runtime folders set up, you can still browse to the package `.pz2` and the figure's reference `.obj` by hand.
 
-- Matching the package to your mesh takes about 30 seconds on a 70,000-vertex figure. Blender stays usable, the cursor shows a percentage, and **Esc** cancels.
+- Matching the package to your mesh takes about 30 seconds on a 70,000-vertex figure, the first time. Blender stays usable, the cursor shows a percentage, and **Esc** cancels. The result is saved on the mesh (about 600 KB in the `.blend`), so applying more packages to the same, unedited mesh skips that step; editing the mesh or picking a different reference `.obj` redoes it.
 - Each morph becomes a shape key named after its label in the package (for example `BrowHeavy`), resting at 0.
 - Joint-corrective morphs and ones already on the mesh are skipped. A **Poser Morph Injection Report** text block lists what happened, including any files the package names that couldn't be found.
 - Packages that keep their data in a separate binary `.pmd` file aren't supported yet.

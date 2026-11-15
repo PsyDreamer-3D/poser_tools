@@ -201,7 +201,11 @@ don't resume it without a specific reason to.
   `:Runtime:Libraries:Pose:` for a folder that is `libraries/pose` on disk, so on a case-sensitive
   filesystem a literal lookup missed ~71% of failing `readScript` targets and Apply silently loaded
   nothing for e.g. `! All Head Morphs.pz2` (256 of 257 unresolved). `load_injection_package()`
-  passes a per-load `dir_cache`. 7.0b: `load_injection_package(path, extra_roots)` searches the add-on
+  passes a per-load `dir_cache`. 7.1: the vertex correspondence is cached on the mesh
+  (`mesh["poser_correspondence"]`, `core/cr2/correspondence_cache.py`), keyed on a SHA-256 of the
+  reference-OBJ vertices + basis positions + format version, so an edited mesh or different OBJ is a
+  miss, never a stale hit; real Aiko3: 33s → 0.4s, bit-identical output. Bump `CACHE_VERSION` if
+  `build_vertex_correspondence()`'s results or the blob format change. 7.0b: `load_injection_package(path, extra_roots)` searches the add-on
   preferences' Runtime roots (Apply and Remove pass `get_runtime_roots(context)`) after the file's
   own Runtime, since a package often names files that live in a different library, and a package
   that yields no morphs because its files weren't found now says so (`no_morphs_report()`). Phase 7
@@ -246,7 +250,8 @@ Everything else is manual smoke test only — no `bpy`-dependent code has automa
    **Import Poser FBX**'s own progress cursor) and the status bar shows both the percentage and
    elapsed seconds the whole time, window never greys out, Esc cancels cleanly. Re-run on the same
    mesh → the figure picker pre-fills the previous choice, reports "already present" for the same
-   package, no duplicate keys, same ~30-60s cost (no caching yet).
+   package, no duplicate keys, and now finishes almost instantly (the vertex correspondence is cached on
+   the mesh; the report's **Vertex correspondence:** line says whether it was reused or built).
 6. Same mesh → **Remove Morph Injection**, pick the same package's `RemDeltas.*` file (or the
    original `InjDeltas.*` one — either works) via the same searchable dropdown. Expect: near-instant
    (no correspondence build), the matching shape key(s) gone, a **Poser Morph Removal Report** text
