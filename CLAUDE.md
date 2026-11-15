@@ -24,8 +24,9 @@ Standard scaffold layout. Two things worth knowing:
   `vendor/io_scene_fbx` sets), but this code gets fixed and extended in place, not frozen. No `bpy`
   dependency — pure Python, covered by `tests/test_cr2_parser.py`, `tests/test_actor_vertex_index.py`,
   and `tests/test_poser_paths.py`.
-  `core/cr2/obj_io.py`, `core/cr2/mesh_correspondence.py`, `core/cr2/injection_package.py`, and
-  `core/cr2/apply_injection.py` (morph-injection Phases 1 and 3, see below) live in the same package
+  `core/cr2/obj_io.py`, `core/cr2/mesh_correspondence.py`, `core/cr2/injection_package.py`,
+  `core/cr2/injection_scan.py` (a cheap brace-walking listing of a package's morphs for the picker;
+  must agree with `CR2Parser`, see its tests), and `core/cr2/apply_injection.py` (morph-injection Phases 1 and 3, see below) live in the same package
   but are original `poser_tools` code, not adapted from `cr2_importer` — GPL-3.0-or-later, not MIT.
   Same no-`bpy` / plain-`pytest` discipline (`tests/test_mesh_correspondence.py`,
   `tests/test_injection_package.py`, `tests/test_apply_injection.py`).

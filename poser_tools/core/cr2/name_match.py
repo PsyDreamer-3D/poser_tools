@@ -85,11 +85,24 @@ def display_name_for(index: dict, internal_name: str) -> str:
     channels with no deltas of their own, e.g. a binary-morph reference) keep
     file order.
     """
-    named = [ch for _actor, ch in index["by_internal"].get(internal_name, []) if ch.display_name]
+    candidates = [(len(ch.deltas), ch.display_name)
+                  for _actor, ch in index["by_internal"].get(internal_name, [])]
+    return pick_display_name(candidates) or internal_name
+
+
+def pick_display_name(candidates) -> str:
+    """The label for one morph from its channels' (delta_count, display_name) pairs.
+
+    The channel with the most deltas wins (rationale in display_name_for);
+    channels without a label are ignored, and ties keep the first. Returns ""
+    when none of them is labelled. Shared with core/cr2/injection_scan.py so the
+    list a user picks from and the shape keys Apply creates are named by one rule.
+    """
+    named = [(count, name) for count, name in candidates if name]
     if not named:
-        return internal_name
+        return ""
     # max() returns the first of equal keys, which is what keeps file order on ties.
-    return max(named, key=lambda ch: len(ch.deltas)).display_name
+    return max(named, key=lambda pair: pair[0])[1]
 
 
 def match_channel_group(index: dict, name: str) -> list:
