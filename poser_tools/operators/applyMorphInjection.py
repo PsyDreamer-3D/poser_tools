@@ -7,7 +7,7 @@ import time
 
 import bpy
 import numpy as np
-from bpy.props import CollectionProperty, StringProperty
+from bpy.props import BoolProperty, CollectionProperty, StringProperty
 
 from ..core.cr2 import runtime_index
 from ..core.cr2.actor_vertex_index import load_obj_actor_vertex_groups
@@ -118,12 +118,26 @@ class OT_ApplyMorphInjection_Operator(bpy.types.Operator):
         name="Injection Package",
         description="Pick the injection package from your Poser Runtime library",
     )
+    # Set by poser.pick_injection_morphs once the user has chosen (JSON lists of internal
+    # names and of the leaf files they live in). Empty means "every morph in the package",
+    # which is what a scripted bpy.ops call gets, unchanged from before the picker existed.
+    selected_morphs: StringProperty(options={'HIDDEN', 'SKIP_SAVE'})
+    selected_leaves: StringProperty(options={'HIDDEN', 'SKIP_SAVE'})
+    # True only for the interactive popup, so its OK hands over to the morph picker while a
+    # scripted call still applies everything. A property rather than an attribute set in
+    # invoke(): properties are what survives from invoke() to execute().
+    use_morph_picker: BoolProperty(options={'HIDDEN', 'SKIP_SAVE'})
 
     @classmethod
     def poll(cls, context):
         return context.active_object is not None and context.active_object.type == 'MESH'
 
     def invoke(self, context, event):
+        if self.selected_morphs:
+            # Arriving from the picker with the package, figure and morphs already chosen.
+            return self.execute(context)
+
+        self.use_morph_picker = True
         obj = context.active_object
         # Remembered from a prior run on this mesh, if any -- re-applying a
         # second package to the same figure shouldn't have to re-browse for
@@ -214,15 +228,42 @@ class OT_ApplyMorphInjection_Operator(bpy.types.Operator):
         if cr2_filepath:
             obj[_REFERENCE_CR2_PROP] = cr2_filepath
 
+        if self.use_morph_picker and not self.selected_morphs:
+            # Which morphs to apply is the picker's question; it comes back here with the answer.
+            bpy.ops.poser.pick_injection_morphs(
+                'INVOKE_DEFAULT',
+                injection_filepath=self.injection_filepath,
+                reference_obj_filepath=self.reference_obj_filepath,
+            )
+            return {'FINISHED'}
+
+        try:
+            selected = json.loads(self.selected_morphs) if self.selected_morphs else None
+            only_leaves = json.loads(self.selected_leaves) if self.selected_leaves else None
+        except ValueError as exc:
+            self.report({'ERROR'}, f"Couldn't read the selected morphs: {exc}")
+            return {'CANCELLED'}
+
         pkg = load_injection_package(
-            self.injection_filepath, extra_roots=get_runtime_roots(context)
+            self.injection_filepath, extra_roots=get_runtime_roots(context), only_leaves=only_leaves
         )
         index = build_channel_index(pkg["figure"])
-        morph_names = list(index["by_internal"].keys())
+        if selected is None:
+            morph_names = list(index["by_internal"].keys())
+            self._missing_selected = []
+        else:
+            # The picker's scan and this parse are two readers of one format; a morph the scan
+            # listed but the parser doesn't have must be said, not silently dropped.
+            morph_names = [n for n in selected if n in index["by_internal"]]
+            self._missing_selected = [n for n in selected if n not in index["by_internal"]]
 
         if not morph_names:
-            self.report(*no_morphs_report(pkg))
+            if selected is not None:
+                self.report({'WARNING'}, f"None of the {len(selected)} selected morph(s) could be read from the package's files.")
+            else:
+                self.report(*no_morphs_report(pkg))
             return {'CANCELLED'}
+        self._selection_count = None if selected is None else len(selected)
 
         obj_verts = load_obj_vertex_positions(self.reference_obj_filepath)
         actor_obj_groups = load_obj_actor_vertex_groups(self.reference_obj_filepath)
@@ -457,6 +498,10 @@ class OT_ApplyMorphInjection_Operator(bpy.types.Operator):
                   f"Applied {applied}/{n_morphs} morph(s).",
                   f"Total time: {total_elapsed:.1f}s",
                   f"Vertex correspondence: {self._correspondence_note}"]
+        if self._selection_count is not None:
+            header.append(f"Applied only the {self._selection_count} morph(s) chosen in the morph picker.")
+        if self._missing_selected:
+            header.append(f"{len(self._missing_selected)} chosen morph(s) were not found in the package's files: {self._missing_selected}")
         if pkg["unresolved_paths"]:
             header.append(
                 f"{len(pkg['unresolved_paths'])} readScript reference(s) could not be resolved: "
@@ -472,7 +517,7 @@ class OT_ApplyMorphInjection_Operator(bpy.types.Operator):
         _write_report(context, _REPORT_TEXT, header + ["", *report_lines])
 
         summary = f"Applied {applied}/{n_morphs} morph(s) from {os.path.basename(self.injection_filepath)}"
-        has_warning = bool(pkg["unresolved_paths"] or empty_skipped)
+        has_warning = bool(pkg["unresolved_paths"] or empty_skipped or self._missing_selected)
         self.report(
             {'WARNING'} if has_warning else {'INFO'},
             f"{summary} — see the '{_REPORT_TEXT}' text block.",

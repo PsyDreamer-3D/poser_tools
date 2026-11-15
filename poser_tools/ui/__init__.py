@@ -3,6 +3,7 @@
 from .applyMorphInjection import ApplyMorphInjection_Panel
 from .fixPoserShapekeys import FixPoserShapekeys_Panel
 from .importPoserFBX import ImportPoserFBX_Panel
+from .pickInjectionMorphs import POSER_UL_injection_morphs
 from .prefixArmatureBones import PrefixArmatureBones_Panel
 from .prefixWeightGroups import PrefixWeightGroups_Panel
 from .renameArmatureBones import RenameArmatureBones_Panel
@@ -11,6 +12,7 @@ from .runtimePaths import POSER_UL_runtime_paths
 
 classes = (
     POSER_UL_runtime_paths,
+    POSER_UL_injection_morphs,
     ImportPoserFBX_Panel,
     FixPoserShapekeys_Panel,
     ApplyMorphInjection_Panel,

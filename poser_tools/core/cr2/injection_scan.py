@@ -172,3 +172,52 @@ def scan_injection_package(path: str, extra_roots=None) -> dict:
         "unresolved_paths": files["unresolved_paths"],
         "leaf_paths": files["leaf_paths"],
     }
+
+
+# Why a morph can't be chosen in the picker. Each matches what Apply does with it
+# anyway (skips it and says so), so the list only shows that earlier.
+STATUS_JCM = "JCM (skipped)"
+STATUS_PRESENT = "already present"
+STATUS_BINARY = ".pmd (unsupported)"
+STATUS_EMPTY = "no deltas"
+
+
+def classify_morphs(morphs, existing_names, is_jcm) -> list:
+    """[(morph, status)] in the same order; status "" means the morph can be applied.
+
+    `existing_names` are the mesh's current shape-key names, `is_jcm` the add-on's
+    own JCM predicate (passed in to keep this module free of Blender imports).
+    A mesh injected before shape keys were named by label may carry a morph under
+    its internal name, so that counts as present too (same rule as Apply).
+    """
+    existing = set(existing_names)
+    result = []
+    for morph in morphs:
+        if is_jcm(morph.display_name):
+            status = STATUS_JCM
+        elif morph.display_name in existing or morph.internal_name in existing:
+            status = STATUS_PRESENT
+        elif morph.uses_binary_morph:
+            status = STATUS_BINARY
+        elif morph.delta_count == 0:
+            status = STATUS_EMPTY
+        else:
+            status = ""
+        result.append((morph, status))
+    return result
+
+
+# Measured on the real V3 and M3 "All Head Morphs" packages (1.94M and 1.49M delta lines in
+# 9.4 s and 6.9 s, warm file cache) and Aiko3 (24 ms per morph to map and add). Cold reads
+# from a slow drive take longer; the dialog says "about".
+_SECONDS_PER_DELTA_LINE = 4.8e-6
+_SECONDS_PER_MORPH = 0.024
+# A shape key stores one float32 x/y/z per vertex.
+_BYTES_PER_VERTEX = 12
+
+
+def estimate_apply(morphs, n_vertices: int) -> tuple:
+    """(seconds, bytes) to read and add `morphs`, excluding the vertex-matching step."""
+    seconds = sum(m.delta_count for m in morphs) * _SECONDS_PER_DELTA_LINE
+    seconds += len(morphs) * _SECONDS_PER_MORPH
+    return seconds, len(morphs) * n_vertices * _BYTES_PER_VERTEX

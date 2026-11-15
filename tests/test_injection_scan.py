@@ -165,3 +165,30 @@ def test_scan_matches_a_full_parse_of_a_real_259_morph_package(package):
     partial = load_injection_package(path, only_leaves=morph.leaf_paths)
     assert list(build_channel_index(partial["figure"])["by_internal"]) == [morph.internal_name]
     assert partial["leaf_paths"] == morph.leaf_paths
+
+
+def _morph(internal, name=None, deltas=5, binary=False):
+    from core.cr2.injection_scan import ScannedMorph
+    return ScannedMorph(internal_name=internal, display_name=name or internal,
+                        delta_count=deltas, uses_binary_morph=binary, leaf_paths=[])
+
+
+def test_classify_morphs_assigns_one_reason_each_in_priority_order():
+    from core.cr2.injection_scan import (
+        STATUS_BINARY, STATUS_EMPTY, STATUS_JCM, STATUS_PRESENT, classify_morphs)
+    morphs = [_morph("A"), _morph("B", "JCMrFoo"), _morph("C", "Have"), _morph("PBMD", "Old"),
+              _morph("E", binary=True, deltas=0), _morph("F", deltas=0),
+              _morph("G", "JCMhave", binary=True)]
+    result = classify_morphs(morphs, ["Basis", "Have", "PBMD", "JCMhave"], lambda n: n.startswith("JCM"))
+    assert [status for _m, status in result] == [
+        "", STATUS_JCM, STATUS_PRESENT, STATUS_PRESENT, STATUS_BINARY, STATUS_EMPTY, STATUS_JCM]
+    assert [m.internal_name for m, _s in result] == ["A", "B", "C", "PBMD", "E", "F", "G"]
+
+
+def test_estimate_scales_with_deltas_morphs_and_vertices():
+    from core.cr2.injection_scan import estimate_apply
+    seconds, size = estimate_apply([_morph("A", deltas=1_000_000), _morph("B", deltas=0)], 72_712)
+    assert seconds == pytest.approx(4.8 + 2 * 0.024)
+    assert size == 2 * 72_712 * 12
+    assert estimate_apply([], 72_712) == (0.0, 0)
+
