@@ -863,7 +863,7 @@ The cache and the picker fix today's pain and don't depend on the library, so th
   at the configuration). The headless check monkeypatches `get_runtime_roots`; the preferences
   reader itself is unchanged and was not exercised here.
 - **7.1** ✅ Correspondence cache (details below).
-- **7.2** Morph picker. After a package is chosen, a dialog lists its morphs (display names via
+- **7.2** ✅ Morph picker (built 2026-11-15; GUI flow pending owner test). After a package is chosen, a dialog lists its morphs (display names via
   `display_name_for`) with checkboxes, Blender's built-in UIList filter box, select all/none; Apply
   handles only the selection and parses only the leaf files those morphs live in. Design below.
 - **7.3** Classifier + index builder, no UI (per-folder `.blend` files, flags, placeholders).
@@ -873,7 +873,7 @@ The cache and the picker fix today's pain and don't depend on the library, so th
 - **7.5** Figure shelf: pick a CR2 with a thumbnail, sets `poser_reference_cr2`.
 - **7.6** Phase 5 tie-in: resolved morph names in the asset description, searchable in the browser.
 
-### 7.2 design (reviewed 2026-11-15, not yet built)
+### 7.2 design (reviewed and built 2026-11-15)
 
 **Measured on the real V3/M3 "All Head Morphs" orchestrators** (warm I/O cache; cold reads from the
 external drive were not measured):
@@ -944,6 +944,49 @@ state, not on the operator, so "select all that match the filter" isn't availabl
 inside `invoke_props_dialog`; whether `update=` callbacks fire for operator properties (decides
 whether Select all/none can be a toggle); chaining dialog 1 into dialog 2 with `INVOKE_DEFAULT` from
 `execute`; per-row state surviving a filter change. The spike script is throwaway, not committed.
+
+**As built.** `poser.apply_morph_injection` keeps its id and its scripted behaviour (no selection =
+every morph). Three hidden `SKIP_SAVE` properties carry the hand-over: `use_morph_picker` (set only
+by the interactive `invoke()`, so dialog 1's OK diverts to the picker while a scripted call doesn't),
+and `selected_morphs`/`selected_leaves` (JSON; when set, `invoke()` skips dialog 1 and runs).
+`poser.pick_injection_morphs` (`INTERNAL`, so not in F3 search) scans in its `invoke()`, classifies
+(`classify_morphs`), applies directly when exactly one morph is choosable, cancels with a message when
+none is, and otherwise opens the list. Select all/none are boolean toggles with `update=` callbacks
+that reset themselves (spike-verified); they act on every unlocked row, not on the filtered ones.
+Apply reports a chosen morph the parser can't find (the scan/parser residual above) instead of
+dropping it.
+
+Verified headless on 5.3.0, 5.2.4 and 5.0.1 against real Aiko3: choosing 2 of 3 morphs from a throwaway
+orchestrator applies exactly those two (`BrowHeavy`, `H3NsDragon`) from only their files; a chosen
+morph absent from the files is reported and the rest applied; a scripted call with no selection still
+applies all three (`EarDeer` correctly labelled); all new classes register and re-register cleanly.
+**Not verifiable headless:** under `--background`, `INVOKE_DEFAULT` runs `execute()` (checked with a
+bare probe operator), so the dialog chain (dialog 1 -> picker -> modal Apply, nested `bpy.ops` calls)
+needs the GUI. The one nesting not spike-tested is a *modal* operator started from inside another
+operator's `invoke()`/`execute()`; if Blender refuses it, the fallback is to start the modal Apply from
+a `bpy.app.timers` callback, at the cost of losing `context.window`.
+
+**Morphs the FBX already carries (owner question, 2026-11-15).** Checked against the real
+`Aiko3 SP All Morphs.fbx`, which has Stephanie Petite's third-party morphs baked in (1,194 raw keys,
+321 after consolidation). Baked keys are named by the channel's **label**, not its internal code
+(`Barbarian`, `BrstNatural`; consolidation strips the `p` from keys it promotes), so the label
+comparison Apply always did works for most of them: StephPetite Head, 111 of 111 detected, on both the
+consolidated and the raw import. **One real gap:** a package's main channel is often labelled with the
+partial marker (`pBarbarian`), which the consolidated mesh no longer has, so StephPetite Body read as
+48 present / 47 new, of which 46 were `p`-labelled duplicates of keys already on the mesh (1 genuinely
+new: `pRubenesque`, absent in every form). Fix: `name_match.present_name_candidates()` adds the bare
+form of a `p`+capital label to the names checked, used by both the picker's classification and Apply's
+skip. End to end on that FBX: the 95-morph package now adds 1 key and skips 94 (before: ~47 added).
+Across the whole `!DAZ` library 289 of 1,953 morphs carry a `p` main label.
+Not solved, by design of a name check: **the same label on a genuinely different morph** reads as
+"already present" and is skipped; telling them apart needs comparing geometry (a correspondence build
+plus a delta comparison per morph), not built.
+**Decided (owner, 2026-11-15): new keys keep the package's own label.** A standalone `pRubenesque` is
+added under that name even though consolidation would have stripped the `p` from the equivalent baked
+key. Reason: the key then matches what the package says (and what Remove's record stores), and
+renaming Apply's output would be a naming change nobody asked for. The cost is the two spellings
+coexisting on one mesh; `present_name_candidates` already treats them as the same morph, so it can't
+produce a duplicate.
 
 **Not in 7.2:** Remove stays name-based and unchanged (the list module should be reusable by it
 later, "remove the selected morphs"); a disk cache; off-thread parsing.

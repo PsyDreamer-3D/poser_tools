@@ -217,7 +217,18 @@ don't resume it without a specific reason to.
   own Runtime, since a package often names files that live in a different library, and a package
   that yields no morphs because its files weren't found now says so (`no_morphs_report()`). Phase 7
   (thumbnail library via Blender's Asset Shelf) is scoped in
-  `docs/handoff-morph-injection.md`; only 7.0 is built.
+  `docs/handoff-morph-injection.md`; 7.0, 7.0b, 7.1 and 7.2 are built.
+- Phase 7.2: **morph picker** (`poser.pick_injection_morphs`, `operators/pickInjectionMorphs.py`,
+  `ui/pickInjectionMorphs.py`). Apply's popup (package + figure) hands over to a second dialog
+  listing the package's morphs; its OK calls `poser.apply_morph_injection` with `selected_morphs`/
+  `selected_leaves` (JSON), which then parses only those files. `core/cr2/injection_scan.py` lists a
+  package's morphs without parsing deltas (~1 s vs. ~9 s for the 259-morph V3 head package); it is a
+  second reader of the CR2 format, so tests assert it agrees with `CR2Parser`, and Apply reports any
+  chosen morph the parser can't find. A scripted `bpy.ops.poser.apply_morph_injection(...)` call
+  with no selection still applies everything (`use_morph_picker` is only set by the interactive
+  `invoke()`). **Headless note:** under `--background`, `INVOKE_DEFAULT` runs `execute()`, not
+  `invoke()`, so the dialog flow can't be exercised without a GUI; the scan, classification,
+  estimate and selected-only apply are tested instead.
 
 ## Testing
 
@@ -250,7 +261,10 @@ Everything else is manual smoke test only — no `bpy`-dependent code has automa
    searchable dropdowns sourced from those roots — pick a figure and its reference OBJ resolves
    automatically (no manual `.obj` browse), pick an injection package the same way. The raw manual
    path fields below still work and win if filled in (no Runtime root configured, or content
-   outside it). Expect: new shape keys named after the package's morphs, a **Poser Morph Injection
+   outside it). A package with several morphs then opens **Choose Morphs to Apply**: everything new
+   is ticked, filter/Select All/Select None work, locked rows (already present, JCM, `.pmd`, no
+   deltas) are greyed with a reason, and the box shows the estimate; OK applies only the ticked
+   ones (the report says so). Expect: new shape keys named after the package's morphs, a **Poser Morph Injection
    Report** text block (including a total-time line), `mesh["poser_reference_obj"]` and
    `mesh["poser_reference_cr2"]` set. Expect roughly 30-60s on a 70k-vertex figure, dominated by the
    one-time vertex-correspondence build — the cursor shows a counting-up percentage (matching
