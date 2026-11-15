@@ -966,6 +966,20 @@ needs the GUI. The one nesting not spike-tested is a *modal* operator started fr
 operator's `invoke()`/`execute()`; if Blender refuses it, the fallback is to start the modal Apply from
 a `bpy.app.timers` callback, at the cost of losing `context.window`.
 
+**Reports from a nested operator never reach the UI (owner UAT, 2026-11-15).** Step 6 of the PR's
+test plan: re-applying an already-applied one-morph package should say "Nothing to apply", and
+nothing appeared. The picker is started with `bpy.ops` from Apply's `execute()`; an operator called
+from Python keeps its own reports off the UI (WARNING/INFO are not shown anywhere; ERROR becomes a
+`RuntimeError` in the caller). I believe that is the cause but did not confirm it in the GUI; the fix
+doesn't depend on it. `applyMorphInjection.say()` records every report these operators make, and
+`call_nested()` runs the inner operator, tolerates the `RuntimeError` only when the inner one
+reported something (any other `RuntimeError` is a real failure and still raises), and re-issues the
+recorded report from the UI-invoked outer operator. The record is left set so a doubly nested call
+(Apply -> picker -> Apply) forwards the innermost message. Verified headless with probe operators
+(warning, error, real exception, double nesting, no stale leak). The single-morph path hit the same
+thing: its "Applied 1/1" summary was swallowed whenever the cache made Apply finish synchronously
+inside the nested call. The same trap awaits the 7.4 shelf, whose click will also start Apply.
+
 **Morphs the FBX already carries (owner question, 2026-11-15).** Checked against the real
 `Aiko3 SP All Morphs.fbx`, which has Stephanie Petite's third-party morphs baked in (1,194 raw keys,
 321 after consolidation). Baked keys are named by the channel's **label**, not its internal code

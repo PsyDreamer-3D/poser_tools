@@ -228,7 +228,11 @@ don't resume it without a specific reason to.
   with no selection still applies everything (`use_morph_picker` is only set by the interactive
   `invoke()`). **Headless note:** under `--background`, `INVOKE_DEFAULT` runs `execute()`, not
   `invoke()`, so the dialog flow can't be exercised without a GUI; the scan, classification,
-  estimate and selected-only apply are tested instead.
+  estimate and selected-only apply are tested instead. **Nested operators lose their reports:** a
+  warning/info from an operator started with `bpy.ops` inside another one is not shown, and an error
+  raises in the caller, so these operators report through `say()` and start each other through
+  `call_nested()` (both in `operators/applyMorphInjection.py`), which re-issue the message from the
+  UI-invoked outer operator. Use them for any new operator in this chain (the 7.4 shelf click too).
 
 ## Testing
 
