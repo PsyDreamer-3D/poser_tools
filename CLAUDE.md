@@ -224,15 +224,23 @@ don't resume it without a specific reason to.
   `docs/handoff-morph-injection.md`; 7.0, 7.0b, 7.1 and 7.2 are built, and 7.3a/7.3b (below).
 - Phase 7.3: the **library index** (7.3a/7.3b the engine, 7.3c the operator and Preferences UI; the shelf is 7.4).
   `core/cr2/library_index.py` classifies the owner's whole Poser library (16,405 entries, ~10 s warm,
-  ~40 s cold) into injection/removal and builds a manifest of 3,956 shown entries in 139 source
+  ~40 s cold) into injection/removal and builds a manifest of 3,816 shown entries in 133 source
   folders, incrementally. `core/library_build.py` turns it into asset `.blend` files by running
   `core/library_assets_child.py` in a **child Blender process** (never in the user's session: building
-  asset-marked images there would touch their file, undo stack and UI), writes the catalog file, saves
+  asset-marked stand-ins there would touch their file, undo stack and UI), writes the catalog file, saves
   the manifest last, and registers the folder as an asset library (`ensure_asset_library`, which must
   check for an existing entry: `new()` twice makes `Name.001`). Everything goes under
   `user_resource('CONFIG', 'poser_tools/library')`, never into the Poser content. `core/library_build.py`
   has no module-level `bpy` so it is pytest-able; the child itself is verified by running it, headless,
-  on 5.0.1, 5.2.4 and 5.3.0 and reading every asset back. 7.3c: `poser.build_library_index`
+  on 5.0.1, 5.2.4 and 5.3.0 and reading every asset back. **Stand-ins are `Scene`s, and must stay a type
+  the Asset Browser lists** (Action, Brush, Collection, Material, Node Tree, Object, Scene, World): an
+  `Image` library registers, shows its catalogs and then "No items", which no headless check can see.
+  Scene was picked because it has no drop target and no other consumer; Object/World/Material are drop
+  targets, Action feeds the Pose Library, NodeTree the Add menus. A removal is a channel that
+  re-declares its delta list empty (`indexes 0`), not just `name -`: `Hide.*` visibility files have
+  `name -` too (`library_index.sniff_leaf`, `ScannedChannel.declares_deltas`). When the index changes,
+  look at it in a real Blender window (throwaway `BLENDER_USER_CONFIG`, screenshots), not only through
+  `bpy.data.libraries.load`. 7.3c: `poser.build_library_index`
   (`operators/libraryIndex.py`, modal like Apply: a worker thread that never touches `bpy`, a timer on
   the main thread for progress, Esc cancels, synchronous under `--background`) and
   `poser.remove_library_entry`, driven from Preferences (`properties/poserToolsPreferences.py`

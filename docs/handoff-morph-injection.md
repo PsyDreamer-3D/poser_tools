@@ -667,7 +667,7 @@ dropdowns stay as the fallback.
   UIList, Menu, Header, Operator, KeyingSetInfo, RenderEngine, AssetShelf, FileHandler,
   PropertyGroup, AddonPreferences, NodeTree, Node, NodeSocket, Gizmo, GizmoGroup), and the ID types
   are closed. So the library is a **generated index**: one stand-in datablock per Poser file.
-- **Stand-in type is `Image`.** `Action` is rejected: the built-in Pose Library shelf's
+- **Stand-in type: chosen as `Image`, changed to `Scene` (see "7.3 correction" below).** `Action` is rejected: the built-in Pose Library shelf's
   `asset_poll` is `asset.id_type == 'ACTION'`, so every stand-in would appear as a pose.
   `Mesh`/`Text` can be marked as assets but `preview_ensure()` returns `None`, so no thumbnail.
   `NodeTree` feeds Blender's modifier/node Add menus. Thumbnail-capable types, identical on
@@ -1026,13 +1026,63 @@ later, "remove the selected morphs"); a disk cache; off-thread parsing.
 
 ### 7.3 plan: the library index (scoped 2026-11-15; 7.3a, 7.3b and 7.3c built)
 
-**What 7.3 delivers.** A built, registered Blender asset library holding one stand-in `Image` asset
+**What 7.3 delivers.** A built, registered Blender asset library holding one stand-in `Scene` asset
 per injection or removal package in the owner's Runtime roots, each with its Poser thumbnail (or a
 placeholder), tags, a catalog (the folder tree), and the payload the click will need. Verified
 headless and browsable in Blender's Asset Browser. **Not** in 7.3: the shelf and its click (7.4),
 the figure shelf (7.5), morph-name search (7.6); Apply and Remove are untouched.
 
-#### What the real library looks like (measured 2026-11-15, 20 roots from `LibraryPrefs.xml`)
+#### 7.3 correction (owner GUI test, 2026-11-16): two mistakes, both found by looking
+
+The first GUI test of 7.3c showed the library registered, its catalogs listed, and **"No items"**.
+Everything the headless checks could see was right (Blender's own cache,
+`~/.cache/blender/asset-library-indices`, held all 139 files and 3,956 entries with the right catalog
+ids, tags and payload keys), so the question was what the Asset Browser does with them. I drove a real
+Blender window (throwaway config folder, screenshots) instead of guessing.
+
+**1. The Asset Browser does not list `Image` assets.** Built a test library with 10 stand-in types:
+the browser listed exactly 7 (Action, Collection, Material, Node Tree, Object, Scene, World); Image,
+Light and Texture were invisible, with every type filter on and with every one off. Blender's own
+Essentials library filled the same window, so the capture was valid, and the earlier prototype
+library (also `Image`) showed "No items" too: it had only ever been seen in the Asset *Shelf*
+(whose type filters include Image). The feasibility pass verified listing through
+`bpy.data.libraries.load()` and the shelf and never opened the Asset Browser, yet the plan said
+"browsable in the Asset Browser". That claim was untested.
+
+Choice of type, among those the browser lists: **Action** is taken wholesale by the Pose Library shelf;
+**NodeTree** feeds the Add menus; **Collection** has no thumbnail on 5.0.1; **Object**, **World** and
+**Material** are drag-and-drop targets (a dropped stand-in adds an empty, replaces the world, or assigns
+a blank material). **Scene** has no drop target and no other consumer I know of. Cost is not a factor:
+4,000 stand-ins are 0.4 MB (Object), 0.5 (Image), 1.1 (World), 2.1 (Scene), 4.4 (Material). The Asset
+Shelf has a filter for every type (`filter_scene` among them), so 7.4 is unaffected. Stand-ins are now
+`Scene`; `ASSET_FORMAT_VERSION` is 2, so existing indexes are rebuilt.
+
+**2. 154 visibility files were still on the removal list.** 7.3a's fix for `Hide.*` files handled
+`valueParm ... name -`. The Asset Browser's All view then showed rows of `Hide.*` / `*_Hide` removal
+tiles: the other flavour, `targetGeom X { name - hidden 1 }` with no delta list (La Roo `ChanVis`
+`H_*_Hide.p2z`, `Hide.*` in several vendors' folders), still matched "`name -` and no deltas". A first
+attempt at a fix, "`hidden` means not a removal", was wrong too: a vendor's real
+`*.RemDeltas.pz2` (HiroGen) also carries `hidden 1`, and 14 of those plus the 15 `* REM.pz2` entries
+that read them dropped out. The test that caught it compared what had moved against what it should
+have. What separates them: **a removal re-declares the channel's delta list, empty** (`indexes 0`,
+`numbDeltas N`, `deltas { }`); a visibility file declares none. `ScannedChannel.declares_deltas`
+carries it, and `sniff_leaf` requires it. A third group surfaced in the same comparison: La Femme's
+`REM ... Morphs.pz2` are lists of `removePMDFileMorphs`/`removeFullBodyMorph` commands, the binary-morph
+system's removal, so they are now `pmd` (unsupported, hidden) rather than removal or pose.
+`MANIFEST_VERSION` is 2: entry answers are cached by file stamps, so a rule change has to invalidate
+them explicitly.
+
+**Final numbers on the owner's 20 roots** (the tables below are the first run and are kept as measured):
+injection 2,135, **removal 1,681** (was 1,821), pose 4,721, other 7,700, `.pmd` 141 (was 83), missing
+27; **3,816 shown in 133 folders** (was 3,956 in 139); thumbnails 2,327 image / 1,458 `.rsr`-only / **31
+none** (was 156: the visibility files had no images); catalogs 144. Rebuilt and read back on Blender
+5.3.0, 5.2.4 and 5.0.1: 3,816 assets, 2,327 real thumbnails and 1,489 placeholders, 0 failures, 0
+mismatches, 133 files / 28.3 to 28.6 MB, first build 3.5 to 5.2 s, second build writes nothing. In the
+real Asset Browser (5.3): the catalog tree, thumbnails, the placeholder tiles, the folder shown on
+repeated names (`BrowHeavy (!A3-H3 MORExp1 INJ)`), and a folder view all render, and the `Hide.*` rows
+are gone from the All view.
+
+#### What the real library looks like (first run, 2026-11-15, 20 roots; superseded by the final numbers above)
 
 | | |
 |---|--:|
@@ -1130,7 +1180,7 @@ Python, same pattern as Apply's correspondence build: modal timer, percentage on
 status bar, Esc cancels). Then **one child Blender process**
 (`bpy.app.binary_path --background --factory-startup --python library_assets_child.py -- <manifest>`)
 creates the stand-ins and writes the `.blend` files. Reasons it is not done in the session:
-`bpy.data.libraries.write` needs the datablocks to exist, so building 3,956 asset-marked images in
+`bpy.data.libraries.write` needs the datablocks to exist, so building ~4,000 asset-marked stand-ins in
 the user's session would add and remove them from the file the user is working in (they would flash
 through "Current File" assets, touch the undo stack and the saved file), and a frozen UI for ~10 s
 unless sliced. The child leaves the session untouched, is exactly what the prototype already did
@@ -1139,8 +1189,8 @@ works: a Blender 5.3.0, 5.2.4 LTS and 5.0.1 session each launched a child from `
 that wrote an asset `.blend` (0.4 to 2.2 s overhead). Not verified: Windows/macOS, a flatpak where
 `binary_path` may differ.
 
-**Stand-ins** (all prototype-verified headless on the three versions): `Image` (not `Action`, which
-the Pose Library shelf takes wholesale, not `Mesh`/`Text`, which give no thumbnail), 4x4, marked as an
+**Stand-ins** (headless-verified on the three versions; the type itself was corrected after the owner's
+GUI test, see "7.3 correction"): `Scene` (first `Image`, which the Asset Browser doesn't list), marked as an
 asset, thumbnail via `preview_ensure()` + `image_pixels_float` from the Poser image. Tags: kind
 (`injection`/`removal`), `incomplete`, `poser`. Catalog: the folder tree below `Libraries/`
 (`uuid5` of the path, so ids are stable across rebuilds). Description: the path relative to its root
@@ -1209,7 +1259,7 @@ never leaves a half-written file under a name the library scans). Protocol on st
 n total`, `POSER_DONE {json}`, `POSER_ERROR msg`; `--python-exit-code 1` makes an uncaught exception
 fail the build.
 
-**Stand-ins.** `Image` 4x4, asset-marked, preview from the Poser thumbnail via numpy
+**Stand-ins.** `Scene`, asset-marked, preview from the Poser thumbnail via numpy
 `foreach_get`/`foreach_set` (previews over 256 px are scaled down; 19 of the real ones were), tags,
 catalog id, description (the path, with the `[INCOMPLETE ...]` prefix where it applies), and custom keys
 `poser_root`, `poser_rel_path`, `poser_kind` on `asset_data`. **Placeholders** (decision D): a flat
