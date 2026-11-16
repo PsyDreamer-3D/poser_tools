@@ -42,6 +42,11 @@ class ScannedChannel:
     display_name: str       # "" when the channel never set one
     delta_count: int        # the `indexes` count == number of `d` lines CR2Parser keeps
     uses_binary_morph: bool
+    # Has an `indexes` line, i.e. re-declares the channel's delta list (empty, for a removal).
+    # A channel-visibility file (`Hide.*`/`Unhide.*`) is `name -` plus `hidden` and nothing
+    # else, so it declares none: that is what tells it from a RemDeltas file, which may carry
+    # `hidden` as well.
+    declares_deltas: bool = False
 
 
 @dataclass
@@ -132,6 +137,7 @@ def _channel_from(capture) -> ScannedChannel:
         # no `d` lines, which is what CR2Parser (and so the main-actor rule) sees.
         delta_count=0 if uses_binary else (int(indexes.group(1)) if indexes else 0),
         uses_binary_morph=uses_binary,
+        declares_deltas=indexes is not None,
     )
 
 

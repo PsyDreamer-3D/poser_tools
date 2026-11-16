@@ -13,7 +13,8 @@ from core.cr2.injection_package import resolve_package_files
 from core.cr2.injection_scan import scan_channels
 from core.cr2.poser_io import read_poser_file
 from synthetic_library import (  # noqa: F401  (the fixtures are used by name)
-    HIDE_LEAF, INJ_LEAF, OTHER_LEAF, PMD_LEAF, POSE_LEAF, REM_LEAF, _orchestrator, lib, library,
+    HIDE_LEAF, HIDE_NAMED_LEAF, INJ_LEAF, OTHER_LEAF, PMD_LEAF, PMD_REMOVAL_LEAF, POSE_LEAF, REM_HIDDEN_LEAF,
+    REM_LEAF, _orchestrator, lib, library,
 )
 
 _REAL_BASE = ("/run/media/jess-green/236a91c9-2598-40dd-b968-9c0f0be8a903/Artwork/Poser Content"
@@ -25,14 +26,23 @@ _REAL_BASE = ("/run/media/jess-green/236a91c9-2598-40dd-b968-9c0f0be8a903/Artwor
 @pytest.mark.parametrize("text, kind", [
     (INJ_LEAF, li.LEAF_INJECTION), (REM_LEAF, li.LEAF_REMOVAL), (HIDE_LEAF, li.LEAF_POSE),
     (POSE_LEAF, li.LEAF_POSE), (PMD_LEAF, li.LEAF_PMD), (OTHER_LEAF, li.LEAF_OTHER),
+    (HIDE_NAMED_LEAF, li.LEAF_POSE), (REM_HIDDEN_LEAF, li.LEAF_REMOVAL), (PMD_REMOVAL_LEAF, li.LEAF_PMD),
 ])
 def test_sniff_leaf(text, kind):
     assert li.sniff_leaf(text) == kind
 
 
 def test_hide_files_are_not_removals():
-    # A grep for `name -` called these removals: 624 wrong tiles on the real library.
+    # A grep for `name -` called the valueParm flavour removals: 624 wrong tiles on the real
+    # library. The targetGeom flavour (`name -` + `hidden 1`, no delta list) fooled the first
+    # fix too: 154 more, found by looking at the library in the Asset Browser.
     assert li.sniff_leaf(HIDE_LEAF) != li.LEAF_REMOVAL
+    assert li.sniff_leaf(HIDE_NAMED_LEAF) != li.LEAF_REMOVAL
+
+
+def test_a_removal_that_also_says_hidden_is_still_a_removal():
+    # Telling the two apart by `hidden` alone would have dropped a vendor's real RemDeltas files.
+    assert li.sniff_leaf(REM_HIDDEN_LEAF) == li.LEAF_REMOVAL
 
 
 def test_sniff_reads_only_the_head_of_a_huge_injection_leaf():
@@ -72,6 +82,7 @@ def test_targets_are_matched_ignoring_case(lib):
 
 @pytest.mark.parametrize("leaf, kind", [
     (REM_LEAF, "removal"), (HIDE_LEAF, "pose"), (POSE_LEAF, "pose"), (PMD_LEAF, "pmd"), (OTHER_LEAF, "other"),
+    (HIDE_NAMED_LEAF, "pose"), (REM_HIDDEN_LEAF, "removal"), (PMD_REMOVAL_LEAF, "pmd"),
 ])
 def test_entry_kinds(lib, leaf, kind):
     lib.write("!DAZ/Fig/Deltas/Leaf.pz2", leaf)
@@ -324,6 +335,27 @@ def test_real_hide_files_are_not_removals():
     assert all(li.sniff_leaf(li.read_head(p)) != li.LEAF_REMOVAL for p in hide[:40])
 
 
+_REAL_PROPS = _REAL_BASE.rsplit("/", 1)[0] + "/Scenes, Props and Objects"
+
+
+@real
+def test_real_visibility_files_are_not_removals_in_either_flavour():
+    path = os.path.join(_REAL_BASE, "Runtime", "libraries", "!DNA", "LaRoo", "ChanVis", "H_Blink L_LR2_Hide.p2z")
+    assert os.path.isfile(path), "expected the La Roo ChanVis files"
+    assert li.classify_entry(path, [_REAL_BASE])["kind"] == "pose"
+
+
+@pytest.mark.skipif(not os.path.isdir(_REAL_PROPS), reason="Poser content drive not mounted")
+def test_real_vendor_removal_files_that_say_hidden_stay_removals():
+    folder = os.path.join(_REAL_PROPS, "Runtime", "libraries", "!Adz", "HiroGen")
+    entry = os.path.join(folder, "GlansDownturn2.RemDeltas.pz2")
+    assert os.path.isfile(entry)
+    assert li.classify_entry(entry, [_REAL_PROPS])["kind"] == "removal"
+    entry_file = os.path.join(_REAL_PROPS, "Runtime", "libraries", "Pose", "AdzHiroGen Mors REM", "GlansDownturn2 REM.pz2")
+    assert os.path.isfile(entry_file)
+    assert li.classify_entry(entry_file, [_REAL_PROPS])["kind"] == "removal"      # reads that RemDeltas file
+
+
 @real
 def test_real_walk_finds_the_same_leaves_as_apply_does():
     for rel in ("pose/!V3 All Morphs INJ/! All Head Morphs.pz2", "pose/!A3-H3 MORExp1 INJ/! All Morphs.pz2"):
@@ -347,9 +379,11 @@ def test_real_sniff_agrees_with_a_full_parse_where_it_matters():
         text = read_poser_file(path)
         channels = scan_channels(text)
         has_deltas = any(c.delta_count > 0 for c in channels)
-        is_removal = any(c.display_name == "-" and c.delta_count == 0 for c in channels)
+        is_removal = any(c.display_name == "-" and c.delta_count == 0 and c.declares_deltas for c in channels)
         sniffed = li.sniff_leaf(head)
-        if has_deltas and not any(c.uses_binary_morph for c in channels):
+        if "removePMDFileMorphs" in text or "injectPMDFileMorphs" in text:
+            assert sniffed == li.LEAF_PMD, path          # Poser commands for the binary-morph system
+        elif has_deltas and not any(c.uses_binary_morph for c in channels):
             assert sniffed == li.LEAF_INJECTION, path
         elif is_removal and not has_deltas:
             assert sniffed == li.LEAF_REMOVAL, path

@@ -25,6 +25,16 @@ POSE_LEAF = _file(_actor(
     "\t\t\ttargetGeom Foo\n\t\t\t\t{\n\t\t\t\tkeys\n\t\t\t\t\t{\n\t\t\t\t\tk 0 0.5\n\t\t\t\t\t}\n\t\t\t\t}\n"))
 PMD_LEAF = _file(_actor(
     "\t\t\ttargetGeom Foo\n\t\t\t\t{\n\t\t\t\tname Foo\n\t\t\t\tuseBinaryMorph 1\n\t\t\t\tindexes 9\n\t\t\t\t}\n"))
+# Visibility file, second flavour (La Roo ChanVis `H_*_Hide.p2z`): `name -` and `hidden 1` on a
+# targetGeom, with no delta list declared. Not a removal.
+HIDE_NAMED_LEAF = _file(_actor("\t\t\ttargetGeom Blink L\n\t\t\t\t{\n\t\t\t\tname -\n\t\t\t\thidden 1\n\t\t\t\t}\n"))
+# A vendor's real RemDeltas: `name -` *and* `hidden 1`, but it re-declares the delta list, empty.
+REM_HIDDEN_LEAF = _file(_actor(
+    "\t\t\ttargetGeom DICA_06\n\t\t\t\t{\n\t\t\t\tname -\n\t\t\t\thidden 1\n\t\t\t\tindexes 0\n"
+    "\t\t\t\tnumbDeltas 735\n\t\t\t\tdeltas\n\t\t\t\t\t{\n\t\t\t\t\t}\n\t\t\t\t}\n"))
+# La Femme's "REM ..." files: Poser commands for the binary-morph system, then visibility channels.
+PMD_REMOVAL_LEAF = ('{\nversion\n\t{\n\tnumber 11\n\t}\nremovePMDFileMorphs ":Runtime:Geometries:X:Y.pmd"\n'
+                    'removeFullBodyMorph BodyFat\n}\n' + HIDE_NAMED_LEAF)
 OTHER_LEAF = _file(_actor("\t\t\trotateX xRotate\n\t\t\t\t{\n\t\t\t\tkeys\n\t\t\t\t\t{\n\t\t\t\t\tk 0 0\n\t\t\t\t\t}\n\t\t\t\t}\n"))
 
 

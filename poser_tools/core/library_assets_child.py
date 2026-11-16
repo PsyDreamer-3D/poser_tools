@@ -5,16 +5,21 @@ library_assets_child.py
 Phase 7.3b: runs inside a *child* Blender process
 (`blender --background --factory-startup --python library_assets_child.py -- job.json`),
 never imported by the add-on. For each source folder in the job it creates one stand-in
-`Image` asset per package, gives it the Poser thumbnail (or a placeholder), tags,
+`Scene` asset per package, gives it the Poser thumbnail (or a placeholder), tags,
 catalog and payload, and writes the folder's `.blend`.
 
 Why a separate process and not the user's session: `bpy.data.libraries.write` needs the
-datablocks to exist, so building ~4,000 asset-marked images in the session the user is
+datablocks to exist, so building ~4,000 asset-marked stand-ins in the session the user is
 working in would add and remove them from their file (they would pass through "Current
 File" assets and the undo stack), and freeze the UI for ~10 s unless sliced.
 
-Stand-in type is `Image`: `Action` is taken wholesale by the Pose Library shelf, and
-`Mesh`/`Text` can be assets but give no thumbnail (docs/handoff-morph-injection.md).
+Stand-in type is `Scene`, chosen against what each type does in Blender (docs/handoff-morph-
+injection.md, "7.3 correction"). The Asset Browser lists only Action, Brush, Collection,
+Material, Node Tree, Object, Scene and World, so an `Image` library (the first choice) shows
+catalogs and "No items" there. `Action` is taken wholesale by the Pose Library shelf and
+`NodeTree` feeds the Add menus; `Object`, `World` and `Material` are drag-and-drop targets (a
+dropped stand-in would add an empty, replace the world, or assign a blank material); `Collection`
+has no thumbnail on 5.0.1. A `Scene` has no drop target. `Mesh`/`Text` can't hold a thumbnail.
 
 This file must stay stand-alone (stdlib, bpy, numpy only): the child has no add-on on its
 path. The parent (core/library_build.py) plans the work, writes the catalog file and
@@ -86,10 +91,10 @@ def load_thumbnail(path: str):
 
 
 def make_standin(entry: dict, catalog_ids: dict, counts: dict):
-    """One asset-marked Image for a manifest entry, with its preview, tags and payload."""
-    image = bpy.data.images.new(entry["name"], 4, 4)
-    image.asset_mark()
-    data = image.asset_data
+    """One asset-marked Scene for a manifest entry, with its preview, tags and payload."""
+    scene = bpy.data.scenes.new(entry["name"])
+    scene.asset_mark()
+    data = scene.asset_data
     data.description = entry["description"]
     catalog_id = catalog_ids.get(entry["catalog"])
     if catalog_id:
@@ -110,23 +115,23 @@ def make_standin(entry: dict, catalog_ids: dict, counts: dict):
         pixels = placeholder_pixels(entry["kind"]).ravel()
         width = height = PLACEHOLDER_SIZE
         counts["failed" if entry["thumbnail"] else "placeholders"] += 1
-    preview = image.preview_ensure()
+    preview = scene.preview_ensure()
     preview.image_size = (width, height)
     preview.image_pixels_float.foreach_set(pixels)
-    return image
+    return scene
 
 
 def write_folder(folder: dict, out_dir: str, catalog_ids: dict, counts: dict) -> None:
-    images = [make_standin(entry, catalog_ids, counts) for entry in folder["entries"]]
+    scenes = [make_standin(entry, catalog_ids, counts) for entry in folder["entries"]]
     final = os.path.join(out_dir, folder["blend"])
     # Written beside the target and renamed, so an interrupted build never leaves a
     # half-written file under the name the library scans.
     temp = os.path.join(out_dir, ".tmp-" + folder["blend"])
-    bpy.data.libraries.write(temp, set(images), fake_user=True, compress=True)
+    bpy.data.libraries.write(temp, set(scenes), fake_user=True, compress=True)
     os.replace(temp, final)
-    counts["assets"] += len(images)
-    for image in images:
-        bpy.data.images.remove(image)
+    counts["assets"] += len(scenes)
+    for scene in scenes:
+        bpy.data.scenes.remove(scene)
 
 
 def main(job_path: str) -> None:

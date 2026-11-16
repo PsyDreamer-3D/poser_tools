@@ -38,7 +38,10 @@ from .poser_io import COMPRESSED_EXTENSIONS, read_poser_file
 from .poser_paths import resolve_poser_path
 from .runtime_index import walk_roots
 
-MANIFEST_VERSION = 1
+# 2: a `targetGeom ... name - hidden 1` visibility file is no longer classified as a removal
+# (a removal must declare its empty delta list).
+# Entry answers are cached by file stamps alone, so a rule change must invalidate them here.
+MANIFEST_VERSION = 2
 HEAD_BYTES = 16384
 # Orchestrators nest two or three deep in practice (an entry, an "all" file, the leaves).
 # The cap only stops a pathological tree; hitting it marks the entry incomplete.
@@ -87,16 +90,23 @@ def read_head(path: str):
 def sniff_leaf(head: str) -> str:
     """What a leaf file does, from its first 16 KB.
 
-    Removal is read from a parsed channel, not grepped: `Hide.*` / `Unhide.*`
-    visibility files also contain `name -`, on a `valueParm`, and a grep put 624 of
-    them on the removal list. Injection stays a pattern match because a channel's
+    Removal is read from a parsed channel, not grepped. `Hide.*` / `Unhide.*` files also
+    contain `name -`: on a `valueParm` (a grep put 624 of them on the removal list), and
+    on a `targetGeom` beside `hidden 1` (154 more, found only by looking at the library
+    in the Asset Browser). What a removal has and a visibility file lacks is a declared,
+    empty delta list (`indexes 0`); some vendors' RemDeltas files also carry `hidden 1`,
+    so `hidden` can't be the test. Injection stays a pattern match because a channel's
     delta block runs past 16 KB, so the channel never closes inside the head.
     """
-    if "injectPMDFileMorphs" in head or "useBinaryMorph 1" in head:
+    # `removePMDFileMorphs` is the same binary-morph system's removal: La Femme's "REM ..."
+    # files are a list of those commands plus `name -`/`hidden` channels, not delta files.
+    if ("injectPMDFileMorphs" in head or "removePMDFileMorphs" in head
+            or "useBinaryMorph 1" in head):
         return LEAF_PMD
     if "targetGeom" in head and _INDEXES_RE.search(head) and _DELTAS_RE.search(head):
         return LEAF_INJECTION
-    if any(c.display_name == "-" and c.delta_count == 0 for c in scan_channels(head)):
+    if any(c.display_name == "-" and c.delta_count == 0 and c.declares_deltas
+           for c in scan_channels(head)):
         return LEAF_REMOVAL
     if "targetGeom" in head:
         return LEAF_POSE
@@ -321,7 +331,7 @@ def _folder_hash(entries: list) -> str:
 _CATALOG_NAMESPACE = uuid.UUID("5f6c1e3a-0b0e-4a52-9d7e-5b7f3c1f2a10")
 # Bump when what the asset files contain changes (placeholders, tags, payload keys), so
 # existing ones are rebuilt: it goes into the manifest signature.
-ASSET_FORMAT_VERSION = 1
+ASSET_FORMAT_VERSION = 2   # 2: stand-ins are Scenes (the Asset Browser doesn't list Images)
 
 
 def asset_signature(blender_version: str) -> str:
