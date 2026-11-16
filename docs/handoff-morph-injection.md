@@ -569,7 +569,8 @@ injection package, populated from `runtime_index.get_all_items()` in `invoke()`.
 resolves its reference OBJ automatically via `CR2Parser.parse_file()` +
 `resolve_geom_file()` — no manual OBJ browsing at all when a Runtime root is configured. The
 existing raw `injection_filepath`/`reference_obj_filepath` fields stay as a manual override
-(unchanged behavior for no-Runtime-root setups or content outside it) and always win if filled in.
+(for no-Runtime-root setups or content outside it). *Originally these won whenever filled in;
+reversed 2026-11-15, see the correction below.*
 The picked CR2 is remembered on the mesh (`poser_reference_cr2`, parallel to the existing
 `poser_reference_obj`) so a re-run pre-fills the same figure.
 
@@ -966,6 +967,22 @@ bare probe operator), so the dialog chain (dialog 1 -> picker -> modal Apply, ne
 needs the GUI. The one nesting not spike-tested is a *modal* operator started from inside another
 operator's `invoke()`/`execute()`; if Blender refuses it, the fallback is to start the modal Apply from
 a `bpy.app.timers` callback, at the cost of losing `context.window`.
+
+**Correction to Phase 5.5's precedence: a pick from the lists now wins over the path fields (owner
+UAT, 2026-11-15).** "Manual path wins if filled" was right for a setup with no Runtime roots, and
+wrong once the lists existed: Blender remembers an operator's last-used property values, Apply writes
+the picked package into `injection_filepath` when it runs, so the next dialog opened with the previous
+package pre-filled and silently ignored a different pick. The figure picker had the same flaw (the
+remembered reference `.obj` was pre-filled next to the pre-selected remembered CR2, so choosing another
+figure was ignored). Now: the lists start empty every time, so a value in them is a pick made in this
+dialog, and it wins; `injection_filepath` and the two list names are `SKIP_SAVE`; when the remembered
+figure is pre-selected its `.obj` is left blank and resolved from the CR2; the dialog says "this path is
+ignored" if both are filled; a pick that matches no entry falls back to a filled path (scripted
+callers), and the picker hand-off (`selected_morphs` set) ignores list names entirely because its paths
+are already settled. Remove had the same pattern and the same fix. Verified headless on a real Aiko3
+with the library items passed as collection properties: stale path + other pick -> the pick is
+applied; path only; unknown pick + path; unknown pick alone -> the error; hand-off with a stale name;
+Remove with a stale path + other pick. Not verified in the GUI.
 
 **Reports from a nested operator never reach the UI (owner UAT, 2026-11-15).** Step 6 of the PR's
 test plan: re-applying an already-applied one-morph package should say "Nothing to apply", and

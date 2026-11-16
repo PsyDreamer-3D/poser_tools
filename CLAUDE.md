@@ -188,8 +188,10 @@ don't resume it without a specific reason to.
   Material/Vertex Group/Shape Key pickers) — picking a figure resolves its reference OBJ
   automatically via the CR2's own `figureResFile` (`core/cr2/cr2_parser.py`'s `resolve_geom_file()`,
   a real pre-existing function fixed in the same change — it imported a module that only exists in
-  `cr2_importer`, so it silently no-op'd until now). The raw manual-path fields are unchanged and
-  still win if filled in, so nothing breaks for a setup with no Runtime root configured.
+  `cr2_importer`, so it silently no-op'd until now). The raw manual-path fields are kept for a
+  setup with no Runtime root configured or content outside it; a pick from the lists wins over them
+  (changed after UAT: the path field is remembered by Blender and was silently overriding new picks,
+  so `injection_filepath` is `SKIP_SAVE` and the lists start empty each run).
 - Phase 6: **Remove Morph Injection** (`poser.remove_morph_injection`,
   `operators/removeMorphInjection.py`) reverses an injection by name-matching, not geometry — no
   reference OBJ, no vertex-correspondence build. Poser's own `RemDeltas.*.pz2` files (shipped
@@ -264,8 +266,8 @@ Everything else is manual smoke test only — no `bpy`-dependent code has automa
    **Apply Morph Injection**: the popup's **Figure (CR2)** and **Injection Package** fields are
    searchable dropdowns sourced from those roots — pick a figure and its reference OBJ resolves
    automatically (no manual `.obj` browse), pick an injection package the same way. The raw manual
-   path fields below still work and win if filled in (no Runtime root configured, or content
-   outside it). A package with several morphs then opens **Choose Morphs to Apply**: everything new
+   path fields below still work when nothing is picked from the lists (no Runtime root configured, or
+   content outside it); a list pick wins, and the dialog says so if both are filled. A package with several morphs then opens **Choose Morphs to Apply**: everything new
    is ticked, filter/Select All/Select None work, locked rows (already present, JCM, `.pmd`, no
    deltas) are greyed with a reason, and the box shows the estimate; OK applies only the ticked
    ones (the report says so). Expect: new shape keys named after the package's morphs, a **Poser Morph Injection
