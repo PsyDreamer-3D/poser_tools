@@ -25,7 +25,7 @@ from .poser_io import read_poser_file
 from .poser_paths import resolve_poser_path
 
 
-def load_injection_package(path: str, extra_roots=None) -> dict:
+def load_injection_package(path: str, extra_roots=None, only_leaves=None) -> dict:
     """Load one morph-package file, resolving it fully into a single Figure.
 
     A plain inline-delta file is parsed and returned as-is. An orchestrator
@@ -47,24 +47,57 @@ def load_injection_package(path: str, extra_roots=None) -> dict:
     another (a product's pose entry in one folder, its figure's deltas under
     "Base Figures"), so without them those references go unresolved.
 
+    `only_leaves`, if given, is a collection of leaf-file paths (as returned in
+    "leaf_paths" by resolve_package_files()/scan_injection_package()); only
+    those are parsed. Parsing is the expensive part (~15s for a 259-morph
+    package), so the morph picker loads just the files of the morphs chosen.
+
     Returns:
         {
-            "figure": Figure,           -- combined actors from every file
+            "figure": Figure,           -- combined actors from every file parsed
             "unresolved_paths": [str],  -- readScript targets that couldn't be
                                            resolved to a real file on disk;
-                                           reported, not silently dropped
+                                           reported, not silently dropped. Always
+                                           the whole package's, even with only_leaves
             "leaf_paths": [str],        -- every file that was actually parsed
                                            (the file itself for a plain package)
         }
     """
+    files = resolve_package_files(path, extra_roots=extra_roots)
+    wanted = None if only_leaves is None else set(only_leaves)
+
     figure = Figure(source_file=path)
-    unresolved_paths = []
+    parsed = []
+    for leaf in files["leaf_paths"]:
+        if wanted is not None and leaf not in wanted:
+            continue
+        parsed.append(leaf)
+        # Deliberately not deduplicating actor names across files here
+        # -- Phase 3 only ever iterates combined.actors (via name_match.py),
+        # never combined.actor_map, so a same-named actor declared in two
+        # different leaf files just means actor_map keeps whichever was
+        # processed last; both actor objects still exist in .actors.
+        sub_figure = CR2Parser.parse_text(read_poser_file(leaf), source_file=leaf)
+        figure.actors.extend(sub_figure.actors)
+        for actor in sub_figure.actors:
+            figure.actor_map[actor.name] = actor
+    return {"figure": figure, "unresolved_paths": files["unresolved_paths"], "leaf_paths": parsed}
+
+
+def resolve_package_files(path: str, extra_roots=None) -> dict:
+    """Follow a package's `readScript` references to the leaf files, parsing nothing.
+
+    Returns {"leaf_paths": [str] (file order), "unresolved_paths": [str]}. A file
+    with no `readScript` directive is a leaf. The substring test first keeps this
+    cheap: leaf files are the big ones, and tokenizing them just to learn they
+    hold no directive would dominate the cost.
+    """
     leaf_paths = []
+    unresolved_paths = []
     # One cache per load: a big orchestrator names hundreds of files in a
     # handful of folders, and re-listing them per target dominates the cost.
-    _load_into(path, figure, unresolved_paths, leaf_paths, seen=set(), dir_cache={},
-               extra_roots=extra_roots)
-    return {"figure": figure, "unresolved_paths": unresolved_paths, "leaf_paths": leaf_paths}
+    _collect(path, leaf_paths, unresolved_paths, seen=set(), dir_cache={}, extra_roots=extra_roots)
+    return {"leaf_paths": leaf_paths, "unresolved_paths": unresolved_paths}
 
 
 def paired_injection_path(removal_path: str):
@@ -91,28 +124,18 @@ def paired_injection_path(removal_path: str):
     return None
 
 
-def _load_into(path: str, combined: Figure, unresolved_paths: list, leaf_paths: list,
-               seen: set, dir_cache: dict, extra_roots=None) -> None:
+def _collect(path: str, leaf_paths: list, unresolved_paths: list, seen: set,
+             dir_cache: dict, extra_roots=None) -> None:
     real_path = os.path.realpath(path)
     if real_path in seen:
         return
     seen.add(real_path)
 
     text = read_poser_file(path)
-    tokens = CR2Tokenizer.tokenize(text)
+    tokens = CR2Tokenizer.tokenize(text) if "readScript" in text else ()
 
     if "readScript" not in tokens:
-        # Leaf file: parse directly and fold its actors into the combined
-        # figure. Deliberately not deduplicating actor names across files here
-        # -- Phase 3 only ever iterates combined.actors (via name_match.py),
-        # never combined.actor_map, so a same-named actor declared in two
-        # different leaf files just means actor_map keeps whichever was
-        # processed last; both actor objects still exist in .actors.
         leaf_paths.append(path)
-        sub_figure = CR2Parser.parse_text(text, source_file=path)
-        combined.actors.extend(sub_figure.actors)
-        for actor in sub_figure.actors:
-            combined.actor_map[actor.name] = actor
         return
 
     for i, tok in enumerate(tokens):
@@ -125,4 +148,4 @@ def _load_into(path: str, combined: Figure, unresolved_paths: list, leaf_paths: 
         if resolved is None:
             unresolved_paths.append(colon_path)
             continue
-        _load_into(resolved, combined, unresolved_paths, leaf_paths, seen, dir_cache, extra_roots)
+        _collect(resolved, leaf_paths, unresolved_paths, seen, dir_cache, extra_roots)

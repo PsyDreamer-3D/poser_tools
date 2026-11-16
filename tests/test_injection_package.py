@@ -6,7 +6,11 @@ import textwrap
 
 import pytest
 
-from core.cr2.injection_package import load_injection_package, paired_injection_path
+from core.cr2.injection_package import (
+    load_injection_package,
+    paired_injection_path,
+    resolve_package_files,
+)
 
 _REAL_CONTENT_ROOT = (
     "/run/media/jess-green/236a91c9-2598-40dd-b968-9c0f0be8a903/Artwork/Poser Content"
@@ -359,3 +363,25 @@ def test_paired_injection_path_is_none_when_there_is_no_pair(tmp_path):
     rem = tmp_path / "RemDeltas.Lonely.pz2"
     rem.write_text("{}")
     assert paired_injection_path(str(rem)) is None
+
+
+def test_only_leaves_parses_just_those_files_and_still_reports_unresolved(tmp_path):
+    runtime = tmp_path / "Runtime" / "libraries"
+    runtime.mkdir(parents=True)
+    for name in ("a", "b"):
+        (runtime / f"{name}.pz2").write_text(
+            "{\nactor " + name + ":1\n\t{\n\tchannels\n\t\t{\n\t\ttargetGeom " + name.upper()
+            + "\n\t\t\t{\n\t\t\tname " + name + "\n\t\t\t}\n\t\t}\n\t}\n}\n")
+    orchestrator = runtime / "! All.pz2"
+    orchestrator.write_text('{\nreadScript ":Runtime:libraries:a.pz2"\nreadScript ":Runtime:libraries:b.pz2"\n'
+                            'readScript ":Runtime:libraries:gone.pz2"\n}\n')
+
+    full = resolve_package_files(str(orchestrator))
+    assert [os.path.basename(p) for p in full["leaf_paths"]] == ["a.pz2", "b.pz2"]
+
+    only_b = load_injection_package(str(orchestrator), only_leaves=[full["leaf_paths"][1]])
+    assert [a.name for a in only_b["figure"].actors] == ["b"]
+    assert [os.path.basename(p) for p in only_b["leaf_paths"]] == ["b.pz2"]
+    assert only_b["unresolved_paths"] == [":Runtime:libraries:gone.pz2"]   # describes the package, not the subset
+
+    assert load_injection_package(str(orchestrator), only_leaves=[])["figure"].actors == []

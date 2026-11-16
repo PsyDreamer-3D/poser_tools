@@ -24,8 +24,9 @@ Standard scaffold layout. Two things worth knowing:
   `vendor/io_scene_fbx` sets), but this code gets fixed and extended in place, not frozen. No `bpy`
   dependency — pure Python, covered by `tests/test_cr2_parser.py`, `tests/test_actor_vertex_index.py`,
   and `tests/test_poser_paths.py`.
-  `core/cr2/obj_io.py`, `core/cr2/mesh_correspondence.py`, `core/cr2/injection_package.py`, and
-  `core/cr2/apply_injection.py` (morph-injection Phases 1 and 3, see below) live in the same package
+  `core/cr2/obj_io.py`, `core/cr2/mesh_correspondence.py`, `core/cr2/injection_package.py`,
+  `core/cr2/injection_scan.py` (a cheap brace-walking listing of a package's morphs for the picker;
+  must agree with `CR2Parser`, see its tests), and `core/cr2/apply_injection.py` (morph-injection Phases 1 and 3, see below) live in the same package
   but are original `poser_tools` code, not adapted from `cr2_importer` — GPL-3.0-or-later, not MIT.
   Same no-`bpy` / plain-`pytest` discipline (`tests/test_mesh_correspondence.py`,
   `tests/test_injection_package.py`, `tests/test_apply_injection.py`).
@@ -187,8 +188,10 @@ don't resume it without a specific reason to.
   Material/Vertex Group/Shape Key pickers) — picking a figure resolves its reference OBJ
   automatically via the CR2's own `figureResFile` (`core/cr2/cr2_parser.py`'s `resolve_geom_file()`,
   a real pre-existing function fixed in the same change — it imported a module that only exists in
-  `cr2_importer`, so it silently no-op'd until now). The raw manual-path fields are unchanged and
-  still win if filled in, so nothing breaks for a setup with no Runtime root configured.
+  `cr2_importer`, so it silently no-op'd until now). The raw manual-path fields are kept for a
+  setup with no Runtime root configured or content outside it; a pick from the lists wins over them
+  (changed after UAT: the path field is remembered by Blender and was silently overriding new picks,
+  so `injection_filepath` is `SKIP_SAVE` and the lists start empty each run).
 - Phase 6: **Remove Morph Injection** (`poser.remove_morph_injection`,
   `operators/removeMorphInjection.py`) reverses an injection by name-matching, not geometry — no
   reference OBJ, no vertex-correspondence build. Poser's own `RemDeltas.*.pz2` files (shipped
@@ -216,7 +219,22 @@ don't resume it without a specific reason to.
   own Runtime, since a package often names files that live in a different library, and a package
   that yields no morphs because its files weren't found now says so (`no_morphs_report()`). Phase 7
   (thumbnail library via Blender's Asset Shelf) is scoped in
-  `docs/handoff-morph-injection.md`; only 7.0 is built.
+  `docs/handoff-morph-injection.md`; 7.0, 7.0b, 7.1 and 7.2 are built.
+- Phase 7.2: **morph picker** (`poser.pick_injection_morphs`, `operators/pickInjectionMorphs.py`,
+  `ui/pickInjectionMorphs.py`). Apply's popup (package + figure) hands over to a second dialog
+  listing the package's morphs; its OK calls `poser.apply_morph_injection` with `selected_morphs`/
+  `selected_leaves` (JSON), which then parses only those files. `core/cr2/injection_scan.py` lists a
+  package's morphs without parsing deltas (~1 s vs. ~9 s for the 259-morph V3 head package); it is a
+  second reader of the CR2 format, so tests assert it agrees with `CR2Parser`, and Apply reports any
+  chosen morph the parser can't find. A scripted `bpy.ops.poser.apply_morph_injection(...)` call
+  with no selection still applies everything (`use_morph_picker` is only set by the interactive
+  `invoke()`). **Headless note:** under `--background`, `INVOKE_DEFAULT` runs `execute()`, not
+  `invoke()`, so the dialog flow can't be exercised without a GUI; the scan, classification,
+  estimate and selected-only apply are tested instead. **Nested operators lose their reports:** a
+  warning/info from an operator started with `bpy.ops` inside another one is not shown, and an error
+  raises in the caller, so these operators report through `say()` and start each other through
+  `call_nested()` (both in `operators/applyMorphInjection.py`), which re-issue the message from the
+  UI-invoked outer operator. Use them for any new operator in this chain (the 7.4 shelf click too).
 
 ## Testing
 
@@ -248,8 +266,11 @@ Everything else is manual smoke test only — no `bpy`-dependent code has automa
    **Apply Morph Injection**: the popup's **Figure (CR2)** and **Injection Package** fields are
    searchable dropdowns sourced from those roots — pick a figure and its reference OBJ resolves
    automatically (no manual `.obj` browse), pick an injection package the same way. The raw manual
-   path fields below still work and win if filled in (no Runtime root configured, or content
-   outside it). Expect: new shape keys named after the package's morphs, a **Poser Morph Injection
+   path fields below still work when nothing is picked from the lists (no Runtime root configured, or
+   content outside it); a list pick wins, and the dialog says so if both are filled. A package with several morphs then opens **Choose Morphs to Apply**: everything new
+   is ticked, filter/Select All/Select None work, locked rows (already present, JCM, `.pmd`, no
+   deltas) are greyed with a reason, and the box shows the estimate; OK applies only the ticked
+   ones (the report says so). Expect: new shape keys named after the package's morphs, a **Poser Morph Injection
    Report** text block (including a total-time line), `mesh["poser_reference_obj"]` and
    `mesh["poser_reference_cr2"]` set. Expect roughly 30-60s on a 70k-vertex figure, dominated by the
    one-time vertex-correspondence build — the cursor shows a counting-up percentage (matching

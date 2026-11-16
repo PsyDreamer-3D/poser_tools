@@ -569,7 +569,8 @@ injection package, populated from `runtime_index.get_all_items()` in `invoke()`.
 resolves its reference OBJ automatically via `CR2Parser.parse_file()` +
 `resolve_geom_file()` — no manual OBJ browsing at all when a Runtime root is configured. The
 existing raw `injection_filepath`/`reference_obj_filepath` fields stay as a manual override
-(unchanged behavior for no-Runtime-root setups or content outside it) and always win if filled in.
+(for no-Runtime-root setups or content outside it). *Originally these won whenever filled in;
+reversed 2026-11-15, see the correction below.*
 The picked CR2 is remembered on the mesh (`poser_reference_cr2`, parallel to the existing
 `poser_reference_obj`) so a re-run pre-fills the same figure.
 
@@ -863,17 +864,164 @@ The cache and the picker fix today's pain and don't depend on the library, so th
   at the configuration). The headless check monkeypatches `get_runtime_roots`; the preferences
   reader itself is unchanged and was not exercised here.
 - **7.1** ✅ Correspondence cache (details below).
-- **7.2** Morph picker. After a package is chosen, a dialog lists its morphs (display names via
-  `display_name_for`; status new / already present / JCM-skipped) with checkboxes, Blender's
-  built-in UIList filter box, select all/none; Apply handles only the selection and parses only
-  those leaf files. Needs a cheap channel-declaration scan (names + owning leaf file, no deltas),
-  also needed by 7.6.
+- **7.2** ✅ Morph picker (built 2026-11-15; GUI flow pending owner test). After a package is chosen, a dialog lists its morphs (display names via
+  `display_name_for`) with checkboxes, Blender's built-in UIList filter box, select all/none; Apply
+  handles only the selection and parses only the leaf files those morphs live in. Design below.
 - **7.3** Classifier + index builder, no UI (per-folder `.blend` files, flags, placeholders).
   Verify against the real library and headless on 5.0.1/5.2.4/5.3.
 - **7.4** Shelf + activate operator → opens the (7.2) dialog pre-filled. Dropdowns stay for setups
   with no Runtime roots or no index built yet.
 - **7.5** Figure shelf: pick a CR2 with a thumbnail, sets `poser_reference_cr2`.
 - **7.6** Phase 5 tie-in: resolved morph names in the asset description, searchable in the browser.
+
+### 7.2 design (reviewed and built 2026-11-15)
+
+**Measured on the real V3/M3 "All Head Morphs" orchestrators** (warm I/O cache; cold reads from the
+external drive were not measured):
+
+| | V3 INJ | M3 INJ |
+|---|--:|--:|
+| leaf files / distinct morphs | 512 / 259 | 506 / 253 |
+| morphs declared in 2 leaf files | 242 | 241 |
+| leaf files declaring more than one morph | 0 | 0 |
+| full parse as first measured (what `execute()` did) | 15.4 s | 11.8 s |
+| full parse after 7.2's loader refactor (leaf files tokenized once, not twice) | 9.3 s | 7.0 s |
+| scan as built (`scan_injection_package`, incl. resolving the files) | 1.1 s | 0.6 s |
+| load only one morph's two files | 0.29 s | 0.20 s |
+
+The 0.15 s / 0.10 s in the first prototype was only the regex over already-read text; the built scan
+also resolves 512 `readScript` paths and reads each file twice (once to find leaves, once to scan),
+so ~1 s is the honest number, about 9x cheaper than a full load rather than 100x. Merging the two
+reads is available if 1 s proves too slow for opening the dialog.
+
+Corrections to the original plan this produced:
+
+- **A morph maps to a set of leaf files, not one.** Head morph plus partial (neck etc.) land in
+  separate files in the big orchestrators. The scan returns `internal_name -> [leaf paths]`, and
+  "parse only the selected" parses every file in the set, then filters the combined channel index by
+  the selected internal names (so a hypothetical multi-morph leaf is still correct).
+- **The scan has to read the whole file, not its head.** The label comes from the channel with the
+  most deltas (Phase 5.4 correction), and that is frequently the *second* actor in the file. The scan
+  therefore reads every channel's `name` and delta count and applies the same most-deltas rule (one
+  shared function, `name_match.pick_display_name`). It walks the file's braces instead of tokenizing,
+  which is what makes it cheap. Two details a first draft got wrong, both found by diffing against
+  the parser on real files rather than on the three packages I started with:
+  - The delta count is the channel's **`indexes`** (the number of `d` lines the parser keeps), not
+    `numbDeltas`, which is the owning actor's vertex count (38,284 on every head channel). The first
+    draft used `numbDeltas` and happened to pass because the head actor outnumbers the neck. A binary
+    (`.pmd`) morph reports 0, as the parser does: its `indexes` counts deltas that aren't in the file.
+  - Channels are only the ones the parser keeps: a `targetGeom` directly inside `actor`/`prop` ->
+    `channels`. Pose files also contain `targetGeom` keyframe blocks under `ikchannels` or outside any
+    actor; a first draft listed 45 of 1,170 sampled files differently because of those, plus names
+    with spaces (the parser keeps the rest of the line and collapses repeated spaces), plus
+    `keys { ... }` blocks nested ahead of `deltas` that defeat a flat pattern.
+- **Scan and parser are two readers of one format**, so divergence is the risk. The scan only builds
+  the list: Apply still parses with the real parser, so a scan miss hides a morph, it can't apply
+  wrong data. Tests assert scan == full parse on synthetic cases (nested `keys`, spaces in names,
+  `ikchannels`/stray blocks, binary morph, CRLF, quotes, two files per morph) and, skipped when the
+  drive is absent, on three real 253-259-morph orchestrators. Measured separately across the whole
+  content drive: 4,658 leaf files / 70,690 channels, one file differs, a pose file
+  (`Legacy Animals/Horse/00.pz2`) where the parser merges 6 channels the file declares twice. Pose
+  files aren't packages anyone applies, and Apply must report a selected morph it can't find rather
+  than skip it silently, so that residual is accepted. Scan 3.4 s vs. parse 26.4 s on that sample.
+- **The existing 11-15 s main-thread freeze is a separate problem.** Parsing the package happens in
+  `execute()` before the modal starts, so a big package freezes Blender with no feedback. 7.2 shrinks
+  it for partial selections but Select All brings it back. Moving the parse into the worker thread
+  is a follow-up, not part of 7.2 (decision 10 below).
+
+**Flow.** The package is picked *inside* the current popup, so the scan can't run at `invoke`: two
+dialogs. Dialog 1 (figure + package, as today) scans on OK and opens dialog 2 (the morph list), whose
+OK runs the existing modal apply with the selected internal names. The 7.4 shelf opens dialog 2
+directly. A package with a single morph skips dialog 2 (decision 9).
+
+**Row statuses:** new; already present (unchecked, disabled); JCM (skipped, disabled); no deltas
+(every morph of a `RemDeltas.*` package); binary morph (`.pmd`, unsupported, disabled). Header line
+"Apply N of M" with a time and memory estimate. Each shape key stores `co` as 3 float32 (12 bytes
+per vertex), so ~0.87 MB on a 72,712-vertex mesh, ~226 MB for all 259 V3 head morphs (arithmetic,
+not measured). Select all/none act on every row: the UIList filter text lives in the UI list's own
+state, not on the operator, so "select all that match the filter" isn't available to `execute()`.
+
+**Unverified, needs a GUI spike (dialogs can't run headless):** checkboxes in a `template_list`
+inside `invoke_props_dialog`; whether `update=` callbacks fire for operator properties (decides
+whether Select all/none can be a toggle); chaining dialog 1 into dialog 2 with `INVOKE_DEFAULT` from
+`execute`; per-row state surviving a filter change. The spike script is throwaway, not committed.
+
+**As built.** `poser.apply_morph_injection` keeps its id and its scripted behaviour (no selection =
+every morph). Three hidden `SKIP_SAVE` properties carry the hand-over: `use_morph_picker` (set only
+by the interactive `invoke()`, so dialog 1's OK diverts to the picker while a scripted call doesn't),
+and `selected_morphs`/`selected_leaves` (JSON; when set, `invoke()` skips dialog 1 and runs).
+`poser.pick_injection_morphs` (`INTERNAL`, so not in F3 search) scans in its `invoke()`, classifies
+(`classify_morphs`), applies directly when the package holds exactly one morph, cancels with a message when
+nothing is choosable, and otherwise opens the list (even for one choosable morph among many, so
+the greyed rows show why the rest were left out). Select all/none are boolean toggles with `update=` callbacks
+that reset themselves (spike-verified); they act on every unlocked row, not on the filtered ones.
+Apply reports a chosen morph the parser can't find (the scan/parser residual above) instead of
+dropping it.
+
+Verified headless on 5.3.0, 5.2.4 and 5.0.1 against real Aiko3: choosing 2 of 3 morphs from a throwaway
+orchestrator applies exactly those two (`BrowHeavy`, `H3NsDragon`) from only their files; a chosen
+morph absent from the files is reported and the rest applied; a scripted call with no selection still
+applies all three (`EarDeer` correctly labelled); all new classes register and re-register cleanly.
+**Not verifiable headless:** under `--background`, `INVOKE_DEFAULT` runs `execute()` (checked with a
+bare probe operator), so the dialog chain (dialog 1 -> picker -> modal Apply, nested `bpy.ops` calls)
+needs the GUI. The one nesting not spike-tested is a *modal* operator started from inside another
+operator's `invoke()`/`execute()`; if Blender refuses it, the fallback is to start the modal Apply from
+a `bpy.app.timers` callback, at the cost of losing `context.window`.
+
+**Correction to Phase 5.5's precedence: a pick from the lists now wins over the path fields (owner
+UAT, 2026-11-15).** "Manual path wins if filled" was right for a setup with no Runtime roots, and
+wrong once the lists existed: Blender remembers an operator's last-used property values, Apply writes
+the picked package into `injection_filepath` when it runs, so the next dialog opened with the previous
+package pre-filled and silently ignored a different pick. The figure picker had the same flaw (the
+remembered reference `.obj` was pre-filled next to the pre-selected remembered CR2, so choosing another
+figure was ignored). Now: the lists start empty every time, so a value in them is a pick made in this
+dialog, and it wins; `injection_filepath` and the two list names are `SKIP_SAVE`; when the remembered
+figure is pre-selected its `.obj` is left blank and resolved from the CR2; the dialog says "this path is
+ignored" if both are filled; a pick that matches no entry falls back to a filled path (scripted
+callers), and the picker hand-off (`selected_morphs` set) ignores list names entirely because its paths
+are already settled. Remove had the same pattern and the same fix. Verified headless on a real Aiko3
+with the library items passed as collection properties: stale path + other pick -> the pick is
+applied; path only; unknown pick + path; unknown pick alone -> the error; hand-off with a stale name;
+Remove with a stale path + other pick. Not verified in the GUI.
+
+**Reports from a nested operator never reach the UI (owner UAT, 2026-11-15).** Step 6 of the PR's
+test plan: re-applying an already-applied one-morph package should say "Nothing to apply", and
+nothing appeared. The picker is started with `bpy.ops` from Apply's `execute()`; an operator called
+from Python keeps its own reports off the UI (WARNING/INFO are not shown anywhere; ERROR becomes a
+`RuntimeError` in the caller). I believe that is the cause but did not confirm it in the GUI; the fix
+doesn't depend on it. `applyMorphInjection.say()` records every report these operators make, and
+`call_nested()` runs the inner operator, tolerates the `RuntimeError` only when the inner one
+reported something (any other `RuntimeError` is a real failure and still raises), and re-issues the
+recorded report from the UI-invoked outer operator. The record is left set so a doubly nested call
+(Apply -> picker -> Apply) forwards the innermost message. Verified headless with probe operators
+(warning, error, real exception, double nesting, no stale leak). The single-morph path hit the same
+thing: its "Applied 1/1" summary was swallowed whenever the cache made Apply finish synchronously
+inside the nested call. The same trap awaits the 7.4 shelf, whose click will also start Apply.
+
+**Morphs the FBX already carries (owner question, 2026-11-15).** Checked against the real
+`Aiko3 SP All Morphs.fbx`, which has Stephanie Petite's third-party morphs baked in (1,194 raw keys,
+321 after consolidation). Baked keys are named by the channel's **label**, not its internal code
+(`Barbarian`, `BrstNatural`; consolidation strips the `p` from keys it promotes), so the label
+comparison Apply always did works for most of them: StephPetite Head, 111 of 111 detected, on both the
+consolidated and the raw import. **One real gap:** a package's main channel is often labelled with the
+partial marker (`pBarbarian`), which the consolidated mesh no longer has, so StephPetite Body read as
+48 present / 47 new, of which 46 were `p`-labelled duplicates of keys already on the mesh (1 genuinely
+new: `pRubenesque`, absent in every form). Fix: `name_match.present_name_candidates()` adds the bare
+form of a `p`+capital label to the names checked, used by both the picker's classification and Apply's
+skip. End to end on that FBX: the 95-morph package now adds 1 key and skips 94 (before: ~47 added).
+Across the whole `!DAZ` library 289 of 1,953 morphs carry a `p` main label.
+Not solved, by design of a name check: **the same label on a genuinely different morph** reads as
+"already present" and is skipped; telling them apart needs comparing geometry (a correspondence build
+plus a delta comparison per morph), not built.
+**Decided (owner, 2026-11-15): new keys keep the package's own label.** A standalone `pRubenesque` is
+added under that name even though consolidation would have stripped the `p` from the equivalent baked
+key. Reason: the key then matches what the package says (and what Remove's record stores), and
+renaming Apply's output would be a naming change nobody asked for. The cost is the two spellings
+coexisting on one mesh; `present_name_candidates` already treats them as the same morph, so it can't
+produce a duplicate.
+
+**Not in 7.2:** Remove stays name-based and unchanged (the list module should be reusable by it
+later, "remove the selected morphs"); a disk cache; off-thread parsing.
 
 ### Decisions
 
@@ -901,6 +1049,16 @@ The cache and the picker fix today's pain and don't depend on the library, so th
    drops 4.4/4.5 users (they stay on 1.0.1). With a 5.0.1 floor the `hasattr(AssetShelf)` gate
    is unnecessary.
 7. **Compressed (`.p2z`/gzip) entries are deferred.**
+
+**Resolved (owner, 2026-11-15), for 7.2:**
+
+8. **Default selection** is every "new" morph checked, with the estimate in the header; the list is
+   mainly for unchecking. (Alternative was none checked.)
+9. **Single-morph packages skip the list** and apply directly; the list is an extra click there.
+   Built first as "exactly one *choosable* morph skips the list", which applied `pRubenesque` from
+   the 95-morph `!All Body.pz2` with no dialog (owner UAT, 2026-11-15). Corrected to the decision's
+   own wording: judged on the package, so a long package with one new morph still shows its list.
+10. **Off-thread package parsing is a follow-up**, not folded into 7.2.
 
 **Deferred idea.** Expressions act on morph channels only, so they could in principle be applied as
 shape-key *values* on a figure, unlike poses. A separate feature (it touches `targetGeom` *value*

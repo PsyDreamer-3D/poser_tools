@@ -10,6 +10,8 @@ channel's deltas (docs/handoff-morph-injection.md Phase 3) needs to know which
 actor's geometry each Channel belongs to.
 """
 
+import pytest
+
 from core.cr2.cr2_parser import CR2Parser
 from core.cr2.name_match import build_channel_index, display_name_for, match_channel_group
 
@@ -182,3 +184,16 @@ def test_display_name_skips_the_biggest_channel_when_it_has_no_label():
 def test_display_name_falls_back_to_internal_name_when_nothing_is_labelled():
     fig = _figure(_wrap_actors(_actor_block("hip", 'targetGeom PBMDC_01\n{\ninitValue 0\n}')))
     assert display_name_for(build_channel_index(fig), "PBMDC_01") == "PBMDC_01"
+
+
+def test_present_name_candidates_cover_label_internal_name_and_bare_form():
+    from core.cr2.name_match import present_name_candidates
+    assert present_name_candidates("EarDeer", "PBMDC_01") == ["EarDeer", "PBMDC_01"]
+    # The FBX bakes the standalone morph without the partial marker.
+    assert present_name_candidates("pBarbarian", "PBMBarbarian") == ["pBarbarian", "PBMBarbarian", "Barbarian"]
+
+
+@pytest.mark.parametrize("label", ["pickle", "p", "pl", "Plain", "pBarbarian".lower()])
+def test_present_name_candidates_only_strip_a_p_followed_by_a_capital(label):
+    from core.cr2.name_match import present_name_candidates
+    assert present_name_candidates(label, "X") == [label, "X"]

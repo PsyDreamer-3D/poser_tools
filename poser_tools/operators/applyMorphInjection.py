@@ -7,7 +7,7 @@ import time
 
 import bpy
 import numpy as np
-from bpy.props import CollectionProperty, StringProperty
+from bpy.props import BoolProperty, CollectionProperty, StringProperty
 
 from ..core.cr2 import runtime_index
 from ..core.cr2.actor_vertex_index import load_obj_actor_vertex_groups
@@ -20,7 +20,12 @@ from ..core.cr2.correspondence_cache import (
 from ..core.cr2.cr2_parser import CR2Parser, resolve_geom_file
 from ..core.cr2.injection_package import load_injection_package
 from ..core.cr2.mesh_correspondence import build_vertex_correspondence
-from ..core.cr2.name_match import build_channel_index, display_name_for, match_channel_group
+from ..core.cr2.name_match import (
+    build_channel_index,
+    display_name_for,
+    match_channel_group,
+    present_name_candidates,
+)
 from ..core.cr2.obj_io import load_obj_vertex_positions
 from ..core.functionsShapeKeys import is_jcm_shapekey
 from ..core.utils import _write_report
@@ -53,6 +58,43 @@ def load_injected_morphs_record(obj) -> dict:
 
 def _save_injected_morphs_record(obj, record: dict) -> None:
     obj.data[_INJECTED_MORPHS_PROP] = json.dumps({"version": 1, "morphs": record})
+
+
+# The last report this add-on's apply/picker operators made, kept so an operator that starts
+# another one with bpy.ops can show it. An operator called from Python keeps its own reports
+# off the UI (WARNING/INFO are not shown anywhere, ERROR becomes an exception in the caller),
+# which made "Nothing to apply" and every other message from the picker vanish when it was
+# started from Apply's dialog.
+_last_report = None
+
+
+def say(operator, types, message):
+    """operator.report(), remembered for call_nested()."""
+    global _last_report
+    _last_report = (types, message)
+    operator.report(types, message)
+
+
+def call_nested(operator, op_call, **kwargs):
+    """Run another operator with bpy.ops and show what it reported, from `operator`.
+
+    `operator` must be one the UI invoked itself, so its reports are shown. An ERROR report
+    raises RuntimeError out of bpy.ops; that is swallowed only when the nested operator
+    reported something, since any other RuntimeError is a real failure.
+    """
+    global _last_report
+    _last_report = None
+    try:
+        result = op_call('INVOKE_DEFAULT', **kwargs)
+    except RuntimeError:
+        if _last_report is None:
+            raise
+        result = {'CANCELLED'}
+    if _last_report is not None:
+        # Left set on purpose: this operator may itself have been nested, and its caller
+        # needs the same message.
+        operator.report(*_last_report)
+    return result
 
 
 def no_morphs_report(pkg) -> tuple:
@@ -97,8 +139,12 @@ class OT_ApplyMorphInjection_Operator(bpy.types.Operator):
     injection_filepath: StringProperty(
         name="Injection File",
         description="A Poser morph injection .pz2 (a single inline-delta file, or an "
-                    "orchestrator that readScript-references several)",
+                    "orchestrator that readScript-references several). Used only when no "
+                    "package is picked from the list above",
         subtype='FILE_PATH',
+        # Not remembered between runs: execute() writes the picked package's path here, so a
+        # remembered value would come back pre-filled and be a stale answer to a new pick.
+        options={'SKIP_SAVE'},
     )
     reference_obj_filepath: StringProperty(
         name="Reference OBJ",
@@ -113,17 +159,33 @@ class OT_ApplyMorphInjection_Operator(bpy.types.Operator):
         name="Figure (CR2)",
         description="Pick the figure from your Poser Runtime library -- its reference OBJ is "
                     "resolved automatically from the CR2's own figureResFile",
+        options={'SKIP_SAVE'},
     )
     selected_injection_name: StringProperty(
         name="Injection Package",
         description="Pick the injection package from your Poser Runtime library",
+        options={'SKIP_SAVE'},
     )
+    # Set by poser.pick_injection_morphs once the user has chosen (JSON lists of internal
+    # names and of the leaf files they live in). Empty means "every morph in the package",
+    # which is what a scripted bpy.ops call gets, unchanged from before the picker existed.
+    selected_morphs: StringProperty(options={'HIDDEN', 'SKIP_SAVE'})
+    selected_leaves: StringProperty(options={'HIDDEN', 'SKIP_SAVE'})
+    # True only for the interactive popup, so its OK hands over to the morph picker while a
+    # scripted call still applies everything. A property rather than an attribute set in
+    # invoke(): properties are what survives from invoke() to execute().
+    use_morph_picker: BoolProperty(options={'HIDDEN', 'SKIP_SAVE'})
 
     @classmethod
     def poll(cls, context):
         return context.active_object is not None and context.active_object.type == 'MESH'
 
     def invoke(self, context, event):
+        if self.selected_morphs:
+            # Arriving from the picker with the package, figure and morphs already chosen.
+            return self.execute(context)
+
+        self.use_morph_picker = True
         obj = context.active_object
         # Remembered from a prior run on this mesh, if any -- re-applying a
         # second package to the same figure shouldn't have to re-browse for
@@ -151,6 +213,11 @@ class OT_ApplyMorphInjection_Operator(bpy.types.Operator):
                     entry.name = display_name
                     entry.filepath = lib_item.filepath
 
+        if self.selected_cr2_name:
+            # The remembered figure is pre-selected and its OBJ is resolved from it, so the OBJ
+            # field stays empty: a pre-filled one would override a different figure picked here.
+            self.reference_obj_filepath = ""
+
         return context.window_manager.invoke_props_dialog(self, width=500)
 
     def draw(self, context):
@@ -170,30 +237,42 @@ class OT_ApplyMorphInjection_Operator(bpy.types.Operator):
             layout.label(text="No Poser Runtime folders configured -- see Preferences.", icon='INFO')
 
         layout.prop(self, "injection_filepath")
+        if self.selected_injection_name and self.injection_filepath:
+            layout.label(text="The package picked above is used; this path is ignored.", icon='INFO')
         layout.prop(self, "reference_obj_filepath")
+        if self.selected_cr2_name and self.reference_obj_filepath:
+            layout.label(text="The figure picked above is used; this .obj is ignored.", icon='INFO')
 
     def execute(self, context):
         self._op_start_time = time.time()
         obj = context.active_object
 
-        if not self.injection_filepath and self.selected_injection_name:
+        # What the user picked from the lists wins over the manual path fields. The lists start
+        # empty every time (invoke), so a value there is a pick made in this dialog, while a
+        # filled path may be left over. A call from the morph picker has already settled both.
+        from_picker = bool(self.selected_morphs)
+
+        if self.selected_injection_name and not from_picker:
             item = self.injection_library_items.get(self.selected_injection_name)
-            if item is None:
-                self.report({'ERROR'}, f"{self.selected_injection_name!r} doesn't match a package in your Poser library.")
+            if item is not None:
+                self.injection_filepath = item.filepath
+            elif not self.injection_filepath:
+                say(self, {'ERROR'}, f"{self.selected_injection_name!r} doesn't match a package in your Poser library.")
                 return {'CANCELLED'}
-            self.injection_filepath = item.filepath
 
         cr2_filepath = ""
-        if not self.reference_obj_filepath and self.selected_cr2_name:
-            item = self.cr2_library_items.get(self.selected_cr2_name)
-            if item is None:
-                self.report({'ERROR'}, f"{self.selected_cr2_name!r} doesn't match a figure in your Poser library.")
+        cr2_item = None
+        if self.selected_cr2_name and not from_picker:
+            cr2_item = self.cr2_library_items.get(self.selected_cr2_name)
+            if cr2_item is None and not self.reference_obj_filepath:
+                say(self, {'ERROR'}, f"{self.selected_cr2_name!r} doesn't match a figure in your Poser library.")
                 return {'CANCELLED'}
-            cr2_filepath = item.filepath
+        if cr2_item is not None:
+            cr2_filepath = cr2_item.filepath
             figure = CR2Parser.parse_file(cr2_filepath)
             resolve_geom_file(figure, cr2_filepath, extra_roots=get_runtime_roots(context))
             if not (figure.geom_file and os.path.isfile(figure.geom_file)):
-                self.report(
+                say(self,
                     {'ERROR'},
                     f"Could not resolve a reference OBJ from {os.path.basename(cr2_filepath)}'s figureResFile."
                 )
@@ -201,10 +280,10 @@ class OT_ApplyMorphInjection_Operator(bpy.types.Operator):
             self.reference_obj_filepath = figure.geom_file
 
         if not os.path.isfile(self.injection_filepath):
-            self.report({'ERROR'}, f"Injection file not found: {self.injection_filepath!r}")
+            say(self, {'ERROR'}, f"Injection file not found: {self.injection_filepath!r}")
             return {'CANCELLED'}
         if not os.path.isfile(self.reference_obj_filepath):
-            self.report({'ERROR'}, f"Reference OBJ not found: {self.reference_obj_filepath!r}")
+            say(self, {'ERROR'}, f"Reference OBJ not found: {self.reference_obj_filepath!r}")
             return {'CANCELLED'}
 
         # Remember the reference OBJ (and, if it came from the library
@@ -214,15 +293,42 @@ class OT_ApplyMorphInjection_Operator(bpy.types.Operator):
         if cr2_filepath:
             obj[_REFERENCE_CR2_PROP] = cr2_filepath
 
+        if self.use_morph_picker and not self.selected_morphs:
+            # Which morphs to apply is the picker's question; it comes back here with the answer.
+            call_nested(
+                self, bpy.ops.poser.pick_injection_morphs,
+                injection_filepath=self.injection_filepath,
+                reference_obj_filepath=self.reference_obj_filepath,
+            )
+            return {'FINISHED'}
+
+        try:
+            selected = json.loads(self.selected_morphs) if self.selected_morphs else None
+            only_leaves = json.loads(self.selected_leaves) if self.selected_leaves else None
+        except ValueError as exc:
+            say(self, {'ERROR'}, f"Couldn't read the selected morphs: {exc}")
+            return {'CANCELLED'}
+
         pkg = load_injection_package(
-            self.injection_filepath, extra_roots=get_runtime_roots(context)
+            self.injection_filepath, extra_roots=get_runtime_roots(context), only_leaves=only_leaves
         )
         index = build_channel_index(pkg["figure"])
-        morph_names = list(index["by_internal"].keys())
+        if selected is None:
+            morph_names = list(index["by_internal"].keys())
+            self._missing_selected = []
+        else:
+            # The picker's scan and this parse are two readers of one format; a morph the scan
+            # listed but the parser doesn't have must be said, not silently dropped.
+            morph_names = [n for n in selected if n in index["by_internal"]]
+            self._missing_selected = [n for n in selected if n not in index["by_internal"]]
 
         if not morph_names:
-            self.report(*no_morphs_report(pkg))
+            if selected is not None:
+                say(self, {'WARNING'}, f"None of the {len(selected)} selected morph(s) could be read from the package's files.")
+            else:
+                say(self, *no_morphs_report(pkg))
             return {'CANCELLED'}
+        self._selection_count = None if selected is None else len(selected)
 
         obj_verts = load_obj_vertex_positions(self.reference_obj_filepath)
         actor_obj_groups = load_obj_actor_vertex_groups(self.reference_obj_filepath)
@@ -317,7 +423,7 @@ class OT_ApplyMorphInjection_Operator(bpy.types.Operator):
                 return None
             return unpack_correspondence(bytes(entry["data"]), n_source, n_target)
         except (KeyError, TypeError, AttributeError, ValueError) as exc:
-            self.report({'WARNING'}, f"Ignoring the cached vertex correspondence: {exc}")
+            say(self, {'WARNING'}, f"Ignoring the cached vertex correspondence: {exc}")
             self._rebuild_reason = f"the cached copy was unusable: {exc}"
             return None
 
@@ -333,7 +439,7 @@ class OT_ApplyMorphInjection_Operator(bpy.types.Operator):
             }
             note += "; cached on the mesh for next time"
         except (ValueError, TypeError, OverflowError, RuntimeError) as exc:
-            self.report({'WARNING'}, f"Couldn't cache the vertex correspondence on the mesh: {exc}")
+            say(self, {'WARNING'}, f"Couldn't cache the vertex correspondence on the mesh: {exc}")
             note += f"; NOT cached: {exc}"
         self._correspondence_note = note
 
@@ -344,7 +450,7 @@ class OT_ApplyMorphInjection_Operator(bpy.types.Operator):
             # The thread isn't forcibly killed -- it finishes in the
             # background and its result is just never picked up. Safe: it
             # never touches bpy.data.
-            self.report(
+            say(self,
                 {'WARNING'},
                 "Apply Morph Injection cancelled -- no shape keys were added.",
             )
@@ -368,7 +474,7 @@ class OT_ApplyMorphInjection_Operator(bpy.types.Operator):
 
         if self._thread_error is not None:
             context.window_manager.progress_end()
-            self.report({'ERROR'}, f"Vertex correspondence build failed: {self._thread_error}")
+            say(self, {'ERROR'}, f"Vertex correspondence build failed: {self._thread_error}")
             return {'CANCELLED'}
 
         try:
@@ -411,9 +517,9 @@ class OT_ApplyMorphInjection_Operator(bpy.types.Operator):
             if is_jcm_shapekey(name):
                 jcm_skipped.append(name)
                 continue
-            # Check internal_name too: a mesh from before this naming change
-            # may already carry the morph under its old raw-internal-name key.
-            if name in obj.data.shape_keys.key_blocks or internal_name in obj.data.shape_keys.key_blocks:
+            # Not just `name`: the mesh may carry the morph under its old raw
+            # internal name, or (from the FBX) without a leading "p".
+            if any(n in obj.data.shape_keys.key_blocks for n in present_name_candidates(name, internal_name)):
                 already_present.append(name)
                 continue
 
@@ -457,6 +563,10 @@ class OT_ApplyMorphInjection_Operator(bpy.types.Operator):
                   f"Applied {applied}/{n_morphs} morph(s).",
                   f"Total time: {total_elapsed:.1f}s",
                   f"Vertex correspondence: {self._correspondence_note}"]
+        if self._selection_count is not None:
+            header.append(f"Applied only the {self._selection_count} morph(s) chosen in the morph picker.")
+        if self._missing_selected:
+            header.append(f"{len(self._missing_selected)} chosen morph(s) were not found in the package's files: {self._missing_selected}")
         if pkg["unresolved_paths"]:
             header.append(
                 f"{len(pkg['unresolved_paths'])} readScript reference(s) could not be resolved: "
@@ -472,8 +582,8 @@ class OT_ApplyMorphInjection_Operator(bpy.types.Operator):
         _write_report(context, _REPORT_TEXT, header + ["", *report_lines])
 
         summary = f"Applied {applied}/{n_morphs} morph(s) from {os.path.basename(self.injection_filepath)}"
-        has_warning = bool(pkg["unresolved_paths"] or empty_skipped)
-        self.report(
+        has_warning = bool(pkg["unresolved_paths"] or empty_skipped or self._missing_selected)
+        say(self,
             {'WARNING'} if has_warning else {'INFO'},
             f"{summary} — see the '{_REPORT_TEXT}' text block.",
         )
