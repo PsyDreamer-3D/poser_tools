@@ -1024,7 +1024,7 @@ produce a duplicate.
 **Not in 7.2:** Remove stays name-based and unchanged (the list module should be reusable by it
 later, "remove the selected morphs"); a disk cache; off-thread parsing.
 
-### 7.3 plan: the library index (scoped 2026-11-15, not built)
+### 7.3 plan: the library index (scoped 2026-11-15; 7.3a built, 7.3b and 7.3c not)
 
 **What 7.3 delivers.** A built, registered Blender asset library holding one stand-in `Image` asset
 per injection or removal package in the owner's Runtime roots, each with its Poser thumbnail (or a
@@ -1040,7 +1040,7 @@ the figure shelf (7.5), morph-name search (7.6); Apply and Remove are untouched.
 | package-format files (`.pz2`/`.p2z`) | 21,076 |
 | of those, `Deltas` leaves (`InjDeltas.`/`RemDeltas.`/in a `Deltas` folder): never entries | 4,671 |
 | user-facing entries | 16,405 |
-| classified **injection** (2 of them incomplete) | 2,135 |
+| classified **injection** (1 of them incomplete) | 2,135 |
 | classified **removal** | 1,821 |
 | `.pmd` (unsupported, hidden) / all targets missing (hidden) | 83 / 27 |
 | poses and expressions (hidden, decision 1) | 4,627 |
@@ -1069,9 +1069,12 @@ Shown entries by image: injection 1,745 `.png`/`.jpg`, 373 only `.rsr`, 17 none;
    share a stem with another in the same folder. Across folders, repeats are the norm: 71% of shown
    entries share a name with another, 60% of injection and 66% of removal *within their own kind*
    (max 5). Adding the parent folder name leaves 1 identical pair per kind. See decision B.
-4. **Only 2 injection entries are incomplete** with all 20 roots configured (the earlier 73 was an
-   artifact of resolving against each entry's own Runtime). Decision 5's dimmed thumbnail with a red
-   frame, for 2 entries, is not worth image compositing. See decision E.
+4. **Only 1 injection entry is incomplete** with all 20 roots configured (`!V3 All Morphs INJ/All
+   Head.pz2`, 1 of 72 files missing: the known `HdJapanese`). The earlier 73 was an artifact of
+   resolving against each entry's own Runtime, and the census script's second one (`! All Head
+   Morphs.pz2`) was a regex miscount: the tokenizer, which Apply uses, resolves all 512 of its files.
+   Decision 5's dimmed thumbnail with a red frame, for one entry, is not worth image compositing.
+   See decision E.
 5. **`.rsr` matters more than the earlier "deferred" suggested.** 1,455 of 3,956 shown entries (37%)
    have only a Mac-resource-fork `.rsr` thumbnail: 59% of removal, 17% of injection. Without a PICT
    decoder those get a placeholder. See decision D.
@@ -1148,6 +1151,45 @@ and 5.0.1, calling `new()` twice with one name silently makes `Name.001`. Update
 exists. `enabled` and `is_available` exist on 5.3 only (`hasattr`). Removing it is an explicit
 Preferences button; `unregister()` leaves it, because unregister also runs on every script reload.
 
+#### 7.3a as built (2026-11-15)
+
+`core/cr2/library_index.py` (pure Python, GPL) and `runtime_index.walk_roots()` (a no-cache walk that
+also says which root a file came from; the existing `get_all_items()` writes its cache through `bpy`,
+so pytest can't call it, and the walk is 0.3 s anyway). Main entry points:
+
+- `classify_entry(path, roots)`: follows `readScript` (same tokenizer and case-insensitive resolver as
+  Apply), sniffs each leaf's first 16 KB, returns `kind` (`injection`/`removal`/`pmd`/`pose`/
+  `missing`/`other`), `incomplete`, `mixed`, file counts, and `stamps` (path, mtime, size of every
+  file read). Depth is capped at 8 and cycle-guarded; hitting the cap marks the entry incomplete.
+- `build_manifest(roots, previous=None, ...)`: classifies every entry (reusing any whose stamps are
+  all unchanged), finds thumbnails, assigns names/catalogs/tags/descriptions, groups the shown
+  entries per source folder with a content hash, and returns `{classified, folders, stats}`.
+  `changed_folders(previous, manifest)` says which folder files to write or remove.
+  `save_manifest`/`load_manifest` persist it gzipped (12.6 MB as JSON, 0.6 MB compressed), with each
+  repeated path stored once.
+- `prefetch_heads()` for the cold-drive case above; `BuildCancelled` for the modal operator's Esc;
+  `progress(phase, done, total)` with phases `reading` and `classifying`.
+
+**Verified on the real library (20 roots), matching the census to the entry:** 16,405 entries;
+injection 2,135, removal 1,821, pose 4,627, other 7,712, `.pmd` 83, missing 27; **3,956 shown in 139
+folders**; thumbnails 2,342 image / 1,458 `.rsr`-only / 156 none (the census had 1,455 `.rsr` and 159 none:
+3 `.rsr` files differ from their entry only in letter case, e.g. `LipsThin` / `Lipsthin.rsr`, which a
+case-sensitive stem match missed and `find_thumbnail` finds); the longest
+display name is 42 bytes (limit 63); 0 mixed injection/removal entries. Full build 9.5 s warm, 40 s
+cold-contents; rebuild from the saved manifest 0.7 s with all 16,405 entries reused and no folder
+needing a rewrite; the mtime of every file under the roots is unchanged by a build.
+
+**Tests** (`tests/test_library_index.py`, 42): the leaf sniff including the Hide/Unhide trap, nested
+orchestrators, case-insensitive targets, targets in another root, missing targets, cycles and depth,
+`.p2z` (and a `.p2z` that isn't gzip), mixed entries, stamps, thumbnails, names and the 63-byte limit,
+incremental reuse (touching one leaf re-classifies only the entry that read it), a changed root or
+format discarding the cache, `changed_folders`, cancel and progress, persistence (corrupt, truncated,
+wrong-format files load as `None`), nothing written under the roots; plus real-library checks that skip
+without the drive (known entries, the Hide files, the walk finding exactly the leaves Apply finds, and
+600 sampled leaves where the sniff must agree with a full parse on every injection and removal).
+Two of them were mutation-checked: reintroducing the `name -` grep fails 6 tests, and making
+`_stamps_current` always false fails 3.
+
 #### Verification
 
 - **pytest** (no `bpy`): `classify_entry` on synthetic trees: orchestrator depth and cycles,
@@ -1165,7 +1207,7 @@ Preferences button; `unregister()` leaves it, because unregister also runs on ev
 
 #### Phasing (one PR, three commits)
 
-- **7.3a** `library_index.py` + manifest + tests. Pure Python, the part that must be right.
+- **7.3a** ✅ `library_index.py` + manifest + tests. Pure Python, the part that must be right. As built below.
 - **7.3b** `library_assets_child.py` + the subprocess driver + registration, verified headless.
 - **7.3c** the operator and Preferences UI, docs (README, CHANGELOG, `CLAUDE.md`, this doc).
 
@@ -1190,7 +1232,7 @@ Preferences button; `unregister()` leaves it, because unregister also runs on ev
   own piece of work with its own test corpus. If you would rather have thumbnails first, it can go
   before 7.4.
 - **E. Incomplete entries:** a tag and a `[INCOMPLETE: N of M files missing]` description prefix, no
-  recoloured thumbnail (2 entries today; compositing images for them is not worth it). Entries with
+  recoloured thumbnail (1 entry today; compositing images for it is not worth it). Entries with
   *every* target missing stay hidden (27).
 - **F. Index location:** `user_resource('CONFIG', ...)` like the existing cache, rather than
   `bpy.utils.extension_path_user()`. Both are per Blender version; this keeps one place for the
@@ -1198,9 +1240,12 @@ Preferences button; `unregister()` leaves it, because unregister also runs on ev
 
 #### Risks and what is not verified
 
-- **Cold-cache classification time.** 8 s is warm; reading 17,117 leaf heads from the external drive
-  cold was not measured. The first build may take noticeably longer; the cursor/status progress is
-  there for that, and later builds are incremental.
+- **Cold-cache classification time: measured, 64.5 s serial, 40 s with parallel prefetch** (warm:
+  9 to 11 s). Evicting every package file's cached pages with `posix_fadvise(DONTNEED)` and timing a
+  full build on the owner's external drive; directory metadata stayed cached, so this is cold file
+  *contents*, not a fully cold drive. Reading the heads on 32 threads first (`prefetch_heads`) cut it
+  by 40%: the work is ~17,000 small reads, not CPU. A rebuild from a saved manifest takes 0.7 s.
+  The first build still needs visible progress (the "reading" phase is almost all of it).
 - **Custom keys read live through a shelf.** Readable through `bpy.data.libraries.load()` (prototype),
   but through the shelf's `AssetRepresentation` only the demo script ever showed them. If it fails,
   the payload falls back to the description string. Settled in 7.4, but the format is chosen here, so

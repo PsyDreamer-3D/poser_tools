@@ -26,7 +26,9 @@ Standard scaffold layout. Two things worth knowing:
   and `tests/test_poser_paths.py`.
   `core/cr2/obj_io.py`, `core/cr2/mesh_correspondence.py`, `core/cr2/injection_package.py`,
   `core/cr2/injection_scan.py` (a cheap brace-walking listing of a package's morphs for the picker;
-  must agree with `CR2Parser`, see its tests), and `core/cr2/apply_injection.py` (morph-injection Phases 1 and 3, see below) live in the same package
+  must agree with `CR2Parser`, see its tests), `core/cr2/library_index.py` (Phase 7.3a: classifies
+  the owner's whole Poser library into injection/removal entries and builds the asset-index
+  manifest; same rule, its sniff is tested against the parser), and `core/cr2/apply_injection.py` (morph-injection Phases 1 and 3, see below) live in the same package
   but are original `poser_tools` code, not adapted from `cr2_importer` — GPL-3.0-or-later, not MIT.
   Same no-`bpy` / plain-`pytest` discipline (`tests/test_mesh_correspondence.py`,
   `tests/test_injection_package.py`, `tests/test_apply_injection.py`).
