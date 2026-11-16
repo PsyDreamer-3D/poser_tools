@@ -867,8 +867,9 @@ The cache and the picker fix today's pain and don't depend on the library, so th
 - **7.2** ✅ Morph picker (built 2026-11-15; GUI flow pending owner test). After a package is chosen, a dialog lists its morphs (display names via
   `display_name_for`) with checkboxes, Blender's built-in UIList filter box, select all/none; Apply
   handles only the selection and parses only the leaf files those morphs live in. Design below.
-- **7.3** Classifier + index builder, no UI (per-folder `.blend` files, flags, placeholders).
-  Verify against the real library and headless on 5.0.1/5.2.4/5.3.
+- **7.3** Library index: classifier + per-folder asset `.blend` files + registered library + a
+  Preferences build button. No shelf. Plan below (scoped 2026-11-15, not built); three commits,
+  one PR.
 - **7.4** Shelf + activate operator → opens the (7.2) dialog pre-filled. Dropdowns stay for setups
   with no Runtime roots or no index built yet.
 - **7.5** Figure shelf: pick a CR2 with a thumbnail, sets `poser_reference_cr2`.
@@ -1022,6 +1023,196 @@ produce a duplicate.
 
 **Not in 7.2:** Remove stays name-based and unchanged (the list module should be reusable by it
 later, "remove the selected morphs"); a disk cache; off-thread parsing.
+
+### 7.3 plan: the library index (scoped 2026-11-15, not built)
+
+**What 7.3 delivers.** A built, registered Blender asset library holding one stand-in `Image` asset
+per injection or removal package in the owner's Runtime roots, each with its Poser thumbnail (or a
+placeholder), tags, a catalog (the folder tree), and the payload the click will need. Verified
+headless and browsable in Blender's Asset Browser. **Not** in 7.3: the shelf and its click (7.4),
+the figure shelf (7.5), morph-name search (7.6); Apply and Remove are untouched.
+
+#### What the real library looks like (measured 2026-11-15, 20 roots from `LibraryPrefs.xml`)
+
+| | |
+|---|--:|
+| CR2/CRZ/PZ2/P2Z files found by `runtime_index` (walk time) | 22,419 (0.3 s) |
+| package-format files (`.pz2`/`.p2z`) | 21,076 |
+| of those, `Deltas` leaves (`InjDeltas.`/`RemDeltas.`/in a `Deltas` folder): never entries | 4,671 |
+| user-facing entries | 16,405 |
+| classified **injection** (2 of them incomplete) | 2,135 |
+| classified **removal** | 1,821 |
+| `.pmd` (unsupported, hidden) / all targets missing (hidden) | 83 / 27 |
+| poses and expressions (hidden, decision 1) | 4,627 |
+| other: props, hair, materials, anything with no morph channels | 7,712 |
+| **shown (injection + removal)** | **3,956 in 139 source folders** (median 28 per folder, max 179) |
+| classification time, 16,405 entries, 17,117 distinct leaf files read (first 16 KB each), warm cache | 8 s |
+
+Shown entries by image: injection 1,745 `.png`/`.jpg`, 373 only `.rsr`, 17 none; removal 597 / 1,082 /
+142. Compressed (`.p2z`) shown entries: 22, all removal.
+
+#### Findings that change the plan
+
+1. **A removal rule from the prototype was wrong, and would have put 624 bogus tiles on the Removal
+   shelf.** The prototype called a file a removal if it had a `name -` anywhere. `Hide.*` /
+   `Unhide.*` files (Victoria 3 `ChanVis` folders: channel-visibility toggles) have `name -` on a
+   `valueParm`, not a `targetGeom`. The classifier must parse channels (`injection_scan.scan_channels`
+   on the 16 KB head), not grep. Corrected, removal is 1,821, not 2,600; Hide/Unhide and 155 others
+   fall to "pose/expression" and are hidden. Found by diffing the cheap sniff against a full parse on
+   a sample, not by looking at the totals.
+2. **The cheap sniff is trustworthy for what is shown.** On 4,000 random leaf files, sniff vs. full
+   parse agree on every injection (485), removal (444) and `.pmd` (17) file; the only differences are
+   213 pose files the sniff calls "other" instead of "morph values" (both hidden) and one `.pmd` whose
+   first `targetGeom` is past 16 KB (hidden either way). Residual risk: an injection leaf whose first
+   `targetGeom` is beyond 16 KB would be hidden, not mis-shown; 0 seen in 4,000.
+3. **Same-folder names never collide, so one `.blend` per source folder works.** 0 of 3,956 entries
+   share a stem with another in the same folder. Across folders, repeats are the norm: 71% of shown
+   entries share a name with another, 60% of injection and 66% of removal *within their own kind*
+   (max 5). Adding the parent folder name leaves 1 identical pair per kind. See decision B.
+4. **Only 2 injection entries are incomplete** with all 20 roots configured (the earlier 73 was an
+   artifact of resolving against each entry's own Runtime). Decision 5's dimmed thumbnail with a red
+   frame, for 2 entries, is not worth image compositing. See decision E.
+5. **`.rsr` matters more than the earlier "deferred" suggested.** 1,455 of 3,956 shown entries (37%)
+   have only a Mac-resource-fork `.rsr` thumbnail: 59% of removal, 17% of injection. Without a PICT
+   decoder those get a placeholder. See decision D.
+6. **Deferring compressed entries costs almost nothing** (22 shown, all removal) and the classifier
+   handles them anyway (`gzip` head read), so decision 7 stands with no extra work either way.
+
+#### Design
+
+**Entry model.** An entry is a user-facing `.pz2`/`.p2z` that is not a `Deltas` leaf, classified by
+following `readScript` (case-insensitive, all configured roots, depth-capped, cycle-guarded: the same
+resolver Apply uses) to its leaf files and sniffing each:
+
+| leaf says | rule (first 16 KB) |
+|---|---|
+| `.pmd` | `injectPMDFileMorphs`, or a channel with `useBinaryMorph 1` |
+| injection | a `targetGeom` with `indexes` > 0 and a `deltas` block |
+| removal | a `targetGeom` channel (parsed, not grepped) with `name -` and no deltas |
+| pose/expression | `targetGeom` present, none of the above |
+| other | no `targetGeom` |
+
+An entry is **injection** if any leaf is, else `.pmd` if any is, else **removal** if any is, else
+hidden. All targets missing: hidden. Some targets missing: shown, tagged `incomplete`. Mixed
+injection/removal entries (the caveat in the classification section) are tagged `injection` and may
+also carry `removal`; the content, not the name, decides.
+
+**Modules.**
+- `core/cr2/library_index.py` (new, pure Python, MIT-adapted from `runtime_index.py`'s scan and
+  cache; the classifier is original, so GPL header on the new parts, decide per file as usual):
+  `classify_entry()`, `find_thumbnail()` (same stem, `.png`/`.jpg`/`.jpeg`, case-insensitive),
+  `build_manifest()`. Reuses `runtime_index.get_all_items()` for the file list and
+  `resolve_package_files()` / `scan_channels()` from 7.2.
+- `core/cr2/library_assets_child.py`: a **stand-alone script** with no add-on imports, run by a
+  child Blender process (below). Reads the manifest, writes the `.blend` files and the catalog file.
+- `operators/buildLibraryIndex.py`: `poser.build_library_index`, a modal operator.
+- `properties/poserToolsPreferences.py` `draw()`: **Build / Rebuild Library Index**, a status line
+  (N entries, built when, "roots changed, rebuild"), and **Remove Library Entry**.
+
+**Manifest** (`library/manifest.json` next to the `.blend` files): a `signature` (format version,
+ordered root list, Blender version) and per source folder `{path, hash, entries:[{rel_path, root,
+stem, ext, kind, incomplete, thumbnail, thumbnail_mtime, leaf_stamps}]}`. `leaf_stamps` are the
+(path, mtime) of the leaves an entry resolved to, so a changed leaf re-classifies its entry although
+the entry file itself did not change; checking them is ~17,000 `stat` calls. A folder's `.blend` is
+rewritten only if its hash changed; a different signature rebuilds everything.
+
+**Where it lives.** `bpy.utils.user_resource('CONFIG', path='poser_tools')/library/`, the same place
+`runtime_index` already keeps its cache, **never inside the Poser content folders** (it is the
+owner's library, the index is derived data). Per Blender version, because that directory is. A
+snapshot of the roots' file mtimes before and after a build must be identical (a test).
+
+**Build process.** Classification and manifest on a background thread of the main process (pure
+Python, same pattern as Apply's correspondence build: modal timer, percentage on the cursor and
+status bar, Esc cancels). Then **one child Blender process**
+(`bpy.app.binary_path --background --factory-startup --python library_assets_child.py -- <manifest>`)
+creates the stand-ins and writes the `.blend` files. Reasons it is not done in the session:
+`bpy.data.libraries.write` needs the datablocks to exist, so building 3,956 asset-marked images in
+the user's session would add and remove them from the file the user is working in (they would flash
+through "Current File" assets, touch the undo stack and the saved file), and a frozen UI for ~10 s
+unless sliced. The child leaves the session untouched, is exactly what the prototype already did
+(background scripts), and has precedent in `cr2_importer`'s own subprocess save. Verified that it
+works: a Blender 5.3.0, 5.2.4 LTS and 5.0.1 session each launched a child from `bpy.app.binary_path`
+that wrote an asset `.blend` (0.4 to 2.2 s overhead). Not verified: Windows/macOS, a flatpak where
+`binary_path` may differ.
+
+**Stand-ins** (all prototype-verified headless on the three versions): `Image` (not `Action`, which
+the Pose Library shelf takes wholesale, not `Mesh`/`Text`, which give no thumbnail), 4x4, marked as an
+asset, thumbnail via `preview_ensure()` + `image_pixels_float` from the Poser image. Tags: kind
+(`injection`/`removal`), `incomplete`, `poser`. Catalog: the folder tree below `Libraries/`
+(`uuid5` of the path, so ids are stable across rebuilds). Description: the path relative to its root
+(shown as the tooltip). Custom keys on `asset_data`: `poser_root`, `poser_rel_path`, `poser_kind`.
+
+**Registering the library.** `preferences.filepaths.asset_libraries.new(name=, directory=)`, keyword
+arguments only (5.3 added optional ones), **after checking for an existing entry**: probed on 5.3.0
+and 5.0.1, calling `new()` twice with one name silently makes `Name.001`. Update `path` if the entry
+exists. `enabled` and `is_available` exist on 5.3 only (`hasattr`). Removing it is an explicit
+Preferences button; `unregister()` leaves it, because unregister also runs on every script reload.
+
+#### Verification
+
+- **pytest** (no `bpy`): `classify_entry` on synthetic trees: orchestrator depth and cycles,
+  case-insensitive targets, targets in another root, missing targets, `.p2z`, `.pmd`, a `Hide.*` file
+  (the trap), mixed injection/removal; `find_thumbnail`; manifest incrementality (touch one leaf
+  re-classifies its entry only; a new root changes the signature); the naming rule. Skipped-when-
+  absent real-library tests: sniff vs. `scan_channels` agreement on a sample, and the corpus counts
+  above within a tolerance (they will drift as content changes, so assert shape, not exact numbers).
+- **Headless Blender on 5.0.1 / 5.2.4 / 5.3.0:** build the real index; reopen the library; assert
+  entry count, previews present, custom keys readable via `bpy.data.libraries.load(assets_only=True)`,
+  tags and catalogs; a second build rewrites nothing; touching one folder's leaf rewrites only that
+  folder's `.blend`; registration is idempotent; the roots' mtimes are unchanged.
+- **Owner, GUI:** build from Preferences, open the Asset Browser, see the library and its folder
+  tree with thumbnails; rebuild after changing the roots.
+
+#### Phasing (one PR, three commits)
+
+- **7.3a** `library_index.py` + manifest + tests. Pure Python, the part that must be right.
+- **7.3b** `library_assets_child.py` + the subprocess driver + registration, verified headless.
+- **7.3c** the operator and Preferences UI, docs (README, CHANGELOG, `CLAUDE.md`, this doc).
+
+#### Decisions for the owner (recommendation first)
+
+- **A. Build in a child Blender process, not in the session.** Recommended, reasons above. The cost is
+  a dependency on `bpy.app.binary_path` working (tested on the Linux builds here).
+- **B. Name display.** Keep the file stem as the asset name; add the parent folder only to names that
+  repeat *within their kind* (`BrowHeavy (A3-H3 MORExp1)`, truncated to fit Blender's 63-byte ID
+  limit; longest stem today is 31). 60 to 66% of entries repeat, so plain names (doc option (a))
+  leave most of the grid ambiguous, though thumbnails differ per product. The suffix depends on
+  what else is installed, so identity is never the name: it is `(root, rel_path)` in the custom keys.
+  A `.blend` per folder keeps names unique regardless.
+- **C. Index both injection and removal, tagged, and let 7.4 give each its own shelf.** The INJ/REM
+  pairs share names by design ("CDI Hitoro Head INJ"/"REM", 179 entries each), so one mixed shelf
+  would show every pair twice. Two shelves (`asset_poll` on the tag) remove that without any naming
+  trick, and put the placeholder-heavy removal tiles on a shelf you open on purpose.
+- **D. Placeholder, and the `.rsr` decoder.** Placeholder: a flat tile coloured by kind, no text
+  (Blender can't draw text onto an image in a background process, and the shelf prints the name under
+  the tile anyway). Decoder: recommend **7.3 ships with placeholders and the decoder is a separate
+  follow-up (7.3d)**, because 1,455 shown entries (37%) are affected, but a PICT v2 decoder is its
+  own piece of work with its own test corpus. If you would rather have thumbnails first, it can go
+  before 7.4.
+- **E. Incomplete entries:** a tag and a `[INCOMPLETE: N of M files missing]` description prefix, no
+  recoloured thumbnail (2 entries today; compositing images for them is not worth it). Entries with
+  *every* target missing stay hidden (27).
+- **F. Index location:** `user_resource('CONFIG', ...)` like the existing cache, rather than
+  `bpy.utils.extension_path_user()`. Both are per Blender version; this keeps one place for the
+  add-on's derived data. Say if you prefer the extension-specific path.
+
+#### Risks and what is not verified
+
+- **Cold-cache classification time.** 8 s is warm; reading 17,117 leaf heads from the external drive
+  cold was not measured. The first build may take noticeably longer; the cursor/status progress is
+  there for that, and later builds are incremental.
+- **Custom keys read live through a shelf.** Readable through `bpy.data.libraries.load()` (prototype),
+  but through the shelf's `AssetRepresentation` only the demo script ever showed them. If it fails,
+  the payload falls back to the description string. Settled in 7.4, but the format is chosen here, so
+  the description holds the path too.
+- **Asset Browser with ~4,000 assets in 139 files.** The prototype read 2,346 entries in 88 files and
+  10,000 stand-ins in one file without trouble; this exact size was not opened in the GUI.
+- **A package whose leaf is read from a stale cache** (leaf changed but its mtime did not): accepted,
+  rebuild fixes it.
+- **Not doing, and why:** recoloured or framed thumbnails for incomplete entries (2 entries); a
+  background auto-rebuild when roots change (the index is rebuilt on demand, and Preferences says
+  when it is stale, since a surprise 10 to 60 s build on startup is worse than a stale tile);
+  indexing figures (7.5); indexing poses and expressions (decision 1).
 
 ### Decisions
 
