@@ -12,59 +12,12 @@ from core.cr2 import library_index as li
 from core.cr2.injection_package import resolve_package_files
 from core.cr2.injection_scan import scan_channels
 from core.cr2.poser_io import read_poser_file
+from synthetic_library import (  # noqa: F401  (the fixtures are used by name)
+    HIDE_LEAF, INJ_LEAF, OTHER_LEAF, PMD_LEAF, POSE_LEAF, REM_LEAF, _orchestrator, lib, library,
+)
 
 _REAL_BASE = ("/run/media/jess-green/236a91c9-2598-40dd-b968-9c0f0be8a903/Artwork/Poser Content"
               "/Base Figures")
-
-
-# ---- synthetic library ---------------------------------------------------------------------
-
-def _actor(channels, name="head:1"):
-    return f"\tactor {name}\n\t\t{{\n\t\tchannels\n\t\t\t{{\n{channels}\t\t\t}}\n\t\t}}\n"
-
-
-def _file(*actors):
-    return "{\n\tversion\n\t\t{\n\t\tnumber 4.01\n\t\t}\n" + "".join(actors) + "}\n"
-
-
-INJ_LEAF = _file(_actor(
-    "\t\t\ttargetGeom Foo\n\t\t\t\t{\n\t\t\t\tname Foo\n\t\t\t\tindexes 2\n\t\t\t\tnumbDeltas 500\n"
-    "\t\t\t\tdeltas\n\t\t\t\t\t{\n\t\t\t\t\td 0 0 0 1\n\t\t\t\t\td 1 0 0 1\n\t\t\t\t\t}\n\t\t\t\t}\n"))
-REM_LEAF = _file(_actor(
-    "\t\t\ttargetGeom Foo\n\t\t\t\t{\n\t\t\t\tname -\n\t\t\t\tindexes 0\n\t\t\t\tnumbDeltas 0\n\t\t\t\t}\n"))
-# The trap: `name -` on a valueParm, and a bare hidden targetGeom (Victoria 3 ChanVis files).
-HIDE_LEAF = _file(
-    _actor("\t\t\tvalueParm Foo\n\t\t\t\t{\n\t\t\t\tname -\n\t\t\t\thidden 1\n\t\t\t\t}\n", name="BODY:1"),
-    _actor("\t\t\ttargetGeom Foo\n\t\t\t\t{\n\t\t\t\thidden 1\n\t\t\t\t}\n", name="abdomen:1"))
-POSE_LEAF = _file(_actor(
-    "\t\t\ttargetGeom Foo\n\t\t\t\t{\n\t\t\t\tkeys\n\t\t\t\t\t{\n\t\t\t\t\tk 0 0.5\n\t\t\t\t\t}\n\t\t\t\t}\n"))
-PMD_LEAF = _file(_actor(
-    "\t\t\ttargetGeom Foo\n\t\t\t\t{\n\t\t\t\tname Foo\n\t\t\t\tuseBinaryMorph 1\n\t\t\t\tindexes 9\n\t\t\t\t}\n"))
-OTHER_LEAF = _file(_actor("\t\t\trotateX xRotate\n\t\t\t\t{\n\t\t\t\tkeys\n\t\t\t\t\t{\n\t\t\t\t\tk 0 0\n\t\t\t\t\t}\n\t\t\t\t}\n"))
-
-
-def _orchestrator(*targets):
-    return "{\n" + "".join(f'\treadScript "{t}"\n' for t in targets) + "}\n"
-
-
-@pytest.fixture
-def lib(tmp_path):
-    """A content root with a Runtime/libraries tree; write() takes paths below libraries/."""
-    root = tmp_path / "Content"
-
-    class Lib:
-        path = str(root)
-
-        def write(self, rel, text, binary=False):
-            target = root / "Runtime" / "libraries" / rel
-            target.parent.mkdir(parents=True, exist_ok=True)
-            if binary:
-                target.write_bytes(text)
-            else:
-                target.write_text(text)
-            return str(target)
-
-    return Lib()
 
 
 # ---- the leaf sniff ------------------------------------------------------------------------
@@ -230,24 +183,6 @@ def test_catalog_path_and_blend_name():
 
 
 # ---- build_manifest ------------------------------------------------------------------------
-
-@pytest.fixture
-def library(lib):
-    lib.write("!DAZ/Fig/Deltas/InjDeltas.Brow.pz2", INJ_LEAF)
-    lib.write("!DAZ/Fig/Deltas/RemDeltas.Brow.pz2", REM_LEAF)
-    lib.write("!DAZ/Fig/Deltas/Hide.Brow.pz2", HIDE_LEAF)
-    lib.write("pose/Fig INJ/Brow.pz2", _orchestrator(":Runtime:libraries:!DAZ:Fig:Deltas:InjDeltas.Brow.pz2"))
-    lib.write("pose/Fig INJ/Brow.png", "png")
-    lib.write("pose/Fig REM/Brow.pz2", _orchestrator(":Runtime:libraries:!DAZ:Fig:Deltas:RemDeltas.Brow.pz2"))
-    lib.write("pose/Fig REM/Brow.rsr", "rsr")
-    lib.write("pose/Fig2 INJ/Brow.pz2", _orchestrator(":Runtime:libraries:!DAZ:Fig:Deltas:InjDeltas.Brow.pz2"))
-    lib.write("pose/Fig2 INJ/Half.pz2", _orchestrator(
-        ":Runtime:libraries:!DAZ:Fig:Deltas:InjDeltas.Brow.pz2", ":Runtime:libraries:gone.pz2"))
-    lib.write("pose/Poses/Wave.pz2", POSE_LEAF)
-    lib.write("pose/Poses/Hide Belly.pz2", _orchestrator(":Runtime:libraries:!DAZ:Fig:Deltas:Hide.Brow.pz2"))
-    lib.write("pose/Props/Plain.pz2", OTHER_LEAF)
-    return lib
-
 
 def _entries(manifest):
     return {os.path.relpath(e["path"], manifest["signature"]["roots"][0]).replace("\\", "/").split("libraries/")[1]: e
@@ -422,3 +357,26 @@ def test_real_sniff_agrees_with_a_full_parse_where_it_matters():
         if checked >= 600:
             break
     assert checked >= 300
+
+
+# ---- catalogs and the asset signature (used by the 7.3b build) -----------------------------
+
+def test_catalog_ids_are_stable_and_include_parents(library):
+    manifest = li.build_manifest([library.path])
+    ids = li.catalog_ids(manifest)
+    assert set(ids) == {"pose", "pose/Fig INJ", "pose/Fig REM", "pose/Fig2 INJ"}
+    assert ids == li.catalog_ids(li.build_manifest([library.path]))
+    assert li.catalog_uuid("pose/Fig INJ") == ids["pose/Fig INJ"] != li.catalog_uuid("pose/Fig REM")
+
+
+def test_catalog_file_text_has_the_version_line_and_one_line_per_catalog():
+    text = li.catalog_file_text({"pose": "u1", "pose/Fig INJ": "u2"})
+    lines = [l for l in text.splitlines() if l and not l.startswith("#")]
+    assert lines == ["VERSION 1", "u1:pose:pose", "u2:pose/Fig INJ:Fig INJ"]
+
+
+def test_the_asset_signature_changes_with_the_format_and_the_blender_version(library):
+    assert li.asset_signature("5.3.0") != li.asset_signature("5.0.1")
+    first = li.build_manifest([library.path], signature_extra=li.asset_signature("5.3.0"))
+    other = li.build_manifest([library.path], previous=first, signature_extra=li.asset_signature("5.0.1"))
+    assert other["stats"]["reused"] == 0

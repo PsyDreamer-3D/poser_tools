@@ -27,6 +27,7 @@ import hashlib
 import json
 import os
 import re
+import uuid
 import zlib
 from collections import Counter, defaultdict
 from concurrent.futures import ThreadPoolExecutor
@@ -313,6 +314,49 @@ def _folder_hash(entries: list) -> str:
     payload = json.dumps([[e[k] for k in keys] for e in sorted(entries, key=lambda e: e["path"])],
                          sort_keys=True)
     return hashlib.sha1(payload.encode("utf-8")).hexdigest()
+
+
+# Namespace for the catalog ids: uuid5 of the catalog path, so an id is stable across rebuilds
+# and machines and a rebuild never orphans an asset from its catalog.
+_CATALOG_NAMESPACE = uuid.UUID("5f6c1e3a-0b0e-4a52-9d7e-5b7f3c1f2a10")
+# Bump when what the asset files contain changes (placeholders, tags, payload keys), so
+# existing ones are rebuilt: it goes into the manifest signature.
+ASSET_FORMAT_VERSION = 1
+
+
+def asset_signature(blender_version: str) -> str:
+    """The `signature_extra` for build_manifest(): asset format plus the Blender that wrote them."""
+    return f"assets-v{ASSET_FORMAT_VERSION}|blender-{blender_version}"
+
+
+def catalog_uuid(path: str) -> str:
+    return str(uuid.uuid5(_CATALOG_NAMESPACE, path))
+
+
+def catalog_ids(manifest: dict) -> dict:
+    """{catalog path: uuid} for every catalog the shown entries use, parents included."""
+    paths = set()
+    for folder in manifest["folders"]:
+        for entry in folder["entries"]:
+            parts = entry["catalog"].split("/") if entry["catalog"] else []
+            paths.update("/".join(parts[:i]) for i in range(1, len(parts) + 1))
+    return {path: catalog_uuid(path) for path in sorted(paths)}
+
+
+def catalog_file_text(ids: dict) -> str:
+    """The body of `blender_assets.cats.txt` for these catalogs."""
+    lines = [
+        "# This is an Asset Catalog Definition file for Blender.",
+        "#",
+        "# Empty lines and lines starting with `#` will be ignored.",
+        "# The first non-ignored line should be the version indicator.",
+        '# Other lines are of the format "UUID:catalog/path/for/assets:simple catalog name"',
+        "",
+        "VERSION 1",
+        "",
+    ]
+    lines += [f"{uid}:{path}:{path.rsplit('/', 1)[-1]}" for path, uid in sorted(ids.items())]
+    return "\n".join(lines) + "\n"
 
 
 # ---------------------------------------------------------------------------
