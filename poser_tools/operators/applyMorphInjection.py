@@ -139,8 +139,12 @@ class OT_ApplyMorphInjection_Operator(bpy.types.Operator):
     injection_filepath: StringProperty(
         name="Injection File",
         description="A Poser morph injection .pz2 (a single inline-delta file, or an "
-                    "orchestrator that readScript-references several)",
+                    "orchestrator that readScript-references several). Used only when no "
+                    "package is picked from the list above",
         subtype='FILE_PATH',
+        # Not remembered between runs: execute() writes the picked package's path here, so a
+        # remembered value would come back pre-filled and be a stale answer to a new pick.
+        options={'SKIP_SAVE'},
     )
     reference_obj_filepath: StringProperty(
         name="Reference OBJ",
@@ -155,10 +159,12 @@ class OT_ApplyMorphInjection_Operator(bpy.types.Operator):
         name="Figure (CR2)",
         description="Pick the figure from your Poser Runtime library -- its reference OBJ is "
                     "resolved automatically from the CR2's own figureResFile",
+        options={'SKIP_SAVE'},
     )
     selected_injection_name: StringProperty(
         name="Injection Package",
         description="Pick the injection package from your Poser Runtime library",
+        options={'SKIP_SAVE'},
     )
     # Set by poser.pick_injection_morphs once the user has chosen (JSON lists of internal
     # names and of the leaf files they live in). Empty means "every morph in the package",
@@ -207,6 +213,11 @@ class OT_ApplyMorphInjection_Operator(bpy.types.Operator):
                     entry.name = display_name
                     entry.filepath = lib_item.filepath
 
+        if self.selected_cr2_name:
+            # The remembered figure is pre-selected and its OBJ is resolved from it, so the OBJ
+            # field stays empty: a pre-filled one would override a different figure picked here.
+            self.reference_obj_filepath = ""
+
         return context.window_manager.invoke_props_dialog(self, width=500)
 
     def draw(self, context):
@@ -226,26 +237,38 @@ class OT_ApplyMorphInjection_Operator(bpy.types.Operator):
             layout.label(text="No Poser Runtime folders configured -- see Preferences.", icon='INFO')
 
         layout.prop(self, "injection_filepath")
+        if self.selected_injection_name and self.injection_filepath:
+            layout.label(text="The package picked above is used; this path is ignored.", icon='INFO')
         layout.prop(self, "reference_obj_filepath")
+        if self.selected_cr2_name and self.reference_obj_filepath:
+            layout.label(text="The figure picked above is used; this .obj is ignored.", icon='INFO')
 
     def execute(self, context):
         self._op_start_time = time.time()
         obj = context.active_object
 
-        if not self.injection_filepath and self.selected_injection_name:
+        # What the user picked from the lists wins over the manual path fields. The lists start
+        # empty every time (invoke), so a value there is a pick made in this dialog, while a
+        # filled path may be left over. A call from the morph picker has already settled both.
+        from_picker = bool(self.selected_morphs)
+
+        if self.selected_injection_name and not from_picker:
             item = self.injection_library_items.get(self.selected_injection_name)
-            if item is None:
+            if item is not None:
+                self.injection_filepath = item.filepath
+            elif not self.injection_filepath:
                 say(self, {'ERROR'}, f"{self.selected_injection_name!r} doesn't match a package in your Poser library.")
                 return {'CANCELLED'}
-            self.injection_filepath = item.filepath
 
         cr2_filepath = ""
-        if not self.reference_obj_filepath and self.selected_cr2_name:
-            item = self.cr2_library_items.get(self.selected_cr2_name)
-            if item is None:
+        cr2_item = None
+        if self.selected_cr2_name and not from_picker:
+            cr2_item = self.cr2_library_items.get(self.selected_cr2_name)
+            if cr2_item is None and not self.reference_obj_filepath:
                 say(self, {'ERROR'}, f"{self.selected_cr2_name!r} doesn't match a figure in your Poser library.")
                 return {'CANCELLED'}
-            cr2_filepath = item.filepath
+        if cr2_item is not None:
+            cr2_filepath = cr2_item.filepath
             figure = CR2Parser.parse_file(cr2_filepath)
             resolve_geom_file(figure, cr2_filepath, extra_roots=get_runtime_roots(context))
             if not (figure.geom_file and os.path.isfile(figure.geom_file)):

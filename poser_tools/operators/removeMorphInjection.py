@@ -31,13 +31,17 @@ class OT_RemoveMorphInjection_Operator(bpy.types.Operator):
         name="Injection File",
         description="Either the original .pz2 that was injected, or its RemDeltas.* counterpart "
                     "-- both declare the same channel names, which is all removal needs. No "
-                    "reference OBJ required: removal is pure name-matching, not geometry",
+                    "reference OBJ required: removal is pure name-matching, not geometry. "
+                    "Used only when no package is picked from the list above",
         subtype='FILE_PATH',
+        # Not remembered: execute() writes the picked package's path here (see Apply).
+        options={'SKIP_SAVE'},
     )
     injection_library_items: CollectionProperty(type=PoserLibraryItem)
     selected_injection_name: StringProperty(
         name="Injection Package",
         description="Pick the injection or removal package from your Poser Runtime library",
+        options={'SKIP_SAVE'},
     )
 
     @classmethod
@@ -74,16 +78,21 @@ class OT_RemoveMorphInjection_Operator(bpy.types.Operator):
             layout.label(text="No Poser Runtime folders configured -- see Preferences.", icon='INFO')
 
         layout.prop(self, "injection_filepath")
+        if self.selected_injection_name and self.injection_filepath:
+            layout.label(text="The package picked above is used; this path is ignored.", icon='INFO')
 
     def execute(self, context):
         obj = context.active_object
 
-        if not self.injection_filepath and self.selected_injection_name:
+        # A pick from the list wins over the path field (the list starts empty each time, the
+        # path may be left over); see Apply.
+        if self.selected_injection_name:
             item = self.injection_library_items.get(self.selected_injection_name)
-            if item is None:
+            if item is not None:
+                self.injection_filepath = item.filepath
+            elif not self.injection_filepath:
                 self.report({'ERROR'}, f"{self.selected_injection_name!r} doesn't match a package in your Poser library.")
                 return {'CANCELLED'}
-            self.injection_filepath = item.filepath
 
         if not os.path.isfile(self.injection_filepath):
             self.report({'ERROR'}, f"Injection file not found: {self.injection_filepath!r}")
