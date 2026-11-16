@@ -654,7 +654,7 @@ Verified headless on the real Aiko3: applied EarFeline, EarDeer and BrowHeavy, t
 via its `RemDeltas.*`; all three gone, the record empty, and a repeat run reports "not present"
 with no error.
 
-## Phase 7 — Thumbnail library for picking packages (scoping, 2026-11-14; 7.0 and 7.0b done, 7.1+ not started)
+## Phase 7 — Thumbnail library for picking packages (scoping, 2026-11-14; 7.0, 7.0b, 7.1, 7.2, 7.3 done; 7.4+ not started)
 
 **Goal.** Replace the two `prop_search()` dropdowns with a thumbnail grid for choosing injection and
 removal packages from the owner's Poser Runtime libraries, using Blender's Asset Shelf. The
@@ -1024,7 +1024,7 @@ produce a duplicate.
 **Not in 7.2:** Remove stays name-based and unchanged (the list module should be reusable by it
 later, "remove the selected morphs"); a disk cache; off-thread parsing.
 
-### 7.3 plan: the library index (scoped 2026-11-15; 7.3a and 7.3b built, 7.3c not)
+### 7.3 plan: the library index (scoped 2026-11-15; 7.3a, 7.3b and 7.3c built)
 
 **What 7.3 delivers.** A built, registered Blender asset library holding one stand-in `Image` asset
 per injection or removal package in the owner's Runtime roots, each with its Poser thumbnail (or a
@@ -1223,7 +1223,7 @@ shelf prints the name). A thumbnail that fails to load falls back to the placeho
 **Registration.** `ensure_asset_library(libraries, name, directory)` reuses an existing entry and only
 corrects its path (and re-enables it on 5.3, where `enabled` exists), because `new()` twice with one
 name silently makes `Name.001`; `remove_asset_library`. Written against the collection so it is tested
-with fakes. Nothing calls it yet: the Preferences button is 7.3c.
+with fakes. Called by the 7.3c operator, only from the explicit build click.
 
 **Verified with the real child on the real library, Blender 5.3.0, 5.2.4 LTS and 5.0.1** (the parent
 built the manifest from the 20 roots and ran the child; a separate process then read every file back):
@@ -1260,6 +1260,47 @@ button is the way to try it), Windows/macOS, and a flatpak where `bpy.app.binary
 `bpy.data.libraries.load()` is how the files were read back; the shelf reads the same data through
 `AssetRepresentation`, which 7.4 checks.
 
+#### 7.3c as built (2026-11-15)
+
+**`poser.build_library_index`** (`operators/libraryIndex.py`, `INTERNAL`, polls false with no Runtime
+folders or while a build runs): the same shape as Apply's correspondence build. `_work(job)` does the
+whole thing (load the previous manifest, `build_manifest`, `build_assets`, write `status.json`) and
+never touches `bpy`; interactively it runs on a thread while a `modal()` timer (0.2 s) maps
+`(phase, done, total)` onto one bar (`library_build.progress_fraction`: reading 0 to 55%, classifying
+55 to 85%, writing assets 85 to 100%, the bands taken from the measured cost split) and drives the wait
+cursor, `wm.progress_update` and a status-bar line naming the phase. **Esc** sets a flag the worker
+checks between files and that terminates the child Blender; the modal waits for the thread, so it can't
+outlive the operator, and nothing is changed (the manifest is saved last). Under `--background` it runs
+`_work` inline, as Apply does. On the main thread afterwards: `ensure_asset_library(...)` (the only
+place preferences are edited, and only from this click), the **Poser Library Index Report** text block
+(`library_build.report_lines`: counts, thumbnails, files written/unchanged/removed, the child's summary,
+incomplete packages), and an INFO message. An error from the child or any exception is reported and
+written to the same block, nothing is registered, and the previous index stays as it was.
+`Full Rebuild` is the same operator with `force`, which ignores the previous manifest.
+
+**`poser.remove_library_entry`** removes the registered library and leaves the files; polls false when
+there is no entry.
+
+**Preferences** (`_draw_library`, below the Runtime folders): package and folder counts, built-at,
+thumbnail/placeholder counts, an alert row when stale (roots, asset format or Blender version differ from
+the last build, from `library_build.status_is_stale`), Build/Update and Full Rebuild buttons, and the
+registered state with the remove button. It reads only `status.json` (cached on its mtime), never the
+manifest, because Preferences redraws constantly.
+
+**Verified headless on Blender 5.3.0, 5.2.4 and 5.0.1, on the real library** (scripted calls with
+`library_dir` redirected to scratch): first build 13 to 15 s end to end (manifest warm ~10 s, child ~5 s),
+3,956 shown in 139 folders, library registered, status not stale; an update with nothing changed 1.3 to
+1.4 s with 139 files unchanged and none written; a full rebuild rewrites all 139; the status goes stale
+when a root is dropped; remove-entry unregisters and keeps the files, and refuses a second time (poll);
+no roots refuses (poll); a child that can't start reports "couldn't start ...", writes the failure
+into the report block, and registers nothing. The Preferences draw code was driven with a recording
+layout through the four states (never built with no roots; built and current but unregistered; registered;
+stale) and produced the expected labels, buttons and alert.
+
+**Not verified:** the modal wrapper itself (timer, cursor, status bar, Esc), which needs the GUI, and the
+Asset Browser actually listing the library. `tests/test_library_build.py` covers the pure pieces added
+here (status read/write/cache/damage, staleness, the progress mapping, the report).
+
 #### Verification
 
 - **pytest** (no `bpy`): `classify_entry` on synthetic trees: orchestrator depth and cycles,
@@ -1279,7 +1320,7 @@ button is the way to try it), Windows/macOS, and a flatpak where `bpy.app.binary
 
 - **7.3a** ✅ `library_index.py` + manifest + tests. Pure Python, the part that must be right. As built below.
 - **7.3b** ✅ `library_assets_child.py` + the subprocess driver + registration, verified headless. As built below.
-- **7.3c** the operator and Preferences UI, docs (README, CHANGELOG, `CLAUDE.md`, this doc).
+- **7.3c** ✅ the operator and Preferences UI, docs (README, CHANGELOG, `CLAUDE.md`, this doc). As built below.
 
 #### Decisions for the owner (recommendation first)
 
