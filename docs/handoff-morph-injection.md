@@ -1024,7 +1024,7 @@ produce a duplicate.
 **Not in 7.2:** Remove stays name-based and unchanged (the list module should be reusable by it
 later, "remove the selected morphs"); a disk cache; off-thread parsing.
 
-### 7.3 plan: the library index (scoped 2026-11-15; 7.3a built, 7.3b and 7.3c not)
+### 7.3 plan: the library index (scoped 2026-11-15; 7.3a and 7.3b built, 7.3c not)
 
 **What 7.3 delivers.** A built, registered Blender asset library holding one stand-in `Image` asset
 per injection or removal package in the owner's Runtime roots, each with its Poser thumbnail (or a
@@ -1106,8 +1106,9 @@ also carry `removal`; the content, not the name, decides.
   `classify_entry()`, `find_thumbnail()` (same stem, `.png`/`.jpg`/`.jpeg`, case-insensitive),
   `build_manifest()`. Reuses `runtime_index.get_all_items()` for the file list and
   `resolve_package_files()` / `scan_channels()` from 7.2.
-- `core/cr2/library_assets_child.py`: a **stand-alone script** with no add-on imports, run by a
-  child Blender process (below). Reads the manifest, writes the `.blend` files and the catalog file.
+- `core/library_assets_child.py` (moved out of `core/cr2/`, which stays free of `bpy`): a **stand-alone
+  script** with no add-on imports, run by a child Blender process (below). Writes the `.blend` files.
+  `core/library_build.py` is the parent side: planning, the process, the catalog file, registration.
 - `operators/buildLibraryIndex.py`: `poser.build_library_index`, a modal operator.
 - `properties/poserToolsPreferences.py` `draw()`: **Build / Rebuild Library Index**, a status line
   (N entries, built when, "roots changed, rebuild"), and **Remove Library Entry**.
@@ -1190,6 +1191,75 @@ without the drive (known entries, the Hide files, the walk finding exactly the l
 Two of them were mutation-checked: reintroducing the `name -` grep fails 6 tests, and making
 `_stamps_current` always false fails 3.
 
+#### 7.3b as built (2026-11-15)
+
+**Files.** `core/library_assets_child.py` (runs in the child Blender; stdlib, `bpy`, `numpy` only) and
+`core/library_build.py` (no module-level `bpy`, so it is pytest-able). Small additions to
+`library_index.py`: `catalog_uuid`/`catalog_ids`/`catalog_file_text`, `ASSET_FORMAT_VERSION` and
+`asset_signature(blender_version)`, which goes into the manifest signature so a change to what the
+asset files contain, or a different Blender, rebuilds them.
+
+**Division of labour.** The parent plans (`plan_asset_build`: folders whose hash changed, folders whose
+`.blend` is missing from disk, strays and `.tmp-` leftovers to sweep), writes the job JSON, runs the
+child (`run_child`: output read on a thread so a silent child can still be cancelled, which terminates
+then kills it), writes the catalog file, deletes stale files, and saves the manifest **last**, so a
+failed or cancelled build leaves the previous baseline and is just redone. The child only builds
+datablocks and writes one `.blend` per folder (to a `.tmp-` name, then renamed, so an interrupted build
+never leaves a half-written file under a name the library scans). Protocol on stdout: `POSER_PROGRESS
+n total`, `POSER_DONE {json}`, `POSER_ERROR msg`; `--python-exit-code 1` makes an uncaught exception
+fail the build.
+
+**Stand-ins.** `Image` 4x4, asset-marked, preview from the Poser thumbnail via numpy
+`foreach_get`/`foreach_set` (previews over 256 px are scaled down; 19 of the real ones were), tags,
+catalog id, description (the path, with the `[INCOMPLETE ...]` prefix where it applies), and custom keys
+`poser_root`, `poser_rel_path`, `poser_kind` on `asset_data`. **Placeholders** (decision D): a flat
+128 px tile by kind, blue with a plus for injection and amber with a minus for removal, so the two read
+apart without colour; no text (Blender can't draw it onto an image in a background process, and the
+shelf prints the name). A thumbnail that fails to load falls back to the placeholder and is counted.
+
+**Catalogs.** Written by the parent, one line per folder in the tree and every parent, with
+`uuid5` ids of the path so they are stable across rebuilds.
+
+**Registration.** `ensure_asset_library(libraries, name, directory)` reuses an existing entry and only
+corrects its path (and re-enables it on 5.3, where `enabled` exists), because `new()` twice with one
+name silently makes `Name.001`; `remove_asset_library`. Written against the collection so it is tested
+with fakes. Nothing calls it yet: the Preferences button is 7.3c.
+
+**Verified with the real child on the real library, Blender 5.3.0, 5.2.4 LTS and 5.0.1** (the parent
+built the manifest from the 20 roots and ran the child; a separate process then read every file back):
+
+| | 5.3.0 | 5.2.4 | 5.0.1 |
+|---|--:|--:|--:|
+| first build (child alone) | 5.0 s (2.4 s) | 5.3 s (2.4 s) | 3.5 s (2.3 s) |
+| second build, nothing changed | 1.3 s, child not run | 1.1 s | 1.3 s |
+| assets / files / size | 3,956 / 141 / 28.9 MB | 28.8 MB | 28.6 MB |
+| thumbnails / placeholders / failed | 2,342 / 1,614 / 0 | same | same |
+
+(plus ~10 s for the manifest on a warm cache, see 7.3a). Read-back, on all three: **0 mismatches in
+3,956 assets** across names, descriptions, tags, catalog ids (and that each is the stable uuid5 of its
+path), the three payload keys, and previews: 2,323 thumbnail previews are pixel-identical to their source
+images (max difference 0.0000), the 19 larger than 256 px are scaled to 256 with their aspect ratio
+kept, and every placeholder is 128 px. All 157 catalogs the entries use are in the catalog file.
+Deleting one asset file and rebuilding rewrote exactly that one. The registration call created the
+library then left it unchanged on a second call (one entry, not `.001`), and the content roots'
+file mtimes were identical before and after. With the real binary, a corrupt or missing thumbnail
+falls back to a placeholder (counted as failed), and an unwritable output directory or a malformed job
+file fails with a non-zero exit and a `POSER_ERROR` line that `run_child` reports.
+
+**Tests** (`tests/test_library_build.py`, 19; 3 more in `test_library_index.py`; fixtures shared in
+`tests/synthetic_library.py`): plan (fresh, up to date, a deleted file rewritten, strays and `.tmp-`
+leftovers swept), the command line, `run_child` against a stand-in child speaking the same protocol
+(progress, summary, a malformed progress line, error, crash, silent exit, cancelling a hung child,
+a binary that can't start), `build_assets` (files, catalogs, manifest saved last, a second build never
+starts the child, only a changed folder rewritten and a vanished one removed, a failed build saves
+nothing, a cancelled one raises `BuildCancelled`), registration with fakes (idempotent, path corrected,
+disabled re-enabled, removal touches only its own entry), and catalog ids/text and the asset signature.
+
+**Not verified:** the Asset Browser actually showing the library (needs the GUI; 7.3c's Preferences
+button is the way to try it), Windows/macOS, and a flatpak where `bpy.app.binary_path` may differ.
+`bpy.data.libraries.load()` is how the files were read back; the shelf reads the same data through
+`AssetRepresentation`, which 7.4 checks.
+
 #### Verification
 
 - **pytest** (no `bpy`): `classify_entry` on synthetic trees: orchestrator depth and cycles,
@@ -1208,7 +1278,7 @@ Two of them were mutation-checked: reintroducing the `name -` grep fails 6 tests
 #### Phasing (one PR, three commits)
 
 - **7.3a** ✅ `library_index.py` + manifest + tests. Pure Python, the part that must be right. As built below.
-- **7.3b** `library_assets_child.py` + the subprocess driver + registration, verified headless.
+- **7.3b** ✅ `library_assets_child.py` + the subprocess driver + registration, verified headless. As built below.
 - **7.3c** the operator and Preferences UI, docs (README, CHANGELOG, `CLAUDE.md`, this doc).
 
 #### Decisions for the owner (recommendation first)

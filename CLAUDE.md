@@ -221,7 +221,18 @@ don't resume it without a specific reason to.
   own Runtime, since a package often names files that live in a different library, and a package
   that yields no morphs because its files weren't found now says so (`no_morphs_report()`). Phase 7
   (thumbnail library via Blender's Asset Shelf) is scoped in
-  `docs/handoff-morph-injection.md`; 7.0, 7.0b, 7.1 and 7.2 are built.
+  `docs/handoff-morph-injection.md`; 7.0, 7.0b, 7.1 and 7.2 are built, and 7.3a/7.3b (below).
+- Phase 7.3a/7.3b: the **library index** (no UI yet; the Preferences button is 7.3c).
+  `core/cr2/library_index.py` classifies the owner's whole Poser library (16,405 entries, ~10 s warm,
+  ~40 s cold) into injection/removal and builds a manifest of 3,956 shown entries in 139 source
+  folders, incrementally. `core/library_build.py` turns it into asset `.blend` files by running
+  `core/library_assets_child.py` in a **child Blender process** (never in the user's session: building
+  asset-marked images there would touch their file, undo stack and UI), writes the catalog file, saves
+  the manifest last, and registers the folder as an asset library (`ensure_asset_library`, which must
+  check for an existing entry: `new()` twice makes `Name.001`). Everything goes under
+  `user_resource('CONFIG', 'poser_tools/library')`, never into the Poser content. `core/library_build.py`
+  has no module-level `bpy` so it is pytest-able; the child itself is verified by running it, headless,
+  on 5.0.1, 5.2.4 and 5.3.0 and reading every asset back.
 - Phase 7.2: **morph picker** (`poser.pick_injection_morphs`, `operators/pickInjectionMorphs.py`,
   `ui/pickInjectionMorphs.py`). Apply's popup (package + figure) hands over to a second dialog
   listing the package's morphs; its OK calls `poser.apply_morph_injection` with `selected_morphs`/
