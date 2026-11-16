@@ -950,8 +950,9 @@ every morph). Three hidden `SKIP_SAVE` properties carry the hand-over: `use_morp
 by the interactive `invoke()`, so dialog 1's OK diverts to the picker while a scripted call doesn't),
 and `selected_morphs`/`selected_leaves` (JSON; when set, `invoke()` skips dialog 1 and runs).
 `poser.pick_injection_morphs` (`INTERNAL`, so not in F3 search) scans in its `invoke()`, classifies
-(`classify_morphs`), applies directly when exactly one morph is choosable, cancels with a message when
-none is, and otherwise opens the list. Select all/none are boolean toggles with `update=` callbacks
+(`classify_morphs`), applies directly when the package holds exactly one morph, cancels with a message when
+nothing is choosable, and otherwise opens the list (even for one choosable morph among many, so
+the greyed rows show why the rest were left out). Select all/none are boolean toggles with `update=` callbacks
 that reset themselves (spike-verified); they act on every unlocked row, not on the filtered ones.
 Apply reports a chosen morph the parser can't find (the scan/parser residual above) instead of
 dropping it.
@@ -1037,6 +1038,9 @@ later, "remove the selected morphs"); a disk cache; off-thread parsing.
 8. **Default selection** is every "new" morph checked, with the estimate in the header; the list is
    mainly for unchecking. (Alternative was none checked.)
 9. **Single-morph packages skip the list** and apply directly; the list is an extra click there.
+   Built first as "exactly one *choosable* morph skips the list", which applied `pRubenesque` from
+   the 95-morph `!All Body.pz2` with no dialog (owner UAT, 2026-11-15). Corrected to the decision's
+   own wording: judged on the package, so a long package with one new morph still shows its list.
 10. **Off-thread package parsing is a follow-up**, not folded into 7.2.
 
 **Deferred idea.** Expressions act on morph channels only, so they could in principle be applied as

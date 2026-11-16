@@ -85,8 +85,10 @@ class OT_PickInjectionMorphs_Operator(bpy.types.Operator):
                 f"all {len(classified)} morph(s) are {', '.join(reasons)}.",
             )
             return {'CANCELLED'}
-        if len(choosable) == 1:
-            # Nothing to choose between.
+        if len(classified) == 1:
+            # A package of one morph has nothing to choose between. Judged on the package, not
+            # on what is choosable: a long package with one new morph still shows its list, so
+            # the greyed rows say why the rest were left out instead of applying silently.
             return self._apply([(m.internal_name, m.leaf_paths) for m in choosable])
 
         self.rows.clear()
