@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 
 import os
+import time
 
 import bpy
 from bpy.props import CollectionProperty, IntProperty, StringProperty
@@ -62,6 +63,50 @@ class PoserToolsPreferences(bpy.types.AddonPreferences):
 
         layout.separator()
         layout.operator("poser.runtime_roots_import_from_poser", icon='IMPORT')
+
+        self._draw_library(context, layout)
+
+    def _draw_library(self, context, layout):
+        # Imported here so the Preferences panel still draws if the build code ever fails to load.
+        from ..core import library_build
+
+        layout.separator()
+        box = layout.box()
+        box.label(text="Morph Package Library", icon='ASSET_MANAGER')
+        box.label(text="Index your injection and removal packages as a Blender asset library, with thumbnails.")
+
+        roots = get_runtime_roots(context)
+        status = library_build.read_status(library_build.library_dir(create=False))
+        if not roots:
+            box.label(text="Add a Poser Runtime folder above first.", icon='INFO')
+        if status:
+            stats = status["stats"]
+            built = time.strftime("%Y-%m-%d %H:%M", time.localtime(status["built_at"]))
+            box.label(text=f"{stats['shown']:,} packages in {stats['folders']} folders, built {built}")
+            thumbs = stats.get("thumbnails", {})
+            box.label(text=f"{thumbs.get('image', 0):,} thumbnails, "
+                           f"{thumbs.get('rsr', 0) + thumbs.get('none', 0):,} placeholders")
+            if library_build.status_is_stale(status, roots, bpy.app.version_string):
+                warn = box.row()
+                warn.alert = True
+                warn.label(text="Runtime folders or Blender version changed: rebuild.", icon='ERROR')
+        else:
+            box.label(text="Not built yet. The first build takes up to a minute on a slow drive.")
+
+        row = box.row()
+        row.operator("poser.build_library_index", text="Update Library Index" if status else "Build Library Index",
+                     icon='FILE_REFRESH')
+        full = row.operator("poser.build_library_index", text="Full Rebuild")
+        full.force = True
+
+        libraries = context.preferences.filepaths.asset_libraries
+        registered = any(lib.name == library_build.LIBRARY_NAME for lib in libraries)
+        row = box.row()
+        if registered:
+            row.label(text=f"Asset library '{library_build.LIBRARY_NAME}' is registered.", icon='CHECKMARK')
+            row.operator("poser.remove_library_entry", icon='X')
+        elif status:
+            row.label(text="Built, but not registered as an asset library: update the index to add it.", icon='INFO')
 
 
 def get_runtime_roots(context) -> list:

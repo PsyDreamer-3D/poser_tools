@@ -17,11 +17,13 @@ import os
 import queue
 import subprocess
 import threading
+import time
 
 from .cr2 import library_index
 
 LIBRARY_NAME = "Poser Morph Packages"
 MANIFEST_FILE = "poser_index.json.gz"
+STATUS_FILE = "status.json"
 CATALOG_FILE = "blender_assets.cats.txt"
 _JOB_FILE = ".job.json"
 _CHILD_SCRIPT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "library_assets_child.py")
@@ -31,8 +33,8 @@ class AssetBuildError(Exception):
     """The child Blender process failed; the previous index, if any, is left as it was."""
 
 
-def library_dir() -> str:
-    """The directory holding the asset files, catalog and manifest (created if needed).
+def library_dir(create: bool = True) -> str:
+    """The directory holding the asset files, catalog and manifest (created if `create`).
 
     The same per-add-on config folder runtime_index already keeps its cache in, which is
     per Blender version. bpy is imported here, not at module level, so the rest of this
@@ -40,12 +42,103 @@ def library_dir() -> str:
     """
     import bpy  # noqa: PLC0415
     path = bpy.utils.user_resource("CONFIG", path=os.path.join("poser_tools", "library"))
-    os.makedirs(path, exist_ok=True)
+    if create:
+        os.makedirs(path, exist_ok=True)
     return path
 
 
 def manifest_path(out_dir: str) -> str:
     return os.path.join(out_dir, MANIFEST_FILE)
+
+
+# ---------------------------------------------------------------------------
+# Status: what the Preferences panel shows, kept small so drawing never loads the manifest
+# ---------------------------------------------------------------------------
+
+_status_cache = {}
+
+
+def write_status(out_dir: str, manifest: dict, seconds: float, now=None) -> None:
+    """Record the headline numbers of a finished build next to the manifest."""
+    status = {"built_at": time.time() if now is None else now, "seconds": round(seconds, 1),
+              "signature": manifest["signature"], "stats": manifest["stats"]}
+    target = os.path.join(out_dir, STATUS_FILE)
+    temp = target + ".tmp"
+    with open(temp, "w", encoding="utf-8") as fh:
+        json.dump(status, fh)
+    os.replace(temp, target)
+
+
+def read_status(out_dir: str):
+    """The last build's status, or None. Cached on the file's mtime: Preferences redraws often."""
+    target = os.path.join(out_dir, STATUS_FILE)
+    try:
+        stamp = os.stat(target).st_mtime_ns
+    except OSError:
+        return None
+    cached = _status_cache.get(target)
+    if cached and cached[0] == stamp:
+        return cached[1]
+    try:
+        with open(target, "r", encoding="utf-8") as fh:
+            status = json.load(fh)
+        status["signature"], status["stats"], status["built_at"]
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+    _status_cache[target] = (stamp, status)
+    return status
+
+
+def status_is_stale(status: dict, roots, blender_version: str) -> bool:
+    """True when the roots, the asset format or the Blender version differ from the last build's.
+
+    A build against a different set answers different questions (a target may now resolve), so
+    the index must be rebuilt. New *content* inside the same roots cannot be seen cheaply; that is
+    what the always-available, incremental update button is for.
+    """
+    existing = [r for r in dict.fromkeys(roots) if r and os.path.isdir(r)]
+    current = library_index.make_signature(existing, library_index.asset_signature(blender_version))
+    return status["signature"] != current
+
+
+# Where each phase sits on one 0..1 bar. Measured on the owner's 20 roots: reading the files
+# dominates a cold build (~30 s of ~40), classifying ~10 s, writing the asset files ~5 s. An
+# incremental build skips "reading", so its bar starts at the classifying band.
+_PHASE_BANDS = {"reading": (0.0, 0.55), "classifying": (0.55, 0.85), "assets": (0.85, 1.0)}
+PHASE_LABELS = {"reading": "reading files", "classifying": "classifying packages",
+                "assets": "writing asset files"}
+
+
+def progress_fraction(phase: str, done: int, total: int) -> float:
+    low, high = _PHASE_BANDS.get(phase, (0.0, 1.0))
+    return low + (high - low) * (done / total if total else 1.0)
+
+
+def report_lines(manifest: dict, result: dict, seconds: float, registered: str) -> list:
+    """The text of the "Poser Library Index Report" block."""
+    stats = manifest["stats"]
+    kinds = stats["kinds"]
+    lines = [
+        f"Library index built in {seconds:.1f}s: {stats['shown']} package(s) in {stats['folders']} folder(s).",
+        f"Asset files: {result['written']} written, {result['unchanged']} unchanged, {result['removed']} removed.",
+        f"Library: {registered}",
+        "",
+        f"Entries scanned: {stats['entries']} ({stats['reused']} reused from the last build, "
+        f"{stats['classified']} classified).",
+        "  shown:  " + ", ".join(f"{k} {kinds.get(k, 0)}" for k in library_index.SHOWN_KINDS),
+        "  hidden: " + ", ".join(f"{k} {n}" for k, n in sorted(kinds.items())
+                                  if k not in library_index.SHOWN_KINDS),
+        "Thumbnails: " + ", ".join(f"{k} {n}" for k, n in sorted(stats["thumbnails"].items())),
+    ]
+    child = result.get("child") or {}
+    if child:
+        lines.append(f"Child Blender {child.get('blender', '?')}: {child.get('assets', 0)} asset(s), "
+                     f"{child.get('placeholders', 0)} placeholder(s), {child.get('failed', 0)} unreadable thumbnail(s).")
+    incomplete = [e for f in manifest["folders"] for e in f["entries"] if e["incomplete"]]
+    if incomplete:
+        lines += ["", f"Incomplete packages ({len(incomplete)}; shown, tagged 'incomplete'):"]
+        lines += [f"  {e['description']}" for e in incomplete[:50]]
+    return lines
 
 
 # ---------------------------------------------------------------------------

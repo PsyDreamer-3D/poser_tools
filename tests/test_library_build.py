@@ -232,3 +232,54 @@ def test_removing_the_library_only_touches_its_own_entry():
     assert lb.remove_asset_library(libs, lb.LIBRARY_NAME) is True
     assert [l.name for l in libs] == ["User Library"]
     assert lb.remove_asset_library(libs, lb.LIBRARY_NAME) is False
+
+
+# ---- status, staleness, progress, report ---------------------------------------------------
+
+def test_status_round_trips_and_is_cached_on_the_file(manifest, tmp_path):
+    out = str(tmp_path)
+    assert lb.read_status(out) is None
+    lb.write_status(out, manifest, 12.34, now=1_700_000_000.0)
+    status = lb.read_status(out)
+    assert status["built_at"] == 1_700_000_000.0 and status["seconds"] == 12.3
+    assert status["stats"]["shown"] == 4 and lb.read_status(out) is status          # cached, not re-read
+    lb.write_status(out, manifest, 1.0, now=5.0)
+    os.utime(os.path.join(out, lb.STATUS_FILE), ns=(1, 1))                            # a new mtime invalidates it
+    assert lb.read_status(out)["built_at"] == 5.0
+
+
+def test_a_damaged_status_file_reads_as_none(tmp_path):
+    (tmp_path / lb.STATUS_FILE).write_text("{not json")
+    assert lb.read_status(str(tmp_path)) is None
+    (tmp_path / lb.STATUS_FILE).write_text('{"built_at": 1}')
+    assert lb.read_status(str(tmp_path / "")) is None
+
+
+def test_status_goes_stale_when_roots_or_blender_change(library, tmp_path):
+    version = "5.3.0"
+    m = li.build_manifest([library.path], signature_extra=li.asset_signature(version))
+    lb.write_status(str(tmp_path), m, 1.0)
+    status = lb.read_status(str(tmp_path))
+    assert not lb.status_is_stale(status, [library.path], version)
+    assert not lb.status_is_stale(status, [library.path, library.path, "/not/a/dir", ""], version)   # same effective roots
+    assert lb.status_is_stale(status, [library.path, str(tmp_path)], version)
+    assert lb.status_is_stale(status, [library.path], "5.0.1")
+    assert lb.status_is_stale(status, [], version)
+
+
+def test_progress_is_one_monotonic_bar_across_the_phases():
+    marks = [lb.progress_fraction(p, d, 10) for p, d in
+             [("reading", 0), ("reading", 10), ("classifying", 0), ("classifying", 10), ("assets", 0), ("assets", 10)]]
+    assert marks == sorted(marks) and marks[0] == 0.0 and marks[-1] == pytest.approx(1.0)
+    assert lb.progress_fraction("assets", 0, 0) == 1.0                  # an empty phase is complete, not a division error
+
+
+def test_the_report_summarizes_the_build(manifest):
+    lines = lb.report_lines(manifest, {"written": 3, "unchanged": 0, "removed": 1,
+                                       "child": {"blender": "5.3.0", "assets": 4, "placeholders": 3, "failed": 0}},
+                            9.87, "Poser Morph Packages (created)")
+    text = "\n".join(lines)
+    assert "4 package(s) in 3 folder(s)" in text and "3 written, 0 unchanged, 1 removed" in text
+    assert "shown:  injection 3, removal 1" in text and "hidden: other 1, pose 2" in text
+    assert "Incomplete packages (1" in text and "[INCOMPLETE: 1 of 2 files missing]" in text
+    assert "created" in text and "Child Blender 5.3.0: 4 asset(s), 3 placeholder(s)" in text
