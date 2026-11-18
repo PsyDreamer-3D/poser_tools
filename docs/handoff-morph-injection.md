@@ -654,7 +654,7 @@ Verified headless on the real Aiko3: applied EarFeline, EarDeer and BrowHeavy, t
 via its `RemDeltas.*`; all three gone, the record empty, and a repeat run reports "not present"
 with no error.
 
-## Phase 7 — Thumbnail library for picking packages (scoping, 2026-11-14; 7.0, 7.0b, 7.1, 7.2, 7.3 done; 7.4+ not started)
+## Phase 7 — Thumbnail library for picking packages (scoping, 2026-11-14; 7.0 to 7.3 done; 7.4 built, pending owner GUI test; 7.5+ not started)
 
 **Goal.** Replace the two `prop_search()` dropdowns with a thumbnail grid for choosing injection and
 removal packages from the owner's Poser Runtime libraries, using Blender's Asset Shelf. The
@@ -870,8 +870,9 @@ The cache and the picker fix today's pain and don't depend on the library, so th
 - **7.3** Library index: classifier + per-folder asset `.blend` files + registered library + a
   Preferences build button. No shelf. Plan below (scoped 2026-11-15, not built); three commits,
   one PR.
-- **7.4** Shelf + activate operator → opens the (7.2) dialog pre-filled. Dropdowns stay for setups
-  with no Runtime roots or no index built yet.
+- **7.4** Built 2026-11-17 (details below): using a package from the Asset Browser (right-click,
+  side panel) and from two shelves; injection opens the (7.2) dialog pre-filled, removal runs.
+  Dropdowns stay for setups with no Runtime roots or no index built yet.
 - **7.5** Figure shelf: pick a CR2 with a thumbnail, sets `poser_reference_cr2`.
 - **7.6** Phase 5 tie-in: resolved morph names in the asset description, searchable in the browser.
 
@@ -1410,7 +1411,8 @@ here (status read/write/cache/damage, staleness, the progress mapping, the repor
 - **Custom keys read live through a shelf.** Readable through `bpy.data.libraries.load()` (prototype),
   but through the shelf's `AssetRepresentation` only the demo script ever showed them. If it fails,
   the payload falls back to the description string. Settled in 7.4, but the format is chosen here, so
-  the description holds the path too.
+  the description holds the path too. *Settled (7.4): read live through `context.asset.metadata` in a
+  5.3 Asset Browser.*
 - **Asset Browser with ~4,000 assets in 139 files.** The prototype read 2,346 entries in 88 files and
   10,000 stand-ins in one file without trouble; this exact size was not opened in the GUI.
 - **A package whose leaf is read from a stale cache** (leaf changed but its mtime did not): accepted,
@@ -1419,6 +1421,66 @@ here (status read/write/cache/damage, staleness, the progress mapping, the repor
   background auto-rebuild when roots change (the index is rebuilt on demand, and Preferences says
   when it is stale, since a surprise 10 to 60 s build on startup is worse than a stale tile);
   indexing figures (7.5); indexing poses and expressions (decision 1).
+
+### 7.4 as built: using a package from the Asset Browser and the shelf (2026-11-17)
+
+The 7.3 index could be browsed but not used. The owner asked for the Asset Browser itself to
+apply packages, not only a shelf, so 7.4 covers both with one operator.
+
+**Probed first, live (Blender 5.3 window, throwaway `BLENDER_USER_CONFIG`, the owner's real
+3,814-asset library):** `context.asset.metadata.get("poser_rel_path")` (and `poser_root`,
+`poser_kind`) returns the values written by the child for an *external* asset; tags, description
+and `id_type == 'SCENE'` read back; `context.selected_assets` and `context.asset` work in the
+Asset Browser; the view layer's active object is reachable from there. Blender's own asset index
+cache (`~/.cache/blender/asset-library-indices/`) stores the keys under `user_properties`. This
+settles the 7.3 risk "custom keys read live": the description fallback is kept only as a safety
+net. Blender's own brush shelf filters on `asset.metadata.get(...)` the same way.
+
+**What exists for acting on an asset (5.0.1 UI scripts and RNA, read, not assumed):**
+`ASSETBROWSER_MT_context_menu` can be appended to; Asset Browser side-panel panels use
+`bpy_extras.asset_utils.AssetBrowserPanel` in the `TOOL_PROPS` region; `AssetShelf` has
+`bl_activate_operator`, `bl_drag_operator` and a `draw_context_menu` classmethod (the pose library
+uses all three). **There is no Python hook for an asset dropped from the Asset Browser** (the only
+drop handlers are `FileHandler`s, for files from the OS), and none for a double click. So the
+Asset Browser gets a right-click entry and a side-panel button, not drag-and-drop.
+
+**As built:**
+
+- `poser.use_morph_package` (`operators/useMorphPackage.py`, `INTERNAL`, no `UNDO` of its own:
+  it only starts Apply, the picker or Remove, which push their own undo steps). Reads the asset
+  through `context_asset()` (one function, so a headless check can supply one; `temp_override(asset=…)`
+  takes no Python stand-in), resolves it with `core/library_build.resolve_package_asset()` (the
+  recorded root first, then every configured root, so a moved mount still works; plain Python,
+  pytest-covered), and acts on the active mesh:
+  - **injection**, mesh already has `poser_reference_obj` → straight to the 7.2 morph picker;
+  - **injection**, first package on this mesh → Apply's popup with the package already picked in
+    its list (Apply's `invoke()` now pre-selects a passed `injection_filepath`), so only the figure
+    is left to choose. Either way there is still an OK before the mesh changes (decision 2);
+  - **removal** → Remove runs straight away (`call_nested(..., execution='EXEC_DEFAULT')`). Remove
+    only deletes the package's own shape keys, its report lists them, and it is one Ctrl+Z. This
+    departs from decision 2's "one extra click" for the removal side only; proposed to the owner,
+    not yet confirmed. A confirm popup is a few lines if wanted.
+- `call_nested()` takes `execution`; Remove now reports through `say()` like Apply and the picker,
+  so its messages show when the shelf starts it.
+- `ui/packageAssets.py`: the right-click entry (**Apply to Active Mesh...** / **Remove from
+  Active Mesh**, drawn only for our assets), a **Poser Morph Package** side panel in the Asset
+  Browser (kind, which mesh it will act on, the button), and two 3D Viewport shelves,
+  `VIEW3D_AST_poser_injection_packages` and `VIEW3D_AST_poser_removal_packages` (`filter_scene`,
+  `asset_poll` on the kind, `NO_ASSET_DRAG` since a Scene stand-in has nowhere to drop, Object Mode
+  with a mesh active). Not `DEFAULT_VISIBLE`, same as the pose library's shelf: the shelf region is
+  opened from the viewport's **View → Asset Shelf**, rather than taking space under every mesh.
+
+**Verified:** registration and unregistration on 5.0.1, 5.2.4 and 5.3.0; resolver tests (own keys,
+tag/description fallback incl. the `[INCOMPLETE: …]` prefix, a moved root, a missing package,
+someone else's asset); headless on 5.0.1 with a real Aiko3 import and a stand-in asset: poll
+accepts ours and refuses others, removal through the operator removed `BrowHeavy` (1/1, report
+written), injection reached Apply with the package path, the picker branch was taken when a figure
+was remembered, and a missing package gives a message naming where it looked.
+
+**Not verified (needs the GUI):** the right-click entry and side panel appearing, `context.asset`
+being the right-clicked asset, a shelf click reaching the operator with `context.asset` set, how two
+shelves share the viewport's shelf region, the dialogs opening from the Asset Browser's area, and
+Ctrl+Z after a removal from the shelf.
 
 ### Decisions
 
@@ -1481,8 +1543,8 @@ same-named assets from different files.
 
 ### Still unverified
 
-Live reading of custom `asset_data` keys through the shelf's `asset.metadata` (same struct; the
-updated demo script now displays them on click, so the owner's next run will show it); shelf
+~~Live reading of custom `asset_data` keys through `asset.metadata`~~ (read live in a 5.3 Asset
+Browser, 7.4; the shelf hands the same `AssetRepresentation`, not yet clicked live); shelf
 behavior for same-named assets across files; the Asset Browser with 10k+ Image assets in a real
 session; applying the 259-morph Victoria 3 head package (no V3 figure here, so per-morph cost at
 that size is extrapolated); the asset API's stability (5.3 added projects/remote-library
