@@ -239,7 +239,11 @@ don't resume it without a specific reason to.
   Poser's own category folders under `Runtime/Libraries` (`POSER_LIBRARY_CATEGORIES`: pose, face, ...)
   are entries, as in Poser's Library palette: vendor folders beside them (`!DAZ`, `!Adz`) hold the files
   packages `readScript`, and a file-name rule alone missed `!Adz`'s `<morph>.InjDeltas.pz2` naming.
-  The Apply/Remove dropdowns still list those files on purpose (manual escape hatch). `core/library_build.py` turns it into asset `.blend` files by running
+  The Apply/Remove dropdowns still list those files on purpose (manual escape hatch). Catalogs are
+  `<Runtime>/<Category>/...` like Poser's Library palette: the Runtime's Preferences Label, else its folder
+  name (`runtime_names()`), and the category folder's first letter capitalized (`pose`/`Pose` merged).
+  The names are layout (`manifest["layout"]`, outside the signature), so a renamed Label reuses every
+  classification and rewrites only that Runtime's files; `status_is_stale()` compares the layout too. `core/library_build.py` turns it into asset `.blend` files by running
   `core/library_assets_child.py` in a **child Blender process** (never in the user's session: building
   asset-marked stand-ins there would touch their file, undo stack and UI), writes the catalog file, saves
   the manifest last, and registers the folder as an asset library (`ensure_asset_library`, which must
@@ -329,7 +333,7 @@ Everything else is manual smoke test only — no `bpy`-dependent code has automa
    writing asset files), Esc cancels and changes nothing; on success an INFO message, a **Poser Library
    Index Report** text block, and the panel shows the package count, thumbnail/placeholder counts and
    "registered". An Asset Browser pointed at **Poser Morph Packages** shows the packages by folder.
-   Run it again: seconds, "0 written". Change the Runtime folders: the panel says rebuild.
+   Run it again: seconds, "0 written". Change the Runtime folders or a Label: the panel says to update; a renamed Label rewrites only that Runtime's files. The Asset Browser lists one catalog per Runtime, each with a capitalized category (Pose) below.
 6c. With that library built and a mesh active: in the Asset Browser, right-click a package →
    **Apply to Active Mesh...** (or the button in the side panel's **Poser Morph Package** box) opens the
    morph picker (or Apply's popup with the package picked, on a mesh never injected into); a removal

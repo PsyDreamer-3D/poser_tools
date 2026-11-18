@@ -1538,6 +1538,23 @@ does take a double-click, on our assets, it replaces Blender's `file.select(open
 The item is listed in Preferences → Keymap → File Browser → File Browser Main, where a user can turn it
 off.
 
+**Catalogs grouped by Runtime (owner, same day).** The catalog tree showed `Pose` and `pose` side by
+side: two Runtimes spell the category folder differently, and catalogs are case-sensitive. The owner's
+call: put each Runtime on top, the way Poser's Library palette lists them, and capitalize the first
+letter of the category folder. Catalogs are now `<Runtime>/<Category>/<folders below>`
+(`library_index.catalog_path(category, runtime_name)`); only the category segment is capitalized,
+vendor folders below keep their spelling. The Runtime name is the root's **Label** from Preferences
+if set, else its folder name (`runtime_names()`; a clash, compared ignoring case, appends the parent
+folder, then a number). The names are layout, not classification: the manifest records them as
+`"layout"`, outside the signature, so renaming a Label reuses every classified answer and rewrites only
+that Runtime's asset files (their folder hash covers the catalog). `status.json` stores the layout too,
+and `status_is_stale()` compares it, so Preferences asks for an update after a rename, and an index
+from before this change (no layout) reads as stale. No `MANIFEST_VERSION` bump was needed. Real
+library (13 roots), built into a scratch folder with the real child on 5.3: 3,783 assets in 129 files,
+0 failures, 14.9 s cold-ish; packages sit under 6 Runtimes (Base Figures 3,530, Scenes, Props and
+Objects 140, Custom Character Sets 63, Poses 43, Hair 5, PsyDreamer3D 2), every one with a single
+`Pose` below it; looked at in a real Asset Browser.
+
 **GUI items above** (right-click entry, side panel, shelf clicks, dialogs from the Asset Browser):
 confirmed by the owner's test. Still not exercised: Windows/macOS.
 
