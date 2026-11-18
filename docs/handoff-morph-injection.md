@@ -1509,8 +1509,20 @@ reference, not ours by name.) The owner's browser was simply opened or switched 
 Fix: `libraryIndex._refresh_open_asset_lists()`, called from Build Library Index's `_finish`, runs
 `asset.library_refresh` in every open Asset Browser and every 3D Viewport shelf region whose poll
 passes (a shelf that never loaded a list reads fresh when first shown). Verified the same way: it
-refreshed 2 views and the stale tiles went. A failure is reported as a warning naming Blender's own
-**Refresh Asset Library**; the index itself is unaffected. Only probed on 5.3.
+refreshed 2 views and the stale tiles went. Only probed on 5.3.
+
+*Correction (owner's GUI run):* called from `_finish`, the refresh raised `TypeError: Overriding context
+with an active temporary screen isn't supported`. The build is started from the Preferences window,
+whose screen is temporary, and Blender refuses a `temp_override` from there into another window's
+screen; the probes had called the helper from a timer, so they never saw it. The exception also skipped
+the build's INFO message and report (the refresh ran before them), and it got through because only
+`RuntimeError` was caught. Reproduced in a throwaway 5.3 window with `screen.userpref_show()`. Fixed by
+running it last and deferred: `refresh_open_asset_lists_later()` registers a one-shot
+`bpy.app.timers` callback, whose context holds the main window even right after events in the
+Preferences window (probed with `event_simulate` there first): it refreshed the open shelf, no error.
+The helper also skips temporary-screen windows. A failure inside the timer (`RuntimeError`/`TypeError`) is
+appended to the **Poser Library Index Report** with the **Refresh Asset Library** hint, since the
+operator's own report is already out by then.
 
 **Double-click in the Asset Browser (owner, same day).** The owner noticed a shelf click acts but an
 Asset Browser click doesn't (a click there is Blender's own selection), and had already noted that

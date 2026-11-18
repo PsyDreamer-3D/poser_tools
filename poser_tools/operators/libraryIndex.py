@@ -76,9 +76,16 @@ def _refresh_open_asset_lists(context) -> int:
     asset.library_refresh is the only way in (no data API for it), and it acts on the asset list of
     the region it runs in, hence one call per Asset Browser and per shelf region. Its poll is False
     for a shelf that never loaded a list, which then reads fresh when first shown.
+
+    `context` must not be inside a temporary-screen window: from the Preferences window, where
+    the build is started, temp_override raises "Overriding context with an active temporary
+    screen isn't supported" (owner's report, reproduced on 5.3). Call it through
+    refresh_open_asset_lists_later(), whose timer runs with no window in context.
     """
     refreshed = 0
     for window in context.window_manager.windows:
+        if window.screen.is_temporary:     # Preferences, file dialogs: no asset views to refresh
+            continue
         for area in window.screen.areas:
             if area.type == 'FILE_BROWSER' and area.ui_type == 'ASSETS':
                 region_type = 'WINDOW'
@@ -94,6 +101,24 @@ def _refresh_open_asset_lists(context) -> int:
                     bpy.ops.asset.library_refresh()
                     refreshed += 1
     return refreshed
+
+
+def _refresh_from_timer():
+    try:
+        _refresh_open_asset_lists(bpy.context)
+    except (RuntimeError, TypeError) as exc:
+        # The index is fine; only what is on screen may be out of date. The build's own report
+        # is already out by now, so the reason goes into its text block.
+        report = bpy.data.texts.get(_REPORT_TEXT)
+        if report is not None:
+            report.write(f"\nCouldn't refresh the open Asset Browsers and shelves ({type(exc).__name__}: {exc}). "
+                         "Right-click in the Asset Browser and choose Refresh Asset Library.\n")
+    return None                            # run once
+
+
+def refresh_open_asset_lists_later():
+    """Refresh the open asset views just after the current operator returns, outside any window."""
+    bpy.app.timers.register(_refresh_from_timer, first_interval=0.0)
 
 
 class OT_BuildLibraryIndex_Operator(bpy.types.Operator):
@@ -192,13 +217,6 @@ class OT_BuildLibraryIndex_Operator(bpy.types.Operator):
         # makes the files appear in the Asset Browser. Only ever done from this explicit click.
         _library, action = library_build.ensure_asset_library(
             context.preferences.filepaths.asset_libraries, LIBRARY_NAME, job.out_dir)
-        if not bpy.app.background:
-            try:
-                _refresh_open_asset_lists(context)
-            except RuntimeError as exc:
-                # The index itself is fine; only what is on screen may be out of date.
-                self.report({'WARNING'}, f"Couldn't refresh the open asset views ({exc}). "
-                            "Right-click in the Asset Browser and choose Refresh Asset Library.")
         _write_report(context, _REPORT_TEXT, library_build.report_lines(
             job.manifest, job.result, job.seconds, f"{LIBRARY_NAME!r} {action} at {job.out_dir}"))
 
@@ -207,6 +225,10 @@ class OT_BuildLibraryIndex_Operator(bpy.types.Operator):
             f"Library index built: {stats['shown']} package(s) in {stats['folders']} folder(s), "
             f"{job.result['written']} file(s) written, {job.seconds:.0f}s. "
             f"Open the Asset Browser and pick '{LIBRARY_NAME}'. See the '{_REPORT_TEXT}' text block."))
+        if not bpy.app.background:
+            # Last, and deferred: this runs from the Preferences window, whose context can't be
+            # overridden into another window's screen.
+            refresh_open_asset_lists_later()
         return {'FINISHED'}
 
 
