@@ -26,7 +26,9 @@ Standard scaffold layout. Two things worth knowing:
   and `tests/test_poser_paths.py`.
   `core/cr2/obj_io.py`, `core/cr2/mesh_correspondence.py`, `core/cr2/injection_package.py`,
   `core/cr2/injection_scan.py` (a cheap brace-walking listing of a package's morphs for the picker;
-  must agree with `CR2Parser`, see its tests), and `core/cr2/apply_injection.py` (morph-injection Phases 1 and 3, see below) live in the same package
+  must agree with `CR2Parser`, see its tests), `core/cr2/library_index.py` (Phase 7.3a: classifies
+  the owner's whole Poser library into injection/removal entries and builds the asset-index
+  manifest; same rule, its sniff is tested against the parser), and `core/cr2/apply_injection.py` (morph-injection Phases 1 and 3, see below) live in the same package
   but are original `poser_tools` code, not adapted from `cr2_importer` — GPL-3.0-or-later, not MIT.
   Same no-`bpy` / plain-`pytest` discipline (`tests/test_mesh_correspondence.py`,
   `tests/test_injection_package.py`, `tests/test_apply_injection.py`).
@@ -219,7 +221,34 @@ don't resume it without a specific reason to.
   own Runtime, since a package often names files that live in a different library, and a package
   that yields no morphs because its files weren't found now says so (`no_morphs_report()`). Phase 7
   (thumbnail library via Blender's Asset Shelf) is scoped in
-  `docs/handoff-morph-injection.md`; 7.0, 7.0b, 7.1 and 7.2 are built.
+  `docs/handoff-morph-injection.md`; 7.0, 7.0b, 7.1 and 7.2 are built, and 7.3a/7.3b (below).
+- Phase 7.3: the **library index** (7.3a/7.3b the engine, 7.3c the operator and Preferences UI; the shelf is 7.4).
+  `core/cr2/library_index.py` classifies the owner's whole Poser library (16,405 entries, ~10 s warm,
+  ~40 s cold) into injection/removal and builds a manifest of 3,816 shown entries in 133 source
+  folders, incrementally. `core/library_build.py` turns it into asset `.blend` files by running
+  `core/library_assets_child.py` in a **child Blender process** (never in the user's session: building
+  asset-marked stand-ins there would touch their file, undo stack and UI), writes the catalog file, saves
+  the manifest last, and registers the folder as an asset library (`ensure_asset_library`, which must
+  check for an existing entry: `new()` twice makes `Name.001`). Everything goes under
+  `user_resource('CONFIG', 'poser_tools/library')`, never into the Poser content. `core/library_build.py`
+  has no module-level `bpy` so it is pytest-able; the child itself is verified by running it, headless,
+  on 5.0.1, 5.2.4 and 5.3.0 and reading every asset back. **Stand-ins are `Scene`s, and must stay a type
+  the Asset Browser lists** (Action, Brush, Collection, Material, Node Tree, Object, Scene, World): an
+  `Image` library registers, shows its catalogs and then "No items", which no headless check can see.
+  Scene was picked because it has no drop target and no other consumer; Object/World/Material are drop
+  targets, Action feeds the Pose Library, NodeTree the Add menus. A removal is a channel that
+  re-declares its delta list empty (`indexes 0`), not just `name -`: `Hide.*` visibility files have
+  `name -` too (`library_index.sniff_leaf`, `ScannedChannel.declares_deltas`). When the index changes,
+  look at it in a real Blender window (throwaway `BLENDER_USER_CONFIG`, screenshots), not only through
+  `bpy.data.libraries.load`. 7.3c: `poser.build_library_index`
+  (`operators/libraryIndex.py`, modal like Apply: a worker thread that never touches `bpy`, a timer on
+  the main thread for progress, Esc cancels, synchronous under `--background`) and
+  `poser.remove_library_entry`, driven from Preferences (`properties/poserToolsPreferences.py`
+  `_draw_library`). Build status is a small `status.json` beside the manifest so drawing never loads
+  the manifest; it goes stale when the roots, asset format or Blender version change. Registering the
+  library edits the user's preferences, so it happens only from that explicit click, on the main
+  thread. `INVOKE_DEFAULT` runs `execute()` under `--background`, so the interactive path is the same
+  `_work()` called inline; the modal wrapper itself needs the GUI.
 - Phase 7.2: **morph picker** (`poser.pick_injection_morphs`, `operators/pickInjectionMorphs.py`,
   `ui/pickInjectionMorphs.py`). Apply's popup (package + figure) hands over to a second dialog
   listing the package's morphs; its OK calls `poser.apply_morph_injection` with `selected_morphs`/
@@ -279,6 +308,12 @@ Everything else is manual smoke test only — no `bpy`-dependent code has automa
    mesh → the figure picker pre-fills the previous choice, reports "already present" for the same
    package, no duplicate keys, and now finishes almost instantly (the vertex correspondence is cached on
    the mesh; the report's **Vertex correspondence:** line says whether it was reused or built).
+6b. Preferences → Add-ons → Poser Tools, with Runtime folders set: **Build Library Index**. The
+   cursor shows a percentage and the status bar names the phase (reading files / classifying packages /
+   writing asset files), Esc cancels and changes nothing; on success an INFO message, a **Poser Library
+   Index Report** text block, and the panel shows the package count, thumbnail/placeholder counts and
+   "registered". An Asset Browser pointed at **Poser Morph Packages** shows the packages by folder.
+   Run it again: seconds, "0 written". Change the Runtime folders: the panel says rebuild.
 6. Same mesh → **Remove Morph Injection**, pick the same package's `RemDeltas.*` file (or the
    original `InjDeltas.*` one — either works) via the same searchable dropdown. Expect: near-instant
    (no correspondence build), the matching shape key(s) gone, a **Poser Morph Removal Report** text

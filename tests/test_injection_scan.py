@@ -200,3 +200,10 @@ def test_a_p_prefixed_label_counts_as_present_when_the_baked_key_has_no_p():
     morphs = [_morph("PBMBarbarian", "pBarbarian"), _morph("PBMRuben", "pRubenesque")]
     result = classify_morphs(morphs, ["Basis", "Barbarian"], lambda n: False)
     assert [s for _m, s in result] == [STATUS_PRESENT, ""]
+
+
+def test_a_channel_says_whether_it_declares_a_delta_list():
+    declared = _file(_actor("head:1", "\t\t\ttargetGeom A\n\t\t\t\t{\n\t\t\t\tname -\n\t\t\t\thidden 1\n\t\t\t\tindexes 0\n\t\t\t\t}\n"))
+    bare = _file(_actor("head:1", "\t\t\ttargetGeom A\n\t\t\t\t{\n\t\t\t\tname -\n\t\t\t\thidden 1\n\t\t\t\t}\n"))
+    assert [c.declares_deltas for c in scan_channels(declared)] == [True]
+    assert [c.declares_deltas for c in scan_channels(bare)] == [False]

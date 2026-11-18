@@ -219,3 +219,27 @@ def get_all_items(roots: List[str]) -> List[LibraryItem]:
                 seen.add(item.filepath)
                 result.append(item)
     return result
+
+
+def walk_roots(roots: List[str]) -> List[tuple]:
+    """Every supported file under the roots as (root, LibraryItem), with no cache.
+
+    For callers that need the root a file came from, or that run without Blender
+    (get_all_items() persists a cache through bpy). A full walk of 20 roots and
+    22,000 files takes ~0.3 s, so the cache buys little here. Same de-duplication
+    as get_all_items(): the first root wins for a file seen in more than one.
+    """
+    seen: set = set()
+    result: List[tuple] = []
+    for root in roots:
+        if not root:
+            continue
+        runtime_dir = _find_subdir_icase(root, "Runtime")
+        libraries_dir = _find_subdir_icase(runtime_dir, "Libraries") if runtime_dir else None
+        if libraries_dir is None:
+            continue
+        for item in _walk_libraries(libraries_dir):
+            if item.filepath not in seen:
+                seen.add(item.filepath)
+                result.append((root, item))
+    return result

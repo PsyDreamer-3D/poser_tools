@@ -3,6 +3,7 @@
 from .applyMorphInjection import OT_ApplyMorphInjection_Operator, PoserLibraryItem
 from .fixPoserShapekeys import OT_FixPoserShapekeys_Operator
 from .importPoserFBX import OT_ImportPoserFBX
+from .libraryIndex import OT_BuildLibraryIndex_Operator, OT_RemoveLibraryEntry_Operator
 from .pickInjectionMorphs import OT_PickInjectionMorphs_Operator, PoserMorphRow
 from .removeMorphInjection import OT_RemoveMorphInjection_Operator
 from .renameArmatureBones import OT_RenameArmatureBones_Operator, OT_PrefixArmatureBones_Operator
@@ -22,6 +23,8 @@ classes = (
     OT_ApplyMorphInjection_Operator,
     OT_PickInjectionMorphs_Operator,
     OT_RemoveMorphInjection_Operator,
+    OT_BuildLibraryIndex_Operator,
+    OT_RemoveLibraryEntry_Operator,
     OT_RenameArmatureBones_Operator,
     OT_PrefixArmatureBones_Operator,
     OT_RenameWeightGroups_Operator,
