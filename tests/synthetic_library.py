@@ -35,7 +35,11 @@ REM_HIDDEN_LEAF = _file(_actor(
 # La Femme's "REM ..." files: Poser commands for the binary-morph system, then visibility channels.
 PMD_REMOVAL_LEAF = ('{\nversion\n\t{\n\tnumber 11\n\t}\nremovePMDFileMorphs ":Runtime:Geometries:X:Y.pmd"\n'
                     'removeFullBodyMorph BodyFat\n}\n' + HIDE_NAMED_LEAF)
-OTHER_LEAF = _file(_actor("\t\t\trotateX xRotate\n\t\t\t\t{\n\t\t\t\tkeys\n\t\t\t\t\t{\n\t\t\t\t\tk 0 0\n\t\t\t\t\t}\n\t\t\t\t}\n"))
+OTHER_LEAF = _file(_actor("\t\t\tvalueParm Smile\n\t\t\t\t{\n\t\t\t\tkeys\n\t\t\t\t\t{\n\t\t\t\t\tk 0 0\n\t\t\t\t\t}\n\t\t\t\t}\n"))
+# A body pose: bone channels on the hip (V3 Spellcaster, and a Channing "Fit" package's hip offset).
+BONE_LEAF = _file(_actor("\t\t\trotateX xrot\n\t\t\t\t{\n\t\t\t\tkeys\n\t\t\t\t\t{\n\t\t\t\t\tk 0 11.828\n\t\t\t\t\t}\n\t\t\t\t}\n"
+                         "\t\t\ttranslateY ytran\n\t\t\t\t{\n\t\t\t\tkeys\n\t\t\t\t\t{\n\t\t\t\t\tk 0 0.0067\n\t\t\t\t\t}\n\t\t\t\t}\n",
+                         name="hip"))
 
 
 def _orchestrator(*targets):
