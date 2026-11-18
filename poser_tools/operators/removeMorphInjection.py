@@ -16,6 +16,7 @@ from .applyMorphInjection import (
     _save_injected_morphs_record,
     load_injected_morphs_record,
     no_morphs_report,
+    say,
 )
 
 _REPORT_TEXT = "Poser Morph Removal Report"
@@ -91,11 +92,11 @@ class OT_RemoveMorphInjection_Operator(bpy.types.Operator):
             if item is not None:
                 self.injection_filepath = item.filepath
             elif not self.injection_filepath:
-                self.report({'ERROR'}, f"{self.selected_injection_name!r} doesn't match a package in your Poser library.")
+                say(self, {'ERROR'}, f"{self.selected_injection_name!r} doesn't match a package in your Poser library.")
                 return {'CANCELLED'}
 
         if not os.path.isfile(self.injection_filepath):
-            self.report({'ERROR'}, f"Injection file not found: {self.injection_filepath!r}")
+            say(self, {'ERROR'}, f"Injection file not found: {self.injection_filepath!r}")
             return {'CANCELLED'}
 
         pkg = load_injection_package(
@@ -105,7 +106,7 @@ class OT_RemoveMorphInjection_Operator(bpy.types.Operator):
         internal_names = list(index["by_internal"].keys())
 
         if not internal_names:
-            self.report(*no_morphs_report(pkg))
+            say(self, *no_morphs_report(pkg))
             return {'CANCELLED'}
 
         shapekeys = obj.data.shape_keys.key_blocks
@@ -190,5 +191,5 @@ class OT_RemoveMorphInjection_Operator(bpy.types.Operator):
         _write_report(context, _REPORT_TEXT, lines)
 
         summary = f"Removed {len(removed)}/{len(internal_names)} morph(s) from {os.path.basename(self.injection_filepath)}"
-        self.report({'INFO'}, f"{summary} — see the '{_REPORT_TEXT}' text block.")
+        say(self, {'INFO'}, f"{summary} — see the '{_REPORT_TEXT}' text block.")
         return {'FINISHED'}

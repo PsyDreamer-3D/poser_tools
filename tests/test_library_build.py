@@ -283,3 +283,44 @@ def test_the_report_summarizes_the_build(manifest):
     assert "shown:  injection 3, removal 1" in text and "hidden: other 1, pose 2" in text
     assert "Incomplete packages (1" in text and "[INCOMPLETE: 1 of 2 files missing]" in text
     assert "created" in text and "Child Blender 5.3.0: 4 asset(s), 3 placeholder(s)" in text
+
+
+# --- 7.4: from an asset back to its package -----------------------------------------------
+
+def _package(tmp_path, rel="Runtime/libraries/pose/Pack/InjDeltas.Foo.pz2"):
+    root = tmp_path / "Content"
+    path = root.joinpath(*rel.split("/"))
+    path.parent.mkdir(parents=True)
+    path.write_text("{}")
+    return str(root), rel, str(path)
+
+
+def test_an_asset_resolves_through_its_own_keys(tmp_path):
+    root, rel, path = _package(tmp_path)
+    fields = {"poser_root": root, "poser_rel_path": rel, "poser_kind": "injection"}
+    assert lb.resolve_package_asset(fields, rel, ["injection", "poser"], []) == (path, "injection", "")
+
+
+def test_without_its_keys_an_asset_falls_back_to_tags_and_description(tmp_path):
+    root, rel, path = _package(tmp_path)
+    description = f"[INCOMPLETE: 1 of 3 files missing] {rel}"
+    assert lb.resolve_package_asset({}, description, ["removal", "poser"], [root]) == (path, "removal", "")
+
+
+def test_a_moved_root_is_found_among_the_configured_ones(tmp_path):
+    root, rel, path = _package(tmp_path)
+    fields = {"poser_root": str(tmp_path / "Old Mount"), "poser_rel_path": rel, "poser_kind": "injection"}
+    assert lb.resolve_package_asset(fields, rel, [], ["/elsewhere", root])[0] == path
+
+
+def test_a_missing_package_says_where_it_looked(tmp_path):
+    fields = {"poser_root": str(tmp_path), "poser_rel_path": "Runtime/x.pz2", "poser_kind": "removal"}
+    path, kind, problem = lb.resolve_package_asset(fields, "", [], [str(tmp_path / "b")])
+    assert (path, kind) == ("", "removal")
+    assert "Runtime/x.pz2" in problem and str(tmp_path) in problem and "1 other" in problem
+
+
+def test_other_assets_are_not_packages():
+    assert lb.package_kind({}, ["injection"]) == ""           # someone else's tag, no "poser"
+    assert lb.package_kind({"poser_kind": "pose"}, []) == ""
+    assert lb.resolve_package_asset({}, "Runtime/x.pz2", [], [])[2]

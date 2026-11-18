@@ -75,17 +75,19 @@ def say(operator, types, message):
     operator.report(types, message)
 
 
-def call_nested(operator, op_call, **kwargs):
+def call_nested(operator, op_call, execution='INVOKE_DEFAULT', **kwargs):
     """Run another operator with bpy.ops and show what it reported, from `operator`.
 
     `operator` must be one the UI invoked itself, so its reports are shown. An ERROR report
     raises RuntimeError out of bpy.ops; that is swallowed only when the nested operator
-    reported something, since any other RuntimeError is a real failure.
+    reported something, since any other RuntimeError is a real failure. `execution`
+    'EXEC_DEFAULT' skips the nested operator's own dialog when the caller already has its
+    answers. Only operators that report through say() can have their messages passed on.
     """
     global _last_report
     _last_report = None
     try:
-        result = op_call('INVOKE_DEFAULT', **kwargs)
+        result = op_call(execution, **kwargs)
     except RuntimeError:
         if _last_report is None:
             raise
@@ -197,6 +199,10 @@ class OT_ApplyMorphInjection_Operator(bpy.types.Operator):
         self.selected_cr2_name = ""
         self.selected_injection_name = ""
 
+        # A caller that already knows the package (a library asset, operators/useMorphPackage.py)
+        # passes its path; it is shown picked in the list below rather than in the path field.
+        given_package = os.path.normcase(self.injection_filepath) if self.injection_filepath else ""
+
         roots = get_runtime_roots(context)
         if roots:
             remembered_cr2 = obj.get(_REFERENCE_CR2_PROP, "")
@@ -212,11 +218,16 @@ class OT_ApplyMorphInjection_Operator(bpy.types.Operator):
                     entry = self.injection_library_items.add()
                     entry.name = display_name
                     entry.filepath = lib_item.filepath
+                    if given_package and os.path.normcase(lib_item.filepath) == given_package:
+                        self.selected_injection_name = display_name
 
         if self.selected_cr2_name:
             # The remembered figure is pre-selected and its OBJ is resolved from it, so the OBJ
             # field stays empty: a pre-filled one would override a different figure picked here.
             self.reference_obj_filepath = ""
+        if self.selected_injection_name:
+            # Same for the package: picked in the list, so the path field would only say "ignored".
+            self.injection_filepath = ""
 
         return context.window_manager.invoke_props_dialog(self, width=500)
 
