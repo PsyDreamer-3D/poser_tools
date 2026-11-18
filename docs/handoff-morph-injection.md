@@ -654,7 +654,7 @@ Verified headless on the real Aiko3: applied EarFeline, EarDeer and BrowHeavy, t
 via its `RemDeltas.*`; all three gone, the record empty, and a repeat run reports "not present"
 with no error.
 
-## Phase 7 — Thumbnail library for picking packages (scoping, 2026-11-14; 7.0, 7.0b, 7.1, 7.2, 7.3 done; 7.4+ not started)
+## Phase 7 — Thumbnail library for picking packages (scoping, 2026-11-14; 7.0 to 7.4 done; 7.5+ not started)
 
 **Goal.** Replace the two `prop_search()` dropdowns with a thumbnail grid for choosing injection and
 removal packages from the owner's Poser Runtime libraries, using Blender's Asset Shelf. The
@@ -870,8 +870,9 @@ The cache and the picker fix today's pain and don't depend on the library, so th
 - **7.3** Library index: classifier + per-folder asset `.blend` files + registered library + a
   Preferences build button. No shelf. Plan below (scoped 2026-11-15, not built); three commits,
   one PR.
-- **7.4** Shelf + activate operator → opens the (7.2) dialog pre-filled. Dropdowns stay for setups
-  with no Runtime roots or no index built yet.
+- **7.4** Built 2026-11-17 (details below): using a package from the Asset Browser (right-click,
+  side panel) and from two shelves; injection opens the (7.2) dialog pre-filled, removal runs.
+  Dropdowns stay for setups with no Runtime roots or no index built yet.
 - **7.5** Figure shelf: pick a CR2 with a thumbnail, sets `poser_reference_cr2`.
 - **7.6** Phase 5 tie-in: resolved morph names in the asset description, searchable in the browser.
 
@@ -1410,7 +1411,8 @@ here (status read/write/cache/damage, staleness, the progress mapping, the repor
 - **Custom keys read live through a shelf.** Readable through `bpy.data.libraries.load()` (prototype),
   but through the shelf's `AssetRepresentation` only the demo script ever showed them. If it fails,
   the payload falls back to the description string. Settled in 7.4, but the format is chosen here, so
-  the description holds the path too.
+  the description holds the path too. *Settled (7.4): read live through `context.asset.metadata` in a
+  5.3 Asset Browser.*
 - **Asset Browser with ~4,000 assets in 139 files.** The prototype read 2,346 entries in 88 files and
   10,000 stand-ins in one file without trouble; this exact size was not opened in the GUI.
 - **A package whose leaf is read from a stale cache** (leaf changed but its mtime did not): accepted,
@@ -1419,6 +1421,154 @@ here (status read/write/cache/damage, staleness, the progress mapping, the repor
   background auto-rebuild when roots change (the index is rebuilt on demand, and Preferences says
   when it is stale, since a surprise 10 to 60 s build on startup is worse than a stale tile);
   indexing figures (7.5); indexing poses and expressions (decision 1).
+
+### 7.4 as built: using a package from the Asset Browser and the shelf (2026-11-17)
+
+The 7.3 index could be browsed but not used. The owner asked for the Asset Browser itself to
+apply packages, not only a shelf, so 7.4 covers both with one operator.
+
+**Probed first, live (Blender 5.3 window, throwaway `BLENDER_USER_CONFIG`, the owner's real
+3,814-asset library):** `context.asset.metadata.get("poser_rel_path")` (and `poser_root`,
+`poser_kind`) returns the values written by the child for an *external* asset; tags, description
+and `id_type == 'SCENE'` read back; `context.selected_assets` and `context.asset` work in the
+Asset Browser; the view layer's active object is reachable from there. Blender's own asset index
+cache (`~/.cache/blender/asset-library-indices/`) stores the keys under `user_properties`. This
+settles the 7.3 risk "custom keys read live": the description fallback is kept only as a safety
+net. Blender's own brush shelf filters on `asset.metadata.get(...)` the same way.
+
+**What exists for acting on an asset (5.0.1 UI scripts and RNA, read, not assumed):**
+`ASSETBROWSER_MT_context_menu` can be appended to; Asset Browser side-panel panels use
+`bpy_extras.asset_utils.AssetBrowserPanel` in the `TOOL_PROPS` region; `AssetShelf` has
+`bl_activate_operator`, `bl_drag_operator` and a `draw_context_menu` classmethod (the pose library
+uses all three). **There is no Python hook for an asset dropped from the Asset Browser** (the only
+drop handlers are `FileHandler`s, for files from the OS). The asset API has no click hook in the
+Asset Browser either, but an add-on *keymap* item is one (see "Double-click" below; this paragraph
+first said there was none). So the Asset Browser gets a right-click entry, a side-panel button and
+a double-click, not drag-and-drop.
+
+**As built:**
+
+- `poser.use_morph_package` (`operators/useMorphPackage.py`, `INTERNAL`, no `UNDO` of its own:
+  it only starts Apply, the picker or Remove, which push their own undo steps). Reads the asset
+  through `context_asset()` (one function, so a headless check can supply one; `temp_override(asset=…)`
+  takes no Python stand-in), resolves it with `core/library_build.resolve_package_asset()` (the
+  recorded root first, then every configured root, so a moved mount still works; plain Python,
+  pytest-covered), and acts on the active mesh:
+  - **injection**, mesh already has `poser_reference_obj` → straight to the 7.2 morph picker;
+  - **injection**, first package on this mesh → Apply's popup with the package already picked in
+    its list (Apply's `invoke()` now pre-selects a passed `injection_filepath`), so only the figure
+    is left to choose. Either way there is still an OK before the mesh changes (decision 2);
+  - **removal** → Remove runs straight away (`call_nested(..., execution='EXEC_DEFAULT')`). Remove
+    only deletes the package's own shape keys, its report lists them, and it is one Ctrl+Z. This
+    departs from decision 2's "one extra click" for the removal side only; proposed to the owner,
+    not yet confirmed. A confirm popup is a few lines if wanted.
+- `call_nested()` takes `execution`; Remove now reports through `say()` like Apply and the picker,
+  so its messages show when the shelf starts it.
+- `ui/packageAssets.py`: the right-click entry (**Apply to Active Mesh...** / **Remove from
+  Active Mesh**, drawn only for our assets), a **Poser Morph Package** side panel in the Asset
+  Browser (kind, which mesh it will act on, the button), and two 3D Viewport shelves,
+  `VIEW3D_AST_poser_injection_packages` and `VIEW3D_AST_poser_removal_packages` (`filter_scene`,
+  `asset_poll` on the kind, `NO_ASSET_DRAG` since a Scene stand-in has nowhere to drop, Object Mode
+  with a mesh active). Not `DEFAULT_VISIBLE`, same as the pose library's shelf: the shelf region is
+  opened from the viewport's **View → Asset Shelf**, rather than taking space under every mesh.
+
+**Verified:** registration and unregistration on 5.0.1, 5.2.4 and 5.3.0; resolver tests (own keys,
+tag/description fallback incl. the `[INCOMPLETE: …]` prefix, a moved root, a missing package,
+someone else's asset); headless on 5.0.1 with a real Aiko3 import and a stand-in asset: poll
+accepts ours and refuses others, removal through the operator removed `BrowHeavy` (1/1, report
+written), injection reached Apply with the package path, the picker branch was taken when a figure
+was remembered, and a missing package gives a message naming where it looked.
+
+**Owner GUI test (2026-11-17):** the Asset Browser right-click entry, side panel and both shelves
+work. The owner notes the right-click entry isn't where a user would look first, but it is enough
+for now.
+
+**Category-folder rule (owner, same test).** The library listed `.pz2` files from vendor folders
+directly under `Runtime/libraries` (`!Adz/HiroGen/FrenulumAsymmetric.InjDeltas.pz2`). Those are
+the files a package under `pose` `readScript`s, not packages to apply on their own, and Poser's
+Library palette never shows them: it lists only its category folders. 7.3a only hid leaf files
+by name (`InjDeltas.*`/`RemDeltas.*` prefix, or a `Deltas` folder), which caught `!DAZ` but not
+`!Adz`'s `<morph>.InjDeltas.pz2` naming. Now an entry must also be inside one of Poser's
+category folders (`library_index.POSER_LIBRARY_CATEGORIES`: camera, character, face, hair, hand,
+light, materials, pose, props, scene; matched ignoring case). `MANIFEST_VERSION` 3, so an existing
+index shows as needing a rebuild. Measured on the owner's 13 current roots, rebuilt in memory
+(9.9 s): 3,814 → 3,783 shown, 132 → 129 folders; the 31 dropped are exactly the out-of-category
+ones (`!Adz` 28, `Posermatic-INJ` 2, `Morphs` 1), all 31 are read by a package under `pose` (so
+none becomes unreachable), nothing was added and no kept entry was renamed. The Apply/Remove
+dropdowns (`runtime_index`) still list vendor-folder files: they are the manual fallback, and picking a
+single leaf there is deliberate.
+
+**Stale shelf after a rebuild (owner, same day).** After the category-folder Update, the Asset
+Browser no longer listed the `!Adz` packages but the shelf still did. On disk the update was right
+(version 3, 3,783 entries, the `!Adz` file gone). Probed on 5.3 against a scratch copy of the library,
+shelf search narrowed to one folder's 3 assets, then that folder's `.blend` deleted: with no refresh
+the shelf keeps all 3 tiles indefinitely; `asset.library_refresh` run in an Asset Browser *or* in the
+shelf's own `ASSET_SHELF` region clears them. So there is no separate on-disk cache: Blender keeps
+the loaded list in memory and doesn't watch the folder. (The shelf lists the "All Libraries"
+reference, not ours by name.) The owner's browser was simply opened or switched after the update.
+Fix: `libraryIndex._refresh_open_asset_lists()`, called from Build Library Index's `_finish`, runs
+`asset.library_refresh` in every open Asset Browser and every 3D Viewport shelf region whose poll
+passes (a shelf that never loaded a list reads fresh when first shown). Verified the same way: it
+refreshed 2 views and the stale tiles went. Only probed on 5.3.
+
+*Correction (owner's GUI run):* called from `_finish`, the refresh raised `TypeError: Overriding context
+with an active temporary screen isn't supported`. The build is started from the Preferences window,
+whose screen is temporary, and Blender refuses a `temp_override` from there into another window's
+screen; the probes had called the helper from a timer, so they never saw it. The exception also skipped
+the build's INFO message and report (the refresh ran before them), and it got through because only
+`RuntimeError` was caught. Reproduced in a throwaway 5.3 window with `screen.userpref_show()`. Fixed by
+running it last and deferred: `refresh_open_asset_lists_later()` registers a one-shot
+`bpy.app.timers` callback, whose context holds the main window even right after events in the
+Preferences window (probed with `event_simulate` there first): it refreshed the open shelf, no error.
+The helper also skips temporary-screen windows. A failure inside the timer (`RuntimeError`/`TypeError`) is
+appended to the **Poser Library Index Report** with the **Refresh Asset Library** hint, since the
+operator's own report is already out by then.
+
+**Double-click in the Asset Browser (owner, same day).** The owner noticed a shelf click acts but an
+Asset Browser click doesn't (a click there is Blender's own selection), and had already noted that
+users won't think of right-clicking. `ui/packageAssets.register_menus()` now adds a `LEFTMOUSE`
+`DOUBLE_CLICK` item for `poser.use_morph_package` to the add-on keyconfig's "File Browser Main"
+keymap (skipped under `--background`, where there is no keyconfig). Probed on 5.3: in the merged
+user keymap our item comes **first**, ahead of Blender's `file.select` (open) and `file.mouse_execute`
+double-click items (add-on items are put at the head), so it is tried first; for any asset that isn't one
+of our packages the operator's poll fails and the event goes on to Blender's items. The first click of
+the double-click selects the asset, so `context.asset` is the one double-clicked. **Not verified:** a
+real double-click reaching the operator. `Window.event_simulate` (`--enable-event-simulate`) can't
+produce one: two simulated presses arrive as two `PRESS` events (a diagnostic keymap item saw no
+`DOUBLE_CLICK`), because Blender derives double-clicks from real input only; and driving the
+owner's desktop with `xdotool` was ruled out. Left to the owner's GUI test.
+
+**No conflict outside our assets (owner asked, verified).** The item lives in "File Browser Main",
+which also serves every ordinary file dialog, so it must never take a double-click that isn't ours.
+What stands in the way is the operator's poll: True only for one of our package assets with a mesh
+active (a file dialog has no `context.asset` at all). That a failed poll hands the event on was probed
+with the same mechanism on a single press, which `event_simulate` can produce: a stand-in operator on
+`LEFTMOUSE` `PRESS`, first in the merged keymap ahead of `file.select`. Poll False: the tile was
+selected (Blender's item ran). Poll True: our item consumed the press and nothing was selected. When it
+does take a double-click, on our assets, it replaces Blender's `file.select(open=True)` and
+`file.mouse_execute`, which do nothing for an asset (they open directories and confirm file dialogs).
+The item is listed in Preferences → Keymap → File Browser → File Browser Main, where a user can turn it
+off.
+
+**Catalogs grouped by Runtime (owner, same day).** The catalog tree showed `Pose` and `pose` side by
+side: two Runtimes spell the category folder differently, and catalogs are case-sensitive. The owner's
+call: put each Runtime on top, the way Poser's Library palette lists them, and capitalize the first
+letter of the category folder. Catalogs are now `<Runtime>/<Category>/<folders below>`
+(`library_index.catalog_path(category, runtime_name)`); only the category segment is capitalized,
+vendor folders below keep their spelling. The Runtime name is the root's **Label** from Preferences
+if set, else its folder name (`runtime_names()`; a clash, compared ignoring case, appends the parent
+folder, then a number). The names are layout, not classification: the manifest records them as
+`"layout"`, outside the signature, so renaming a Label reuses every classified answer and rewrites only
+that Runtime's asset files (their folder hash covers the catalog). `status.json` stores the layout too,
+and `status_is_stale()` compares it, so Preferences asks for an update after a rename, and an index
+from before this change (no layout) reads as stale. No `MANIFEST_VERSION` bump was needed. Real
+library (13 roots), built into a scratch folder with the real child on 5.3: 3,783 assets in 129 files,
+0 failures, 14.9 s cold-ish; packages sit under 6 Runtimes (Base Figures 3,530, Scenes, Props and
+Objects 140, Custom Character Sets 63, Poses 43, Hair 5, PsyDreamer3D 2), every one with a single
+`Pose` below it; looked at in a real Asset Browser.
+
+**GUI items above** (right-click entry, side panel, shelf clicks, dialogs from the Asset Browser):
+confirmed by the owner's test. Still not exercised: Windows/macOS.
 
 ### Decisions
 
@@ -1481,8 +1631,8 @@ same-named assets from different files.
 
 ### Still unverified
 
-Live reading of custom `asset_data` keys through the shelf's `asset.metadata` (same struct; the
-updated demo script now displays them on click, so the owner's next run will show it); shelf
+~~Live reading of custom `asset_data` keys through `asset.metadata`~~ (read live in a 5.3 Asset
+Browser, 7.4; the shelf hands the same `AssetRepresentation`, not yet clicked live); shelf
 behavior for same-named assets across files; the Asset Browser with 10k+ Image assets in a real
 session; applying the 259-morph Victoria 3 head package (no V3 figure here, so per-morph cost at
 that size is extrapolated); the asset API's stability (5.3 added projects/remote-library

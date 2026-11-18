@@ -14,6 +14,7 @@ from .runtimePaths import (
     POSER_OT_runtime_root_move,
     POSER_OT_runtime_roots_import_from_poser,
 )
+from .useMorphPackage import OT_UseMorphPackage_Operator
 
 classes = (
     PoserLibraryItem,
@@ -25,6 +26,7 @@ classes = (
     OT_RemoveMorphInjection_Operator,
     OT_BuildLibraryIndex_Operator,
     OT_RemoveLibraryEntry_Operator,
+    OT_UseMorphPackage_Operator,
     OT_RenameArmatureBones_Operator,
     OT_PrefixArmatureBones_Operator,
     OT_RenameWeightGroups_Operator,

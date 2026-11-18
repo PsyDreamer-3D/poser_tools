@@ -15,6 +15,7 @@ user's Poser content: the library is theirs, the index is derived data.
 import json
 import os
 import queue
+import re
 import subprocess
 import threading
 import time
@@ -61,7 +62,8 @@ _status_cache = {}
 def write_status(out_dir: str, manifest: dict, seconds: float, now=None) -> None:
     """Record the headline numbers of a finished build next to the manifest."""
     status = {"built_at": time.time() if now is None else now, "seconds": round(seconds, 1),
-              "signature": manifest["signature"], "stats": manifest["stats"]}
+              "signature": manifest["signature"], "layout": manifest.get("layout"),
+              "stats": manifest["stats"]}
     target = os.path.join(out_dir, STATUS_FILE)
     temp = target + ".tmp"
     with open(temp, "w", encoding="utf-8") as fh:
@@ -89,16 +91,20 @@ def read_status(out_dir: str):
     return status
 
 
-def status_is_stale(status: dict, roots, blender_version: str) -> bool:
-    """True when the roots, the asset format or the Blender version differ from the last build's.
+def status_is_stale(status: dict, roots, blender_version: str, labels=None) -> bool:
+    """True when the roots, their names, the asset format or the Blender version differ from
+    the last build's.
 
     A build against a different set answers different questions (a target may now resolve), so
-    the index must be rebuilt. New *content* inside the same roots cannot be seen cheaply; that is
-    what the always-available, incremental update button is for.
+    the index must be rebuilt. A renamed Runtime only moves catalogs; an update rewrites just
+    those folders. New *content* inside the same roots cannot be seen cheaply; that is what the
+    always-available, incremental update button is for. A status from before Runtime-level
+    catalogs has no layout and reads as stale.
     """
     existing = [r for r in dict.fromkeys(roots) if r and os.path.isdir(r)]
     current = library_index.make_signature(existing, library_index.asset_signature(blender_version))
-    return status["signature"] != current
+    return (status["signature"] != current
+            or status.get("layout") != library_index.runtime_names(existing, labels))
 
 
 # Where each phase sits on one 0..1 bar. Measured on the owner's 20 roots: reading the files
@@ -338,3 +344,62 @@ def remove_asset_library(libraries, name: str) -> bool:
             libraries.remove(library)
             return True
     return False
+
+
+# ---------------------------------------------------------------------------
+# From a library asset back to its package (7.4: Asset Browser and shelf clicks)
+# ---------------------------------------------------------------------------
+
+PACKAGE_KINDS = ("injection", "removal")
+_INCOMPLETE_PREFIX_RE = re.compile(r'^\[INCOMPLETE:[^\]]*\]\s*')
+
+
+def package_kind(fields: dict, tags) -> str:
+    """"injection" or "removal" for one of our assets, "" for any other asset.
+
+    `fields` are the asset's custom metadata (poser_kind etc.), `tags` its tag names. The
+    tags are the fallback because they are Blender's own metadata and always survive.
+    """
+    kind = fields.get("poser_kind") or ""
+    if kind in PACKAGE_KINDS:
+        return kind
+    tags = set(tags)
+    if "poser" in tags:
+        for candidate in PACKAGE_KINDS:
+            if candidate in tags:
+                return candidate
+    return ""
+
+
+def resolve_package_asset(fields: dict, description: str, tags, roots) -> tuple:
+    """(path, kind, problem) for the package a library asset stands for.
+
+    `problem` is "" when `path` is an existing file, else a message for the user. The asset
+    records its Runtime root and the path under it (library_assets_child.make_standin); the
+    description holds the same relative path, so it stands in if the custom keys are ever
+    missing. Read live on Blender 5.3 the keys are there (docs/handoff-morph-injection.md, 7.4).
+
+    The recorded root is tried first, then every configured root: a Runtime folder that was
+    moved or remounted elsewhere still finds the package without rebuilding the index.
+    """
+    kind = package_kind(fields, tags)
+    if not kind:
+        return "", "", "This asset isn't a Poser morph package."
+    rel_path = fields.get("poser_rel_path") or _INCOMPLETE_PREFIX_RE.sub("", description or "").strip()
+    if not rel_path:
+        return "", kind, "This asset doesn't record which package it stands for. Rebuild the library index."
+
+    candidates = []
+    for root in [fields.get("poser_root") or "", *roots]:
+        if root and root not in candidates:
+            candidates.append(root)
+    for root in candidates:
+        path = os.path.join(root, *rel_path.split("/"))
+        if os.path.isfile(path):
+            return path, kind, ""
+    where = candidates[0] if candidates else "any Runtime folder"
+    return "", kind, (
+        f"Package not found: {rel_path} (looked in {where}"
+        f"{f' and {len(candidates) - 1} other Runtime folder(s)' if len(candidates) > 1 else ''}). "
+        "Is the drive mounted? If the file was moved, Update the library index in Preferences."
+    )

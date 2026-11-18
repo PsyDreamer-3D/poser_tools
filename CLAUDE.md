@@ -221,11 +221,29 @@ don't resume it without a specific reason to.
   own Runtime, since a package often names files that live in a different library, and a package
   that yields no morphs because its files weren't found now says so (`no_morphs_report()`). Phase 7
   (thumbnail library via Blender's Asset Shelf) is scoped in
-  `docs/handoff-morph-injection.md`; 7.0, 7.0b, 7.1 and 7.2 are built, and 7.3a/7.3b (below).
+  `docs/handoff-morph-injection.md`; 7.0 to 7.4 are built (7.2, 7.3 and 7.4 below).
+- Phase 7.4: **using a package from the library** (`poser.use_morph_package`,
+  `operators/useMorphPackage.py`; `ui/packageAssets.py`). One operator behind the Asset Browser's
+  right-click entry, a side panel there, and two 3D Viewport shelves (injection, removal; opened from
+  View → Asset Shelf). It reads the asset's `poser_root`/`poser_rel_path`/`poser_kind` through
+  `context.asset.metadata` (read live on 5.3; `core/library_build.resolve_package_asset()` falls back to
+  tags + description and to the other Runtime roots). Injection opens the 7.2 picker when the mesh
+  remembers its reference OBJ, else Apply's popup with the package pre-picked; removal runs Remove
+  directly (`call_nested(..., execution='EXEC_DEFAULT')`). The asset is read through `context_asset()`
+  so a headless script can patch in a stand-in: `temp_override(asset=…)` doesn't take one. No drag and
+  drop: Python has no hook for an asset dropped from the Asset Browser, and a Scene has no drop target.
 - Phase 7.3: the **library index** (7.3a/7.3b the engine, 7.3c the operator and Preferences UI; the shelf is 7.4).
   `core/cr2/library_index.py` classifies the owner's whole Poser library (16,405 entries, ~10 s warm,
   ~40 s cold) into injection/removal and builds a manifest of 3,816 shown entries in 133 source
-  folders, incrementally. `core/library_build.py` turns it into asset `.blend` files by running
+  folders, incrementally (20 roots; 3,783 in 129 on the owner's current 13 roots). Only files in
+  Poser's own category folders under `Runtime/Libraries` (`POSER_LIBRARY_CATEGORIES`: pose, face, ...)
+  are entries, as in Poser's Library palette: vendor folders beside them (`!DAZ`, `!Adz`) hold the files
+  packages `readScript`, and a file-name rule alone missed `!Adz`'s `<morph>.InjDeltas.pz2` naming.
+  The Apply/Remove dropdowns still list those files on purpose (manual escape hatch). Catalogs are
+  `<Runtime>/<Category>/...` like Poser's Library palette: the Runtime's Preferences Label, else its folder
+  name (`runtime_names()`), and the category folder's first letter capitalized (`pose`/`Pose` merged).
+  The names are layout (`manifest["layout"]`, outside the signature), so a renamed Label reuses every
+  classification and rewrites only that Runtime's files; `status_is_stale()` compares the layout too. `core/library_build.py` turns it into asset `.blend` files by running
   `core/library_assets_child.py` in a **child Blender process** (never in the user's session: building
   asset-marked stand-ins there would touch their file, undo stack and UI), writes the catalog file, saves
   the manifest last, and registers the folder as an asset library (`ensure_asset_library`, which must
@@ -244,7 +262,11 @@ don't resume it without a specific reason to.
   (`operators/libraryIndex.py`, modal like Apply: a worker thread that never touches `bpy`, a timer on
   the main thread for progress, Esc cancels, synchronous under `--background`) and
   `poser.remove_library_entry`, driven from Preferences (`properties/poserToolsPreferences.py`
-  `_draw_library`). Build status is a small `status.json` beside the manifest so drawing never loads
+  `_draw_library`). A finished build runs `asset.library_refresh` in every open Asset Browser and
+  shelf region (`_refresh_open_asset_lists`): Blender doesn't watch the folder, and an open shelf
+  otherwise keeps listing deleted assets until restart. It runs from a one-shot timer
+  (`refresh_open_asset_lists_later`): the build is started from the Preferences window, a temporary
+  screen, and `temp_override` from there into another window raises `TypeError`. Build status is a small `status.json` beside the manifest so drawing never loads
   the manifest; it goes stale when the roots, asset format or Blender version change. Registering the
   library edits the user's preferences, so it happens only from that explicit click, on the main
   thread. `INVOKE_DEFAULT` runs `execute()` under `--background`, so the interactive path is the same
@@ -313,7 +335,15 @@ Everything else is manual smoke test only — no `bpy`-dependent code has automa
    writing asset files), Esc cancels and changes nothing; on success an INFO message, a **Poser Library
    Index Report** text block, and the panel shows the package count, thumbnail/placeholder counts and
    "registered". An Asset Browser pointed at **Poser Morph Packages** shows the packages by folder.
-   Run it again: seconds, "0 written". Change the Runtime folders: the panel says rebuild.
+   Run it again: seconds, "0 written". Change the Runtime folders or a Label: the panel says to update; a renamed Label rewrites only that Runtime's files. The Asset Browser lists one catalog per Runtime, each with a capitalized category (Pose) below.
+6c. With that library built and a mesh active: in the Asset Browser, right-click a package →
+   **Apply to Active Mesh...** (or the button in the side panel's **Poser Morph Package** box) opens the
+   morph picker (or Apply's popup with the package picked, on a mesh never injected into); a removal
+   package's **Remove from Active Mesh** removes its keys at once, Ctrl+Z restores them. Double-clicking
+   one of our packages does the same (a keymap item; other libraries' assets keep Blender's own
+   double-click). `Window.event_simulate` can't produce a double-click, so test it by hand. In the 3D
+   Viewport, View → Asset Shelf shows the injection and removal shelves in Object Mode; clicking a tile
+   does the same.
 6. Same mesh → **Remove Morph Injection**, pick the same package's `RemDeltas.*` file (or the
    original `InjDeltas.*` one — either works) via the same searchable dropdown. Expect: near-instant
    (no correspondence build), the matching shape key(s) gone, a **Poser Morph Removal Report** text
