@@ -62,7 +62,8 @@ _status_cache = {}
 def write_status(out_dir: str, manifest: dict, seconds: float, now=None) -> None:
     """Record the headline numbers of a finished build next to the manifest."""
     status = {"built_at": time.time() if now is None else now, "seconds": round(seconds, 1),
-              "signature": manifest["signature"], "stats": manifest["stats"]}
+              "signature": manifest["signature"], "layout": manifest.get("layout"),
+              "stats": manifest["stats"]}
     target = os.path.join(out_dir, STATUS_FILE)
     temp = target + ".tmp"
     with open(temp, "w", encoding="utf-8") as fh:
@@ -90,16 +91,20 @@ def read_status(out_dir: str):
     return status
 
 
-def status_is_stale(status: dict, roots, blender_version: str) -> bool:
-    """True when the roots, the asset format or the Blender version differ from the last build's.
+def status_is_stale(status: dict, roots, blender_version: str, labels=None) -> bool:
+    """True when the roots, their names, the asset format or the Blender version differ from
+    the last build's.
 
     A build against a different set answers different questions (a target may now resolve), so
-    the index must be rebuilt. New *content* inside the same roots cannot be seen cheaply; that is
-    what the always-available, incremental update button is for.
+    the index must be rebuilt. A renamed Runtime only moves catalogs; an update rewrites just
+    those folders. New *content* inside the same roots cannot be seen cheaply; that is what the
+    always-available, incremental update button is for. A status from before Runtime-level
+    catalogs has no layout and reads as stale.
     """
     existing = [r for r in dict.fromkeys(roots) if r and os.path.isdir(r)]
     current = library_index.make_signature(existing, library_index.asset_signature(blender_version))
-    return status["signature"] != current
+    return (status["signature"] != current
+            or status.get("layout") != library_index.runtime_names(existing, labels))
 
 
 # Where each phase sits on one 0..1 bar. Measured on the owner's 20 roots: reading the files

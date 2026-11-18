@@ -186,8 +186,11 @@ def test_names_repeat_only_within_a_kind_and_stay_unique_per_folder():
 
 
 def test_catalog_path_and_blend_name():
-    assert li.catalog_path("pose/!A3-H3 MORExp1 INJ") == "pose/!A3-H3 MORExp1 INJ"
-    assert li.catalog_path("pose/Weird: Name//x") == "pose/Weird- Name/x"
+    assert li.catalog_path("pose/!A3-H3 MORExp1 INJ") == "Pose/!A3-H3 MORExp1 INJ"
+    assert li.catalog_path("pose/Weird: Name//x") == "Pose/Weird- Name/x"
+    # Only the category folder is capitalized; the Runtime name goes on top.
+    assert li.catalog_path("Pose/morphs/x", "Base Figures") == "Base Figures/Pose/morphs/x"
+    assert li.catalog_path("pose/x", "A: B/C") == "A- B-C/Pose/x"
     a, b = li.blend_name_for("/r/Pack"), li.blend_name_for("/other/Pack")
     assert a != b and a.endswith(".blend") and a == li.blend_name_for("/r/Pack")
     assert " " not in li.blend_name_for("/r/My Folder!") and li.blend_name_for("/r/!!!").startswith("folder-")
@@ -218,7 +221,7 @@ def test_manifest_entry_fields(library):
     assert half["tags"] == ["injection", "incomplete", "poser"]
     assert half["description"] == "[INCOMPLETE: 1 of 2 files missing] Runtime/libraries/pose/Fig2 INJ/Half.pz2"
     assert inj["description"] == "Runtime/libraries/pose/Fig INJ/Brow.pz2"
-    assert inj["catalog"] == "pose/Fig INJ" and inj["rel_path"] == "Runtime/libraries/pose/Fig INJ/Brow.pz2"
+    assert inj["catalog"] == "Content/Pose/Fig INJ" and inj["rel_path"] == "Runtime/libraries/pose/Fig INJ/Brow.pz2"
     # `Brow` repeats within the injection kind, so those two get their folder; the removal one is alone
     assert inj["name"] == "Brow (Fig INJ)" and entries["pose/Fig2 INJ/Brow.pz2"]["name"] == "Brow (Fig2 INJ)"
     assert rem["name"] == "Brow" and half["name"] == "Half"
@@ -398,9 +401,10 @@ def test_real_sniff_agrees_with_a_full_parse_where_it_matters():
 def test_catalog_ids_are_stable_and_include_parents(library):
     manifest = li.build_manifest([library.path])
     ids = li.catalog_ids(manifest)
-    assert set(ids) == {"pose", "pose/Fig INJ", "pose/Fig REM", "pose/Fig2 INJ"}
+    assert set(ids) == {"Content", "Content/Pose", "Content/Pose/Fig INJ", "Content/Pose/Fig REM",
+                        "Content/Pose/Fig2 INJ"}
     assert ids == li.catalog_ids(li.build_manifest([library.path]))
-    assert li.catalog_uuid("pose/Fig INJ") == ids["pose/Fig INJ"] != li.catalog_uuid("pose/Fig REM")
+    assert li.catalog_uuid("Content/Pose/Fig INJ") == ids["Content/Pose/Fig INJ"] != li.catalog_uuid("Content/Pose/Fig REM")
 
 
 def test_catalog_file_text_has_the_version_line_and_one_line_per_catalog():
@@ -433,3 +437,42 @@ def test_vendor_folders_beside_the_categories_are_not_entries(lib):
     m = li.build_manifest([lib.path])
     assert sorted(_entries(m)) == ["Pose/Hiro/Frenulum Off.pz2", "Pose/Hiro/Frenulum.pz2"]
     assert m["stats"]["entries"] == 2
+
+
+# ---- catalogs grouped by Runtime, as in Poser's Library palette --------------------------
+
+def test_runtime_names_use_the_label_else_the_folder_and_never_collide():
+    roots = ["/a/Base Figures", "/b/Base Figures/", "/c/base figures", "/d/Hair"]
+    names = li.runtime_names(roots, {"/d/Hair": "  My Hair  "})
+    assert names["/a/Base Figures"] == "Base Figures"
+    assert names["/b/Base Figures/"] == "Base Figures (b)"
+    assert names["/c/base figures"] == "base figures (c)"            # case-insensitive clash
+    assert names["/d/Hair"] == "My Hair"
+    assert len({n.casefold() for n in names.values()}) == len(roots)
+
+
+def test_each_runtime_is_its_own_top_catalog_and_pose_spellings_merge_within_it(tmp_path):
+    def runtime(name, category):
+        root = tmp_path / name
+        leaf = root / "Runtime" / "libraries" / "!V" / "Deltas" / "InjDeltas.Brow.pz2"
+        leaf.parent.mkdir(parents=True); leaf.write_text(INJ_LEAF)
+        pkg = root / "Runtime" / "libraries" / category / "Pack" / "Brow.pz2"
+        pkg.parent.mkdir(parents=True)
+        pkg.write_text(_orchestrator(":Runtime:libraries:!V:Deltas:InjDeltas.Brow.pz2"))
+        return str(root)
+    lower, upper = runtime("Base Figures", "pose"), runtime("Extra", "Pose")
+    m = li.build_manifest([lower, upper], runtime_labels={upper: "Poser 5"})
+    assert m["layout"] == {lower: "Base Figures", upper: "Poser 5"}
+    assert sorted(e["catalog"] for f in m["folders"] for e in f["entries"]) == [
+        "Base Figures/Pose/Pack", "Poser 5/Pose/Pack"]
+
+
+def test_renaming_a_runtime_reuses_every_answer_and_rewrites_only_its_folders(library):
+    first = li.build_manifest([library.path])
+    renamed = li.build_manifest([library.path], previous=first, runtime_labels={library.path: "Mine"})
+    assert renamed["signature"] == first["signature"]
+    assert renamed["stats"]["classified"] == 0                    # nothing re-read
+    assert {e["catalog"].split("/")[0] for f in renamed["folders"] for e in f["entries"]} == {"Mine"}
+    assert len(li.changed_folders(first, renamed)["write"]) == len(renamed["folders"])
+    again = li.build_manifest([library.path], previous=renamed, runtime_labels={library.path: "Mine"})
+    assert li.changed_folders(renamed, again)["write"] == []

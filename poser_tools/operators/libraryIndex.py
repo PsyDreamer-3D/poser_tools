@@ -11,7 +11,7 @@ from ..core import library_build
 from ..core.cr2 import library_index
 from ..core.library_build import LIBRARY_NAME, library_dir
 from ..core.utils import _write_report
-from ..properties.poserToolsPreferences import get_runtime_roots
+from ..properties.poserToolsPreferences import get_runtime_labels, get_runtime_roots
 
 _REPORT_TEXT = "Poser Library Index Report"
 
@@ -23,8 +23,9 @@ class _Job:
     """What the worker thread and the modal timer share. The thread only ever writes plain
     attributes here; every bpy call stays on the main thread."""
 
-    def __init__(self, roots, out_dir, binary, blender_version, force):
+    def __init__(self, roots, out_dir, binary, blender_version, force, labels=None):
         self.roots, self.out_dir, self.binary = roots, out_dir, binary
+        self.labels = labels or {}
         self.blender_version, self.force = blender_version, force
         self.phase, self.fraction = "reading", 0.0
         self.cancel = False
@@ -50,7 +51,7 @@ def _work(job: _Job) -> None:
         job.manifest = library_index.build_manifest(
             job.roots, previous=previous,
             signature_extra=library_index.asset_signature(job.blender_version),
-            progress=job.on_progress, cancelled=lambda: job.cancel,
+            progress=job.on_progress, cancelled=lambda: job.cancel, runtime_labels=job.labels,
         )
         job.result = library_build.build_assets(
             job.manifest, previous, job.out_dir,
@@ -120,7 +121,7 @@ class OT_BuildLibraryIndex_Operator(bpy.types.Operator):
             return {'CANCELLED'}
 
         self._job = _Job(get_runtime_roots(context), library_dir(), binary,
-                         bpy.app.version_string, self.force)
+                         bpy.app.version_string, self.force, get_runtime_labels(context))
         _running = True
         if bpy.app.background:
             # Headless: nothing dispatches TIMER events, so a modal operator would hang (see

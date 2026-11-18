@@ -147,7 +147,7 @@ def test_a_build_writes_assets_catalogs_and_the_manifest_last(manifest, tmp_path
     assert sorted(f for f in os.listdir(out) if f.endswith(".blend")) == sorted(f["blend"] for f in manifest["folders"])
     assert ".job.json" not in os.listdir(out)
     cats = open(os.path.join(out, lb.CATALOG_FILE)).read()
-    assert "VERSION 1" in cats and ":pose/Fig INJ:Fig INJ" in cats and ":pose:pose" in cats
+    assert "VERSION 1" in cats and ":Content/Pose/Fig INJ:Fig INJ" in cats and ":Content:Content" in cats
     assert li.load_manifest(lb.manifest_path(out))["folders"] == manifest["folders"]
 
 
@@ -265,6 +265,10 @@ def test_status_goes_stale_when_roots_or_blender_change(library, tmp_path):
     assert lb.status_is_stale(status, [library.path, str(tmp_path)], version)
     assert lb.status_is_stale(status, [library.path], "5.0.1")
     assert lb.status_is_stale(status, [], version)
+    assert lb.status_is_stale(status, [library.path], version, {library.path: "Renamed"})
+    assert not lb.status_is_stale(status, [library.path], version, {library.path: ""})   # blank = folder name
+    old = {k: v for k, v in status.items() if k != "layout"}          # built before Runtime catalogs
+    assert lb.status_is_stale(old, [library.path], version)
 
 
 def test_progress_is_one_monotonic_bar_across_the_phases():

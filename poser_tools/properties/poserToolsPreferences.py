@@ -86,10 +86,11 @@ class PoserToolsPreferences(bpy.types.AddonPreferences):
             thumbs = stats.get("thumbnails", {})
             box.label(text=f"{thumbs.get('image', 0):,} thumbnails, "
                            f"{thumbs.get('rsr', 0) + thumbs.get('none', 0):,} placeholders")
-            if library_build.status_is_stale(status, roots, bpy.app.version_string):
+            if library_build.status_is_stale(status, roots, bpy.app.version_string,
+                                                get_runtime_labels(context)):
                 warn = box.row()
                 warn.alert = True
-                warn.label(text="Runtime folders or Blender version changed: rebuild.", icon='ERROR')
+                warn.label(text="Runtime folders, their labels or the Blender version changed: update the index.", icon='ERROR')
         else:
             box.label(text="Not built yet. The first build takes up to a minute on a slow drive.")
 
@@ -107,6 +108,15 @@ class PoserToolsPreferences(bpy.types.AddonPreferences):
             row.operator("poser.remove_library_entry", icon='X')
         elif status:
             row.label(text="Built, but not registered as an asset library: update the index to add it.", icon='INFO')
+
+
+def get_runtime_labels(context) -> dict:
+    """{root path: Label} for the roots that have one (the library index names catalogs by them)."""
+    try:
+        prefs = context.preferences.addons[_ADDON_PKG].preferences
+        return {item.path: item.label for item in prefs.runtime_paths if item.path and item.label}
+    except (KeyError, AttributeError):
+        return {}
 
 
 def get_runtime_roots(context) -> list:

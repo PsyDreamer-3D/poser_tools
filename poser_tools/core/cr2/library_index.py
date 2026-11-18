@@ -320,12 +320,43 @@ def assign_display_names(entries: list) -> None:
         entry["name"] = name
 
 
-def catalog_path(category: str) -> str:
-    """The Asset Browser catalog for a library folder: its path below `Libraries/`.
+def runtime_names(roots, labels=None) -> dict:
+    """{root: the name its catalogs go under}, one per root, all different.
 
-    The catalog file format uses ':' as a separator, so a folder name can't carry one.
+    The user's Label for the root (Preferences) if set, else the folder's own name, which is
+    what Poser's Library palette shows. Two roots that would share a name get their parent
+    folder appended, then a number, so their catalogs never merge.
+    """
+    labels = labels or {}
+    names, used = {}, set()
+    for root in roots:
+        folder = os.path.normpath(root)
+        base = (labels.get(root) or "").strip() or os.path.basename(folder) or folder
+        name = base
+        if name.casefold() in used:
+            name = f"{base} ({os.path.basename(os.path.dirname(folder))})"
+        n = 2
+        while name.casefold() in used:
+            name, n = f"{base} {n}", n + 1
+        used.add(name.casefold())
+        names[root] = name
+    return names
+
+
+def catalog_path(category: str, runtime_name: str = "") -> str:
+    """The Asset Browser catalog for a library folder: `<runtime>/<path below Libraries>`.
+
+    Grouped by Runtime the way Poser's Library palette is. The category folder right under
+    Libraries gets its first letter capitalized (owner's call, 2026-11-17): runtimes spell it
+    `pose` or `Pose`, and without this the tree showed both side by side. Deeper folders keep
+    their own spelling. The catalog file format uses ':' as a separator, so no name can carry one.
     """
     parts = [p.replace(":", "-").strip() for p in category.replace("\\", "/").split("/")]
+    parts = [p for p in parts if p]
+    if parts:
+        parts[0] = parts[0][:1].upper() + parts[0][1:]
+    if runtime_name:
+        parts.insert(0, runtime_name.replace(":", "-").replace("/", "-").strip())
     return "/".join(p for p in parts if p)
 
 
@@ -446,7 +477,7 @@ def _describe(rel_path: str, rec: dict) -> str:
 
 
 def build_manifest(roots, previous=None, signature_extra=None, progress=None, cancelled=None,
-                   prefetch=True) -> dict:
+                   prefetch=True, runtime_labels=None) -> dict:
     """Classify the library under `roots` and describe what should be indexed.
 
     `previous` is an earlier manifest: an entry whose file and every leaf it read are
@@ -455,6 +486,9 @@ def build_manifest(roots, previous=None, signature_extra=None, progress=None, ca
     `progress(phase, done, total)` ("reading" then "classifying") and `cancelled()` are
     optional callbacks; cancelling raises BuildCancelled. With no usable `previous`, the
     package files' heads are read in parallel first (`prefetch=False` to skip).
+    `runtime_labels` ({root: label}) name the top-level catalogs (runtime_names()); they are
+    layout only, recorded as "layout" and kept out of the signature, so renaming one reuses
+    every classification and rewrites only the folders whose catalog changed.
 
     Returns {"version", "signature", "classified": {path: record}, "folders": [...],
     "stats": {...}}. Only injection and removal entries appear in "folders"; "classified"
@@ -462,6 +496,7 @@ def build_manifest(roots, previous=None, signature_extra=None, progress=None, ca
     """
     roots = [r for r in dict.fromkeys(roots) if r and os.path.isdir(r)]
     signature = make_signature(roots, signature_extra)
+    names = runtime_names(roots, runtime_labels)
     prior = {}
     if previous and previous.get("signature") == signature:
         prior = previous.get("classified", {})
@@ -501,7 +536,7 @@ def build_manifest(roots, previous=None, signature_extra=None, progress=None, ca
                 "root": root,
                 "rel_path": rel_path,
                 "folder": os.path.dirname(item.filepath),
-                "catalog": catalog_path(item.category),
+                "catalog": catalog_path(item.category, names[root]),
                 "stem": item.name,
                 "ext": item.ext,
                 "kind": rec["kind"],
@@ -531,6 +566,7 @@ def build_manifest(roots, previous=None, signature_extra=None, progress=None, ca
     return {
         "version": MANIFEST_VERSION,
         "signature": signature,
+        "layout": names,
         "classified": classified,
         "folders": folders,
         "stats": {
