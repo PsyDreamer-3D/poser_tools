@@ -1567,6 +1567,24 @@ library (13 roots), built into a scratch folder with the real child on 5.3: 3,78
 Objects 140, Custom Character Sets 63, Poses 43, Hair 5, PsyDreamer3D 2), every one with a single
 `Pose` below it; looked at in a real Asset Browser.
 
+**Packages that move bones are poses (owner, same day).** V3 Spellcaster showed up in the library: each
+file `readScript`s nine V3 `InjDeltas.*` (and nine `Unhide.*`) for the expressions it dials, then poses
+the body in the same file (`actor hip:1` with `rotateX/Y/Z`, `translateX`: 330 bone keys, 127 non-zero).
+The classifier only looked at what the leaves were, so "has an injection leaf" made it an injection
+package. Owner's rule: the library holds morph packages only; poses stay out, because applying one means
+translating Poser's bone space through the FBX import's bone-roll fixes, which has been hard before.
+`classify_entry()` now checks every file a package reads for a bone channel (`_BONE_CHANNEL_RE`:
+`rotate|translate` + `X/Y/Z` at the start of a line) and classes the entry `"armature"`, which isn't
+shown. That also hides Channing's **"Fit" packages** (owner's choice, asked): they inject a fit morph
+*and* set the hip's rotation/translation (V3 Fit INJ: hip `rotateX` 11.83, `translateY` 0.0067,
+`translateZ` 0.0014), which Apply would ignore; they stay reachable through Apply's own dropdown.
+Measured on the owner's 13 roots: 130 shown entries carry bone channels, every one in the entry's own
+file (none only in a file it loads), and a full-file scan finds the same 130 as the 16 KB head (largest
+entry 0.4 MB), so the head is enough. Rebuilt in memory (10.9 s): 3,783 → 3,653 shown, 129 → 124
+folders; the 130 removed are exactly V3 Spellcaster 25, UlfGens 2 Expansion Fits 45, AdzHirogens
+Expansion Pack 1 Fit INJ DS / Fit INJ Poser / Fit REM 20 each; nothing added, no kept entry renamed.
+`MANIFEST_VERSION` 4.
+
 **GUI items above** (right-click entry, side panel, shelf clicks, dialogs from the Asset Browser):
 confirmed by the owner's test. Still not exercised: Windows/macOS.
 
@@ -1638,6 +1656,45 @@ session; applying the 259-morph Victoria 3 head package (no V3 figure here, so p
 that size is extrapolated); the asset API's stability (5.3 added projects/remote-library
 parameters; additive so far). Prototype scripts live in the session scratchpad and are not
 committed.
+
+## Phase 8 — MAT pose support (plan, 2026-11-17; not started)
+
+Owner, after the Spellcaster fix: the library is morph packages only for now, but MAT poses (Poser
+material presets) should come next, reusing `cr2_importer`'s material code. This is the plan, not a
+design that has been reviewed.
+
+**What `cr2_importer` already has** (read, not run; all MIT, so ported files keep their MIT header like
+the rest of `core/cr2/`):
+- `core/pz2_parser.py` `PZ2Parser` (581 lines): a MAT `.pz2`/`.p2z` → `{material name: PoserMaterial}`,
+  covering the `figure { material ... }`, per-`actor` and `setMaterial FIGURE MAT { }` layouts. It
+  delegates to `CR2Parser._parse_material_block()`, which `poser_tools`' adapted parser already has
+  with an identical `PoserMaterial` (shader-tree parsing included), so the parsing side mostly exists.
+- `core/shader_translator.py` `build_shader_tree()` (658 lines): Poser's `shaderTree` (superfly root) to
+  a Cycles node tree on a Principled BSDF, coat/SSS collapsed, bump/normal routed; Firefly-only nodes
+  skipped.
+- `core/material_pipeline.py` `MaterialMixin` (198 lines): `_build_material_nodes()` and `_load_image()`
+  (colon-path texture resolution, image reuse).
+- `operators/apply_ops.py` `poser.apply_mat_pose`: matches the file's materials to the object's slots by
+  name, stripping the figure prefix `cr2_importer` gave its own materials.
+
+**What is new here:**
+1. **Matching names to the FBX import's slots.** `cr2_importer` named the materials itself; here they come
+   from Poser's FBX export, then `sort_material_slots_by_face_order()`. Whether the FBX keeps Poser's
+   material names unchanged (`SkinTorso`, `Lips`...) is not checked: the first spike is to import Aiko3
+   and LaFemme and compare their slot names to a MAT file's materials.
+2. **Textures across Runtimes.** `_load_image()` resolves against the file's own Runtime; route it through
+   `resolve_poser_path(..., extra_roots=get_runtime_roots())` (case-insensitive, Phase 7.0), as packages do.
+3. **Classification.** A MAT kind in `library_index`: a file whose own content is `material` blocks, with no
+   bone channels (the armature rule still wins) and no deltas. Measure how many of the owner's hidden
+   `"other"`/`"pose"` entries that is before deciding the shelf layout (a third shelf, or a tag).
+4. **Applying.** One operator (shelf click, double-click, right-click through `poser.use_morph_package`'s
+   pattern, or a separate `poser.use_material_package`), on the active mesh, with Ctrl+Z. It replaces node
+   trees, so it is more destructive than an injection: a confirm, or apply to copies, is an open decision.
+
+**Phasing (proposed):** 8.1 port the parser pieces and translator with pytest on real MAT files, plus the
+slot-name spike; 8.2 apply operator (manual file pick); 8.3 index + shelf. **Out of scope at first:**
+Poser's Materials-library collections (`.mt5`/`.mc6`), Firefly-only shaders, EEVEE-specific tuning.
+**Open:** confirm-or-not on apply; what a MAT does to a material the mesh doesn't have.
 
 ## Open decisions
 
