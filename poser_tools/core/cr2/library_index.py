@@ -40,8 +40,10 @@ from .runtime_index import walk_roots
 
 # 2: a `targetGeom ... name - hidden 1` visibility file is no longer classified as a removal
 # (a removal must declare its empty delta list).
-# Entry answers are cached by file stamps alone, so a rule change must invalidate them here.
-MANIFEST_VERSION = 2
+# 3: only files in Poser's own library category folders are entries (POSER_LIBRARY_CATEGORIES).
+# Entry answers are cached by file stamps alone, so a rule change must invalidate them here; the
+# bump also makes Preferences say the index needs rebuilding.
+MANIFEST_VERSION = 3
 HEAD_BYTES = 16384
 # Orchestrators nest two or three deep in practice (an entry, an "all" file, the leaves).
 # The cap only stops a pathological tree; hitting it marks the entry incomplete.
@@ -64,6 +66,22 @@ _DELTAS_RE = re.compile(r"\bdeltas\b")
 # ---------------------------------------------------------------------------
 # Classification
 # ---------------------------------------------------------------------------
+
+# The folders under Runtime/Libraries that Poser's Library palette shows. Anything else there
+# (`!DAZ`, `!Adz`, `morphs`, ...) is a vendor's store of the files the packages in these folders
+# readScript; Poser never lists it, and those files aren't meant to be applied on their own
+# (owner, 2026-11-17). On the owner's library all 31 such files that classified as packages were
+# read by a package under `pose`, so nothing becomes unreachable.
+POSER_LIBRARY_CATEGORIES = frozenset({
+    "camera", "character", "face", "hair", "hand", "light", "materials", "pose", "props", "scene",
+})
+
+
+def in_poser_library(category: str) -> bool:
+    """True when `category` (a path below Runtime/Libraries) is inside one of Poser's own folders."""
+    first = category.replace("\\", "/").split("/", 1)[0].lower()
+    return first in POSER_LIBRARY_CATEGORIES
+
 
 def is_delta_leaf(name: str, category: str) -> bool:
     """True for the per-morph files a package points at, which are never entries themselves."""
@@ -450,7 +468,8 @@ def build_manifest(roots, previous=None, signature_extra=None, progress=None, ca
 
     candidates = [
         (root, item) for root, item in walk_roots(roots)
-        if item.ext in PACKAGE_EXTENSIONS and not is_delta_leaf(item.name, item.category)
+        if item.ext in PACKAGE_EXTENSIONS and in_poser_library(item.category)
+        and not is_delta_leaf(item.name, item.category)
     ]
 
     if prefetch and not prior:

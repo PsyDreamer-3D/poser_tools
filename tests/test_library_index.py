@@ -414,3 +414,22 @@ def test_the_asset_signature_changes_with_the_format_and_the_blender_version(lib
     first = li.build_manifest([library.path], signature_extra=li.asset_signature("5.3.0"))
     other = li.build_manifest([library.path], previous=first, signature_extra=li.asset_signature("5.0.1"))
     assert other["stats"]["reused"] == 0
+
+
+def test_only_poser_library_category_folders_hold_entries():
+    assert li.in_poser_library("pose/!A3-H3 MORExp1 INJ")
+    assert li.in_poser_library("Pose/AM/Wolf 2") and li.in_poser_library("Face")
+    assert not li.in_poser_library("!Adz/HiroGen")
+    assert not li.in_poser_library("morphs") and not li.in_poser_library("")
+
+
+def test_vendor_folders_beside_the_categories_are_not_entries(lib):
+    # The !Adz layout: leaf files named <morph>.InjDeltas, which the name rule doesn't catch.
+    lib.write("!Adz/Hiro/Frenulum.InjDeltas.pz2", INJ_LEAF)
+    lib.write("!Adz/Hiro/Frenulum.RemDeltas.pz2", REM_LEAF)
+    lib.write("morphs/Loose.pz2", INJ_LEAF)
+    lib.write("Pose/Hiro/Frenulum.pz2", _orchestrator(":Runtime:libraries:!Adz:Hiro:Frenulum.InjDeltas.pz2"))
+    lib.write("Pose/Hiro/Frenulum Off.pz2", _orchestrator(":Runtime:libraries:!Adz:Hiro:Frenulum.RemDeltas.pz2"))
+    m = li.build_manifest([lib.path])
+    assert sorted(_entries(m)) == ["Pose/Hiro/Frenulum Off.pz2", "Pose/Hiro/Frenulum.pz2"]
+    assert m["stats"]["entries"] == 2
