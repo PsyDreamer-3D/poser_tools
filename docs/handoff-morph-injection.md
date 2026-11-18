@@ -1526,6 +1526,18 @@ produce one: two simulated presses arrive as two `PRESS` events (a diagnostic ke
 `DOUBLE_CLICK`), because Blender derives double-clicks from real input only; and driving the
 owner's desktop with `xdotool` was ruled out. Left to the owner's GUI test.
 
+**No conflict outside our assets (owner asked, verified).** The item lives in "File Browser Main",
+which also serves every ordinary file dialog, so it must never take a double-click that isn't ours.
+What stands in the way is the operator's poll: True only for one of our package assets with a mesh
+active (a file dialog has no `context.asset` at all). That a failed poll hands the event on was probed
+with the same mechanism on a single press, which `event_simulate` can produce: a stand-in operator on
+`LEFTMOUSE` `PRESS`, first in the merged keymap ahead of `file.select`. Poll False: the tile was
+selected (Blender's item ran). Poll True: our item consumed the press and nothing was selected. When it
+does take a double-click, on our assets, it replaces Blender's `file.select(open=True)` and
+`file.mouse_execute`, which do nothing for an asset (they open directories and confirm file dialogs).
+The item is listed in Preferences → Keymap → File Browser → File Browser Main, where a user can turn it
+off.
+
 **GUI items above** (right-click entry, side panel, shelf clicks, dialogs from the Asset Browser):
 confirmed by the owner's test. Still not exercised: Windows/macOS.
 
