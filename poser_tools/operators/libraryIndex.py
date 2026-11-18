@@ -67,6 +67,34 @@ def _work(job: _Job) -> None:
         job.error = f"{type(exc).__name__}: {exc}\n{traceback.format_exc()}"
 
 
+def _refresh_open_asset_lists(context) -> int:
+    """Make every open Asset Browser and 3D Viewport asset shelf re-read the library; returns how many.
+
+    Blender doesn't watch library folders: an open shelf keeps listing assets from files a build
+    just deleted until something refreshes it (probed on 5.3, docs/handoff-morph-injection.md 7.4).
+    asset.library_refresh is the only way in (no data API for it), and it acts on the asset list of
+    the region it runs in, hence one call per Asset Browser and per shelf region. Its poll is False
+    for a shelf that never loaded a list, which then reads fresh when first shown.
+    """
+    refreshed = 0
+    for window in context.window_manager.windows:
+        for area in window.screen.areas:
+            if area.type == 'FILE_BROWSER' and area.ui_type == 'ASSETS':
+                region_type = 'WINDOW'
+            elif area.type == 'VIEW_3D':
+                region_type = 'ASSET_SHELF'
+            else:
+                continue
+            region = next((r for r in area.regions if r.type == region_type), None)
+            if region is None:
+                continue
+            with context.temp_override(window=window, screen=window.screen, area=area, region=region):
+                if bpy.ops.asset.library_refresh.poll():
+                    bpy.ops.asset.library_refresh()
+                    refreshed += 1
+    return refreshed
+
+
 class OT_BuildLibraryIndex_Operator(bpy.types.Operator):
     """Index the injection and removal packages in your Poser Runtime folders as a Blender asset library"""
     bl_idname = "poser.build_library_index"
@@ -163,6 +191,13 @@ class OT_BuildLibraryIndex_Operator(bpy.types.Operator):
         # makes the files appear in the Asset Browser. Only ever done from this explicit click.
         _library, action = library_build.ensure_asset_library(
             context.preferences.filepaths.asset_libraries, LIBRARY_NAME, job.out_dir)
+        if not bpy.app.background:
+            try:
+                _refresh_open_asset_lists(context)
+            except RuntimeError as exc:
+                # The index itself is fine; only what is on screen may be out of date.
+                self.report({'WARNING'}, f"Couldn't refresh the open asset views ({exc}). "
+                            "Right-click in the Asset Browser and choose Refresh Asset Library.")
         _write_report(context, _REPORT_TEXT, library_build.report_lines(
             job.manifest, job.result, job.seconds, f"{LIBRARY_NAME!r} {action} at {job.out_dir}"))
 

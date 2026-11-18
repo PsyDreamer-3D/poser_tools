@@ -1496,6 +1496,20 @@ none becomes unreachable), nothing was added and no kept entry was renamed. The 
 dropdowns (`runtime_index`) still list vendor-folder files: they are the manual fallback, and picking a
 single leaf there is deliberate.
 
+**Stale shelf after a rebuild (owner, same day).** After the category-folder Update, the Asset
+Browser no longer listed the `!Adz` packages but the shelf still did. On disk the update was right
+(version 3, 3,783 entries, the `!Adz` file gone). Probed on 5.3 against a scratch copy of the library,
+shelf search narrowed to one folder's 3 assets, then that folder's `.blend` deleted: with no refresh
+the shelf keeps all 3 tiles indefinitely; `asset.library_refresh` run in an Asset Browser *or* in the
+shelf's own `ASSET_SHELF` region clears them. So there is no separate on-disk cache: Blender keeps
+the loaded list in memory and doesn't watch the folder. (The shelf lists the "All Libraries"
+reference, not ours by name.) The owner's browser was simply opened or switched after the update.
+Fix: `libraryIndex._refresh_open_asset_lists()`, called from Build Library Index's `_finish`, runs
+`asset.library_refresh` in every open Asset Browser and every 3D Viewport shelf region whose poll
+passes (a shelf that never loaded a list reads fresh when first shown). Verified the same way: it
+refreshed 2 views and the stale tiles went. A failure is reported as a warning naming Blender's own
+**Refresh Asset Library**; the index itself is unaffected. Only probed on 5.3.
+
 **GUI items above** (right-click entry, side panel, shelf clicks, dialogs from the Asset Browser):
 confirmed by the owner's test. Still not exercised: Windows/macOS.
 

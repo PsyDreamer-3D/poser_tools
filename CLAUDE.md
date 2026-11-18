@@ -258,7 +258,9 @@ don't resume it without a specific reason to.
   (`operators/libraryIndex.py`, modal like Apply: a worker thread that never touches `bpy`, a timer on
   the main thread for progress, Esc cancels, synchronous under `--background`) and
   `poser.remove_library_entry`, driven from Preferences (`properties/poserToolsPreferences.py`
-  `_draw_library`). Build status is a small `status.json` beside the manifest so drawing never loads
+  `_draw_library`). A finished build runs `asset.library_refresh` in every open Asset Browser and
+  shelf region (`_refresh_open_asset_lists`): Blender doesn't watch the folder, and an open shelf
+  otherwise keeps listing deleted assets until restart. Build status is a small `status.json` beside the manifest so drawing never loads
   the manifest; it goes stale when the roots, asset format or Blender version change. Registering the
   library edits the user's preferences, so it happens only from that explicit click, on the main
   thread. `INVOKE_DEFAULT` runs `execute()` under `--background`, so the interactive path is the same
