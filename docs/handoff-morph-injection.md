@@ -1441,8 +1441,10 @@ net. Blender's own brush shelf filters on `asset.metadata.get(...)` the same way
 `bpy_extras.asset_utils.AssetBrowserPanel` in the `TOOL_PROPS` region; `AssetShelf` has
 `bl_activate_operator`, `bl_drag_operator` and a `draw_context_menu` classmethod (the pose library
 uses all three). **There is no Python hook for an asset dropped from the Asset Browser** (the only
-drop handlers are `FileHandler`s, for files from the OS), and none for a double click. So the
-Asset Browser gets a right-click entry and a side-panel button, not drag-and-drop.
+drop handlers are `FileHandler`s, for files from the OS). The asset API has no click hook in the
+Asset Browser either, but an add-on *keymap* item is one (see "Double-click" below; this paragraph
+first said there was none). So the Asset Browser gets a right-click entry, a side-panel button and
+a double-click, not drag-and-drop.
 
 **As built:**
 
@@ -1509,6 +1511,20 @@ Fix: `libraryIndex._refresh_open_asset_lists()`, called from Build Library Index
 passes (a shelf that never loaded a list reads fresh when first shown). Verified the same way: it
 refreshed 2 views and the stale tiles went. A failure is reported as a warning naming Blender's own
 **Refresh Asset Library**; the index itself is unaffected. Only probed on 5.3.
+
+**Double-click in the Asset Browser (owner, same day).** The owner noticed a shelf click acts but an
+Asset Browser click doesn't (a click there is Blender's own selection), and had already noted that
+users won't think of right-clicking. `ui/packageAssets.register_menus()` now adds a `LEFTMOUSE`
+`DOUBLE_CLICK` item for `poser.use_morph_package` to the add-on keyconfig's "File Browser Main"
+keymap (skipped under `--background`, where there is no keyconfig). Probed on 5.3: in the merged
+user keymap our item comes **first**, ahead of Blender's `file.select` (open) and `file.mouse_execute`
+double-click items (add-on items are put at the head), so it is tried first; for any asset that isn't one
+of our packages the operator's poll fails and the event goes on to Blender's items. The first click of
+the double-click selects the asset, so `context.asset` is the one double-clicked. **Not verified:** a
+real double-click reaching the operator. `Window.event_simulate` (`--enable-event-simulate`) can't
+produce one: two simulated presses arrive as two `PRESS` events (a diagnostic keymap item saw no
+`DOUBLE_CLICK`), because Blender derives double-clicks from real input only; and driving the
+owner's desktop with `xdotool` was ruled out. Left to the owner's GUI test.
 
 **GUI items above** (right-click entry, side panel, shelf clicks, dialogs from the Asset Browser):
 confirmed by the owner's test. Still not exercised: Windows/macOS.

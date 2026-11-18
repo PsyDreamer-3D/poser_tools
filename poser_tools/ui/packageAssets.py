@@ -86,9 +86,26 @@ class VIEW3D_AST_poser_removal_packages(_PackageShelf, bpy.types.AssetShelf):
     kind = "removal"
 
 
+# (keymap, item) pairs added by register_menus(), removed again by unregister_menus().
+_keymap_items = []
+
+
 def register_menus():
     bpy.types.ASSETBROWSER_MT_context_menu.append(draw_asset_browser_context_menu)
+    # Double-click in the Asset Browser does what a shelf click does. The asset API has no
+    # click hook there; an add-on keymap item is the way in. The operator's poll refuses any
+    # asset that isn't one of our packages, and the event then goes on to Blender's own
+    # double-click items, so other libraries behave as before (probed, docs 7.4).
+    keyconfig = bpy.context.window_manager.keyconfigs.addon
+    if keyconfig is None:          # --background: no key configuration
+        return
+    keymap = keyconfig.keymaps.new(name="File Browser Main", space_type='FILE_BROWSER')
+    item = keymap.keymap_items.new(_OPERATOR, 'LEFTMOUSE', 'DOUBLE_CLICK')
+    _keymap_items.append((keymap, item))
 
 
 def unregister_menus():
+    for keymap, item in _keymap_items:
+        keymap.keymap_items.remove(item)
+    _keymap_items.clear()
     bpy.types.ASSETBROWSER_MT_context_menu.remove(draw_asset_browser_context_menu)

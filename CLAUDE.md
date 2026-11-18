@@ -333,7 +333,9 @@ Everything else is manual smoke test only — no `bpy`-dependent code has automa
 6c. With that library built and a mesh active: in the Asset Browser, right-click a package →
    **Apply to Active Mesh...** (or the button in the side panel's **Poser Morph Package** box) opens the
    morph picker (or Apply's popup with the package picked, on a mesh never injected into); a removal
-   package's **Remove from Active Mesh** removes its keys at once, Ctrl+Z restores them. In the 3D
+   package's **Remove from Active Mesh** removes its keys at once, Ctrl+Z restores them. Double-clicking
+   one of our packages does the same (a keymap item; other libraries' assets keep Blender's own
+   double-click). `Window.event_simulate` can't produce a double-click, so test it by hand. In the 3D
    Viewport, View → Asset Shelf shows the injection and removal shelves in Object Mode; clicking a tile
    does the same.
 6. Same mesh → **Remove Morph Injection**, pick the same package's `RemDeltas.*` file (or the
