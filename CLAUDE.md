@@ -235,7 +235,11 @@ don't resume it without a specific reason to.
 - Phase 7.3: the **library index** (7.3a/7.3b the engine, 7.3c the operator and Preferences UI; the shelf is 7.4).
   `core/cr2/library_index.py` classifies the owner's whole Poser library (16,405 entries, ~10 s warm,
   ~40 s cold) into injection/removal and builds a manifest of 3,816 shown entries in 133 source
-  folders, incrementally. `core/library_build.py` turns it into asset `.blend` files by running
+  folders, incrementally (20 roots; 3,783 in 129 on the owner's current 13 roots). Only files in
+  Poser's own category folders under `Runtime/Libraries` (`POSER_LIBRARY_CATEGORIES`: pose, face, ...)
+  are entries, as in Poser's Library palette: vendor folders beside them (`!DAZ`, `!Adz`) hold the files
+  packages `readScript`, and a file-name rule alone missed `!Adz`'s `<morph>.InjDeltas.pz2` naming.
+  The Apply/Remove dropdowns still list those files on purpose (manual escape hatch). `core/library_build.py` turns it into asset `.blend` files by running
   `core/library_assets_child.py` in a **child Blender process** (never in the user's session: building
   asset-marked stand-ins there would touch their file, undo stack and UI), writes the catalog file, saves
   the manifest last, and registers the folder as an asset library (`ensure_asset_library`, which must

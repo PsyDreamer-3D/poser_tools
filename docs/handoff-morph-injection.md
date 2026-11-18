@@ -654,7 +654,7 @@ Verified headless on the real Aiko3: applied EarFeline, EarDeer and BrowHeavy, t
 via its `RemDeltas.*`; all three gone, the record empty, and a repeat run reports "not present"
 with no error.
 
-## Phase 7 — Thumbnail library for picking packages (scoping, 2026-11-14; 7.0 to 7.3 done; 7.4 built, pending owner GUI test; 7.5+ not started)
+## Phase 7 — Thumbnail library for picking packages (scoping, 2026-11-14; 7.0 to 7.4 done; 7.5+ not started)
 
 **Goal.** Replace the two `prop_search()` dropdowns with a thumbnail grid for choosing injection and
 removal packages from the owner's Poser Runtime libraries, using Blender's Asset Shelf. The
@@ -1477,10 +1477,27 @@ accepts ours and refuses others, removal through the operator removed `BrowHeavy
 written), injection reached Apply with the package path, the picker branch was taken when a figure
 was remembered, and a missing package gives a message naming where it looked.
 
-**Not verified (needs the GUI):** the right-click entry and side panel appearing, `context.asset`
-being the right-clicked asset, a shelf click reaching the operator with `context.asset` set, how two
-shelves share the viewport's shelf region, the dialogs opening from the Asset Browser's area, and
-Ctrl+Z after a removal from the shelf.
+**Owner GUI test (2026-11-17):** the Asset Browser right-click entry, side panel and both shelves
+work. The owner notes the right-click entry isn't where a user would look first, but it is enough
+for now.
+
+**Category-folder rule (owner, same test).** The library listed `.pz2` files from vendor folders
+directly under `Runtime/libraries` (`!Adz/HiroGen/FrenulumAsymmetric.InjDeltas.pz2`). Those are
+the files a package under `pose` `readScript`s, not packages to apply on their own, and Poser's
+Library palette never shows them: it lists only its category folders. 7.3a only hid leaf files
+by name (`InjDeltas.*`/`RemDeltas.*` prefix, or a `Deltas` folder), which caught `!DAZ` but not
+`!Adz`'s `<morph>.InjDeltas.pz2` naming. Now an entry must also be inside one of Poser's
+category folders (`library_index.POSER_LIBRARY_CATEGORIES`: camera, character, face, hair, hand,
+light, materials, pose, props, scene; matched ignoring case). `MANIFEST_VERSION` 3, so an existing
+index shows as needing a rebuild. Measured on the owner's 13 current roots, rebuilt in memory
+(9.9 s): 3,814 → 3,783 shown, 132 → 129 folders; the 31 dropped are exactly the out-of-category
+ones (`!Adz` 28, `Posermatic-INJ` 2, `Morphs` 1), all 31 are read by a package under `pose` (so
+none becomes unreachable), nothing was added and no kept entry was renamed. The Apply/Remove
+dropdowns (`runtime_index`) still list vendor-folder files: they are the manual fallback, and picking a
+single leaf there is deliberate.
+
+**GUI items above** (right-click entry, side panel, shelf clicks, dialogs from the Asset Browser):
+confirmed by the owner's test. Still not exercised: Windows/macOS.
 
 ### Decisions
 
