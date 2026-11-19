@@ -1838,8 +1838,8 @@ warns once per texture not found.
 
 **Result on the whole library:** 12,825 as written; 6,120 relative to Runtime:Textures, 388 relative to Runtime,
 250 without the leading `:`; 685 `.bum` via their image; 494 by file name plus 31 chosen among several; 12 by
-a Windows path's Runtime tail; 1,360 NO_MAP now silent. **Still missing: 2,377 references, all `.jpg`, in 94
-MAT poses**, whose file name exists nowhere under the 13 roots (e.g. David's `D_BodyMapHi.jpg`: content not
+a Windows path's Runtime tail; 1,360 NO_MAP now silent. **Still missing: 2,377 references, all `.jpg`, in 29
+MAT poses** (94 before the `.bum` step), whose file name exists nowhere under the 13 roots (e.g. David's `D_BodyMapHi.jpg`: content not
 installed). Headless 5.0.1 on a real Aiko3 with the roots configured: `! All Aiko Map Male 01` loaded all 8
 textures (its `:textures:DAZ:...` eye maps relative to Runtime), the toon `!!Skin 01` found both
 `D:\My Documents\Poser\CelShaders\...` images by name in its own Runtime (not Silent Shadow (2016)'s copy) and
