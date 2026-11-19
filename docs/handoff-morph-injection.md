@@ -1518,8 +1518,9 @@ accepts ours and refuses others, removal through the operator removed `BrowHeavy
 written), injection reached Apply with the package path, the picker branch was taken when a figure
 was remembered, and a missing package gives a message naming where it looked.
 
-**Owner GUI test (2026-11-17):** the Asset Browser right-click entry, side panel and both shelves
-work. The owner notes the right-click entry isn't where a user would look first, but it is enough
+**Owner GUI test (2026-11-17):** the Asset Browser right-click entry, side panel and the shelf
+work. (Recorded at the time as "both shelves"; only the injection shelf was ever reachable, see the
+8.2 shelf correction below.) The owner notes the right-click entry isn't where a user would look first, but it is enough
 for now.
 
 **Category-folder rule (owner, same test).** The library listed `.pz2` files from vendor folders
@@ -1632,7 +1633,7 @@ none of the 70 were listed, so the shown set is unchanged (3,653), and 72 hidden
 `other`/`pose` to `armature`.
 
 **GUI items above** (right-click entry, side panel, shelf clicks, dialogs from the Asset Browser):
-confirmed by the owner's test. Still not exercised: Windows/macOS.
+confirmed by the owner's test, for the injection shelf only (8.2 shelf correction). Still not exercised: Windows/macOS.
 
 ### Decisions
 
@@ -1827,8 +1828,8 @@ imported through FBX takes a MAT the same way a figure does), on the same branch
 - `poser.use_morph_package` (idname kept: the shelves and the double-click keymap item are bound to it;
   label now "Use Poser Package") sends a `"material"` asset to `poser.apply_mat_pose` through
   `call_nested()`, whose dialog previews the match and is the confirmation; a mesh with no materials gets
-  a warning instead. Right-click / side panel read **Apply MAT Pose to Active Mesh...**; a third shelf,
-  `VIEW3D_AST_poser_material_packages`.
+  a warning instead. Right-click / side panel read **Apply MAT Pose to Active Mesh...**. (Built first as a
+  third shelf, `VIEW3D_AST_poser_material_packages`; see the shelf correction below.)
 - **Real library** (13 roots): 6,296 entries in 265 folders = 2,030 injection + 1,623 removal (unchanged)
   + **2,643 MAT poses** (Clothing 856, Hair 607, Base Figures 497, Custom Character Sets 329, Scenes,
   Props and Objects 308...); written by the real child on 5.3 in 9.4 s, 0 failures, 4,639 thumbnails and
@@ -1836,6 +1837,18 @@ imported through FBX takes a MAT the same way a figure does), on the same branch
   DP-Thourobread MATs with their thumbnails). Headless 5.0.1: a stand-in MAT asset through the click
   operator applied Lady Xtaci to a real Aiko3 (31 replaced); a cube without materials got the warning;
   a missing file said where it looked.
+- **Shelf correction (owner's GUI test, same day).** MAT poses showed in the Asset Browser but not on the
+  shelf. Probed on 5.3 with stand-in shelves: with three shelves polling alike, the 3D View's shelf region
+  shows the **first registered one only** (`context.asset_shelf` was always the injection shelf), and Blender's
+  UI has no switcher between shelves (5.0.1's and 5.3's `bl_ui/asset_shelf.py` hold only the display popover).
+  So the removal shelf had never been reachable either, since 7.4; the owner's 7.4 test had only exercised
+  the injection one. Fixed with **one shelf**, `VIEW3D_AST_poser_packages`, whose `asset_poll` reads
+  `WindowManager.poser_shelf_kind` (Injection / Removal / MAT Poses, default Injection, per session). The
+  same probe showed a filter read in `asset_poll` re-filters on the next redraw, no library refresh needed.
+  The switch is in the shelf's own settings popover (appended to `ASSETSHELF_PT_display`, only when it is
+  our shelf) and in a **Poser Library Shelf** sidebar panel, which also says how to open the shelf. No
+  "All": in a mixed shelf, a removal tile is one stray click from deleting shape keys. Checked in a real
+  window: the one shelf lists morph packages, removal tiles and MAT poses as the switch changes.
 - **Library name:** still "Poser Morph Packages" though it now holds MAT poses. Renaming it would leave
   the old entry registered under the old name (`ensure_asset_library` matches by name); left for the
   owner to decide.

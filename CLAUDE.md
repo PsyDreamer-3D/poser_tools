@@ -227,7 +227,9 @@ don't resume it without a specific reason to.
   `docs/handoff-morph-injection.md`; 7.0 to 7.4 are built (7.2, 7.3 and 7.4 below).
 - Phase 7.4: **using a package from the library** (`poser.use_morph_package`,
   `operators/useMorphPackage.py`; `ui/packageAssets.py`). One operator behind the Asset Browser's
-  right-click entry, a side panel there, and two 3D Viewport shelves (injection, removal; opened from
+  right-click entry, a side panel there, and the one Poser Library shelf (Injection / Removal / MAT Poses
+  switch, `WindowManager.poser_shelf_kind`: Blender shows one shelf per 3D View and can't switch between
+  shelves that poll alike, so kinds share it; opened from
   View → Asset Shelf). It reads the asset's `poser_root`/`poser_rel_path`/`poser_kind` through
   `context.asset.metadata` (read live on 5.3; `core/library_build.resolve_package_asset()` falls back to
   tags + description and to the other Runtime roots). Injection opens the 7.2 picker when the mesh
@@ -280,7 +282,7 @@ don't resume it without a specific reason to.
   `_work()` called inline; the modal wrapper itself needs the GUI.
 - **Phase 8.2: MAT poses in the library.** Kind `"material"` (`library_index._is_mat_pose`: one file of
   `material` blocks and nothing else, judged on the whole file) is shown, every MAT included, props and
-  clothing too (owner). A third shelf; `poser.use_morph_package` (idname kept for its bindings) sends MAT
+  clothing too (owner). On the shelf behind its MAT Poses switch; `poser.use_morph_package` (idname kept for its bindings) sends MAT
   assets to `poser.apply_mat_pose`'s dialog. `read_head()` normalizes `\r` line endings: old Mac files
   slipped past every `^`-anchored pattern.
 - **Phase 8.1: MAT poses** (`poser.apply_mat_pose`, `operators/applyMatPose.py`, `ui/applyMatPose.py`;
@@ -372,7 +374,8 @@ Everything else is manual smoke test only — no `bpy`-dependent code has automa
    package's **Remove from Active Mesh** removes its keys at once, Ctrl+Z restores them. Double-clicking
    one of our packages does the same (a keymap item; other libraries' assets keep Blender's own
    double-click). `Window.event_simulate` can't produce a double-click, so test it by hand. In the 3D
-   Viewport, View → Asset Shelf shows the injection and removal shelves in Object Mode; clicking a tile
+   Viewport, View → Asset Shelf shows the Poser Library shelf in Object Mode; its settings popover (or the
+   sidebar's Poser Library Shelf panel) switches Injection / Removal / MAT Poses; clicking a tile
    does the same.
 6. Same mesh → **Remove Morph Injection**, pick the same package's `RemDeltas.*` file (or the
    original `InjDeltas.*` one — either works) via the same searchable dropdown. Expect: near-instant
@@ -383,7 +386,7 @@ Everything else is manual smoke test only — no `bpy`-dependent code has automa
    materials in Material Preview, 31 `... (original)` materials with fake users, a **Poser MAT Pose Report**.
    Ctrl+Z restores them. A second MAT adds backups only for materials the first didn't touch. With the
    library index updated, the same MAT in the Asset Browser (double-click, right-click → **Apply MAT Pose to
-   Active Mesh...**) or on the MAT shelf opens that dialog with the file picked.
+   Active Mesh...**) or on the shelf switched to MAT Poses opens that dialog with the file picked.
 
 For a quick check without Blender: `python -m py_compile` the tree, or import `poser_tools` under a
 stubbed `bpy` and call `register()`/`unregister()` — that catches class-tuple typos and bad import
