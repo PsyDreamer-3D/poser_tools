@@ -1811,6 +1811,65 @@ suffix/case, the real Lady Xtaci MAT against Aiko3's CR2 names, and the parser f
 Principled; absolute Windows texture paths in old MATs never resolve (a basename search across the roots
 could find them).
 
+**Ruled out (owner, 2026-11-19): translating Poser's toon nodes.** Blender's nearest equivalents are the
+Toon BSDF (Cycles only) for `toon` and an RGB/Color node for `simple_color`, but the owner's own toon MATs
+(`Aiko3 ToonShaders`) were a specialized setup they have since replaced with better results in EEVEE, so
+reproducing them isn't worth the work. The translator keeps reporting these nodes as left out, so a toon
+MAT still applies its other settings and says what it skipped.
+
+#### 8.3 as built (2026-11-19): finding textures the way Poser does
+
+**Measured first** (every texture reference in the owner's 2,643 MAT poses, 24,542 in all). Only 4 distinct
+absolute Windows paths (24 references, 5 MATs: CookieMilCat, the owner's Aiko3 ToonShaders, TreadZ WorkBootZ),
+but **45% of ordinary colon paths failed**: 10,469 of 23,294 in 863 MATs, plus all 973 bare file names. Most
+are written relative to `Runtime:Textures` (`:DAZ:...`, `:Stonemason:...`) or to `Runtime` (`:textures:DAZ:...`),
+which Poser resolves (owner); 1,360 were `:NO_MAP:`, Poser's "no texture", reported as missing; 685 named a
+`.bum` (Poser's own bump format) that doesn't exist, each with its source image beside the name.
+
+**As built.** `core/cr2/texture_paths.py` (GPL, no bpy) `resolve_texture(ref, mat_file, roots, index)` tries in
+order: NO_MAP (any spelling) is no texture; the path as written; a colon path missing its leading `:`;
+relative to `Runtime`, then `Runtime:Textures`; a Windows path's tail from its last `Runtime\`; a `.bum`'s
+source image (same stem, image extensions, through the same steps); last, the file name anywhere under the
+roots (`TextureIndex`, one walk, built only when a lookup needs it), preferring the match sharing the most
+trailing folders with the reference, then the MAT's own content root. The owner's view: the Windows and
+by-name steps are what Poser does before asking the user to find a file. `material_builder.make_image_loader`
+uses it; the MAT report lists each texture found by a fallback once (reference, file, which step) and still
+warns once per texture not found.
+
+**Result on the whole library:** 12,825 as written; 6,120 relative to Runtime:Textures, 388 relative to Runtime,
+250 without the leading `:`; 685 `.bum` via their image; 494 by file name plus 31 chosen among several; 12 by
+a Windows path's Runtime tail; 1,360 NO_MAP now silent. **Still missing: 2,377 references, all `.jpg`, in 29
+MAT poses** (94 before the `.bum` step), whose file name exists nowhere under the 13 roots (e.g. David's `D_BodyMapHi.jpg`: content not
+installed). Headless 5.0.1 on a real Aiko3 with the roots configured: `! All Aiko Map Male 01` loaded all 8
+textures (its `:textures:DAZ:...` eye maps relative to Runtime), the toon `!!Skin 01` found both
+`D:\My Documents\Poser\CelShaders\...` images by name in its own Runtime (not Silent Shadow (2016)'s copy) and
+now reports no missing texture (was 6), only the toon nodes left out.
+
+**The `.bum` format (investigated 2026-11-19, all 18 on the owner's drive).** Every `.bum` is an uncompressed
+Windows BMP (`BM` header, 54-byte header, or 1,078 with a 256-colour palette) with another extension; Blender
+loads it as BMP by its header. Two kinds:
+- **15 are 24-bit tangent-space normal maps with the Z channel dropped** (first read as plain slope maps; the
+  owner pointed out they look like normal maps). R and G average 0.5, B is always 0. The decisive test: in all
+  15, (2R−1)² + (2G−1)² never exceeds 1 (0.00% of pixels; the maximum is exactly 1.00 in five files), which is
+  what a unit normal's X/Y do and per-channel clipped slopes don't; almost no pixel sits at 0 or 1 (≤0.8%).
+  Rebuilding Z as √(1−X²−Y²) gives an ordinary lavender normal map with the same relief as the `.jpg`
+  (`Test_Poser_Assets/bum_comparison.png`: Gold floor design, T-shirt folds, stucco). Against the same-named
+  `.jpg`'s slopes, G follows the vertical slope inverted (−0.53 to −0.74, Blender/OpenGL convention) and R the
+  horizontal slope *not* inverted (+0.47 to +0.78), so X is flipped relative to Blender's convention (by
+  correlation; not checked by eye). The owner adds that Poser is Y-up: the axis out of a surface is Poser's Y,
+  so in Poser's terms the `.bum` keeps the normal's X and Z and drops Y (Blender's Z). Mapping texture U/V onto
+  Poser's X/Z may be what flips X relative to Blender's tangent convention; that mapping wasn't confirmed, but
+  the conversion for using a `.bum` directly follows from the measured signs either way: rebuild the
+  out-of-surface component, flip R, keep G. The ~0.7 rather than 1 says Poser's filter differs from a central
+  difference (and the `.bum` likely predates the `.jpg`'s compression). `Roof.bum` is 512 px from a 191 px
+  `.jpg`, so Poser also resamples.
+- **3 are 8-bit greyscale** (ardath3d): exactly the `.jpg`'s pixels (correlation 1.000).
+Every one has its source `.jpg` beside it, and every one of the 685 `.bum` references in MAT poses names a
+missing `.bum` whose source image exists. **Decision:** use the source image as the height map (what the .bum
+step does): it is the original, and a `.bum` fed to a Bump node as height would be wrong. A `.bum` found without
+its image is reported as "a normal map with no Z channel, not converted" rather than "not found"; using one
+directly (rebuild Z, flip X, Normal Map node) is possible but has no case on the owner's drive.
+
 #### 8.2 as built (2026-11-18): MAT poses in the library, the Asset Browser and a shelf
 
 Owner: list every MAT pose, props and clothing included ("we can import props as well": a prop

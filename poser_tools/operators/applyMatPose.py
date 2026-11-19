@@ -156,8 +156,12 @@ class OT_ApplyMatPose_Operator(bpy.types.Operator):
                                    f"{obj.name}. See the material names in its slots.")
             return {'CANCELLED'}
 
-        warnings = []
-        load_image = make_image_loader(path, get_runtime_roots(context), lambda _t, msg: warnings.append(msg))
+        warnings, texture_notes = [], []
+
+        def collect(types, message):
+            (warnings if 'WARNING' in types else texture_notes).append(message)
+
+        load_image = make_image_loader(path, get_runtime_roots(context), collect)
         replaced, backups = [], []
         for mat_name, slot_name in match["pairs"]:
             bl_mat = bpy.data.materials[slot_name]
@@ -169,7 +173,7 @@ class OT_ApplyMatPose_Operator(bpy.types.Operator):
                 bl_mat[_BACKUP_PROP] = backup.name
                 backups.append(backup.name)
             kind = build_material_nodes(bl_mat, materials[mat_name], load_image,
-                                        reporter=lambda _t, msg, m=slot_name: warnings.append(f"{m}: {msg}"))
+                                        reporter=lambda t, msg, m=slot_name: collect(t, f"{m}: {msg}"))
             replaced.append(f"  {slot_name} <- {mat_name} ({kind})")
 
         lines = [f"MAT file: {path}", f"Mesh: {obj.name}",
@@ -182,6 +186,9 @@ class OT_ApplyMatPose_Operator(bpy.types.Operator):
                          f"{match['untouched']}")
         if warnings:
             lines += ["", f"{len(warnings)} warning(s):", *[f"  {w}" for w in warnings]]
+        if texture_notes:
+            lines += ["", f"{len(texture_notes)} texture(s) found the way Poser looks for them, not at the path written:",
+                      *[f"  {n}" for n in texture_notes]]
         lines += ["", "Replaced:", *replaced]
         if backups:
             lines += ["", "Originals kept as:", *[f"  {b}" for b in backups]]

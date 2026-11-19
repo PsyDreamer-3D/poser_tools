@@ -40,6 +40,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Blender 5.1.2 can crash importing a multi-figure FBX (hair or clothing alongside the figure). This is an upstream bug in `BM_mesh_bm_from_me()`, [fixed in Blender 5.2](https://projects.blender.org/blender/blender/pulls/156302) and not backported; `poser_tools` has no workaround.
 
 ### Fixed
+- **Apply MAT Pose** finds textures the way Poser does: paths written relative to `Runtime` or `Runtime:Textures` (`:DAZ:…`, `:textures:…`), absolute Windows paths from the author's machine, Poser `.bum` bump files (their source image) and, last, the file name anywhere in your Runtime folders. On a real library 45% of MAT texture references didn't resolve before; now 2,377 of 24,542 don't, all files that aren't installed. `NO_MAP` is no longer reported as a missing texture.
 - Library files with old Mac line endings (a bare `\r`) were misread by the library index's quick checks; 8 MAT poses were left out.
 - Poser materials whose name contains a space (`material Quilt Trim`) were read as no material at all; 41 MAT files on a real library read nothing.
 - A Poser shader node with an empty `file` line (DAZ Firearms) cut a material file short: one prop MAT read 1 of its 53 materials.
