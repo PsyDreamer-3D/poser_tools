@@ -1025,6 +1025,43 @@ produce a duplicate.
 **Not in 7.2:** Remove stays name-based and unchanged (the list module should be reusable by it
 later, "remove the selected morphs"); a disk cache; off-thread parsing.
 
+### Package dials (owner's review, 2026-11-18)
+
+**Problem.** Some injection packages load their files and then dial the morphs, like Poser's character
+presets. Lady Xtaci's `MOR INJ.pz2` `readScript`s 46 V3 InjDeltas files, then sets 38 `valueParm`s on BODY
+(`PBMTone` 0.232, `PBMBreastSize8` -1.012...), 18 `targetGeom`s on the head (`HdCeltic` 0.798...), the eyes'
+`CorneaBulge`/`IrisIn` (1, already in the figure) and a BODY `propagatingScale` of 0.93. Apply injected the
+morphs at 0, so the character never appeared. Measured on the owner's library: 20 of the 2,030 listed
+injection packages dial values in their own file (279 `valueParm`, 376 `targetGeom` dials); 6 or 7 of them
+also set a scale.
+
+**Decision (owner, asked):** set every dialed morph, including ones already on the mesh; Poser does the
+same. Alternatives were "only the morphs this run adds" and "leave them at 0".
+
+**As built.** `injection_package.package_dials(path, extra_roots)` follows `readScript` like
+`resolve_package_files()` but parses the **orchestrators** (files holding `readScript`), never the leaves:
+delta files carry `keys { k 0 0 }`, which would otherwise reset a dial the user set, and a single inline
+delta file therefore dials nothing. `targetGeom`/`valueParm` channels with a keyed value are dials; any
+other keyed channel (`scale`, bones on a package picked through Apply's dropdown) goes to `"other"`.
+`match_dials_to_shape_keys()` finds each dial's key by Apply's own record (`poser_injected_morphs`), then
+`present_name_candidates(label, internal)`; one morph dialed on two actors (left/right eye) is one key, the
+first value wins and a differing second is reported. `_set_package_dials()` runs at the end of
+`_apply_morphs()`, widens `slider_min`/`slider_max` to fit the value (a value outside the slider range is
+held to it; Blender caps the range at -10..10, so anything beyond is clamped and reported), and writes report
+lines for what was set, what isn't on the mesh, conflicts and skipped non-dial settings. Re-applying a
+package whose morphs are all present used to stop at the picker ("Nothing to apply"); if the package
+dials, the picker now hands Apply `selected_morphs="[]"`, which Apply treats as "set the dials only" (no
+parsing, no vertex matching).
+
+**Verified.** pytest: dials from orchestrators only (a leaf's `k 0 0` and a leaf-only file's value are
+ignored), scale to "other", a single delta file dials nothing, the matcher (record, label, `p`-less label,
+missing, conflict, never Basis), and the real `MOR INJ.pz2` (59 dials, `PBMBreastSize8` -1.012, scale 0.93).
+Headless on 5.0.1 with a real Aiko3 import and a test package (the real BrowHeavy delta file plus dials):
+BrowHeavy injected at -0.4 with its slider minimum widened, an FBX key dialed to 2.5 with its maximum
+widened, a missing morph and the scale reported; after resetting both to 0, the dials-only call set them again.
+**Not verified:** the picker's hand-over to the dials-only call (the dialog needs the GUI), and a real V3
+character on a V3 mesh (no V3 figure here).
+
 ### 7.3 plan: the library index (scoped 2026-11-15; 7.3a, 7.3b and 7.3c built)
 
 **What 7.3 delivers.** A built, registered Blender asset library holding one stand-in `Scene` asset
