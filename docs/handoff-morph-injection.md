@@ -1856,7 +1856,11 @@ loads it as BMP by its header. Two kinds:
   (`Test_Poser_Assets/bum_comparison.png`: Gold floor design, T-shirt folds, stucco). Against the same-named
   `.jpg`'s slopes, G follows the vertical slope inverted (−0.53 to −0.74, Blender/OpenGL convention) and R the
   horizontal slope *not* inverted (+0.47 to +0.78), so X is flipped relative to Blender's convention (by
-  correlation; not checked by eye). The ~0.7 rather than 1 says Poser's filter differs from a central
+  correlation; not checked by eye). The owner adds that Poser is Y-up: the axis out of a surface is Poser's Y,
+  so in Poser's terms the `.bum` keeps the normal's X and Z and drops Y (Blender's Z). Mapping texture U/V onto
+  Poser's X/Z may be what flips X relative to Blender's tangent convention; that mapping wasn't confirmed, but
+  the conversion for using a `.bum` directly follows from the measured signs either way: rebuild the
+  out-of-surface component, flip R, keep G. The ~0.7 rather than 1 says Poser's filter differs from a central
   difference (and the `.bum` likely predates the `.jpg`'s compression). `Roof.bum` is 512 px from a 191 px
   `.jpg`, so Poser also resamples.
 - **3 are 8-bit greyscale** (ardath3d): exactly the `.jpg`'s pixels (correlation 1.000).

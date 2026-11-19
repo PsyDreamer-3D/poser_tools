@@ -115,8 +115,9 @@ def resolve_texture(reference: str, source_file: str, roots=None, index: Texture
                 return found, "Poser .bum bump map, used the image it was made from" + (f" ({note})" if note else "")
         if resolve_poser_path(ref if ref.startswith(":") else ":" + ref, source_file, extra_roots=roots,
                               dir_cache=dir_cache) and not _WINDOWS_ABSOLUTE_RE.match(ref):
-            # The .bum is there but its source image isn't. It is a normal map missing its Z channel
-            # (and with X inverted against Blender's convention, by correlation), not a height map;
+            # The .bum is there but its source image isn't. It is a normal map missing its out-of-surface
+            # channel (Poser's Y, Poser being Y-up; Blender's Z), with X inverted against Blender's
+            # tangent convention by correlation; not a height map.
             # converting it isn't done, since no .bum on the owner's drive lacks its image.
             return None, "Poser .bum without the image it was made from (a normal map with no Z channel, not converted)"
         return None, "not found"
