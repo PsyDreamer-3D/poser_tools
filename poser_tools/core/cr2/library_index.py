@@ -41,9 +41,11 @@ from .runtime_index import walk_roots
 # 2: a `targetGeom ... name - hidden 1` visibility file is no longer classified as a removal
 # (a removal must declare its empty delta list).
 # 3: only files in Poser's own library category folders are entries (POSER_LIBRARY_CATEGORIES).
+# 4: a package that moves bones is an "armature" pose and hidden, even if it also injects.
+# 5: `thighLength` marks a pose file too (owner's tip; 70 pose files have it but no bone channel).
 # Entry answers are cached by file stamps alone, so a rule change must invalidate them here; the
 # bump also makes Preferences say the index needs rebuilding.
-MANIFEST_VERSION = 3
+MANIFEST_VERSION = 5
 HEAD_BYTES = 16384
 # Orchestrators nest two or three deep in practice (an entry, an "all" file, the leaves).
 # The cap only stops a pathological tree; hitting it marks the entry incomplete.
@@ -60,6 +62,11 @@ LEAF_POSE = "morph-values"
 LEAF_OTHER = "other"
 
 _INDEXES_RE = re.compile(r"\bindexes\s+[1-9]")
+# What a pose file has and a morph file doesn't: a bone channel (`rotateX xrot`, `translateY ytran`
+# inside an actor; morph files only carry `targetGeom`/`valueParm` channels), or the `thighLength`
+# line Poser writes into pose files (owner's tip: 3,352 files on their library have it, 70 of them
+# with no bone channel at all, e.g. the empty second block of a saved pose).
+_BONE_CHANNEL_RE = re.compile(r"^[ \t]*(?:(?:rotate|translate)[XYZ][ \t]|thighLength\b)", re.M)
 _DELTAS_RE = re.compile(r"\bdeltas\b")
 
 
@@ -147,6 +154,7 @@ class _Visit:
         self.kinds = Counter()
         self.missing = 0
         self.truncated = False
+        self.moves_bones = False
         self.visited = []     # every file read, for the cache stamps
 
 
@@ -162,6 +170,8 @@ def _visit(path, depth, seen, state):
     head = read_head(path)
     if head is None:
         return
+    if not state.moves_bones and _BONE_CHANNEL_RE.search(head):
+        state.moves_bones = True
     # The cheap substring test first: leaf files are the big ones, and tokenizing
     # them only to learn they hold no directive would dominate the cost.
     tokens = ()
@@ -198,9 +208,13 @@ def classify_entry(path: str, roots, dir_cache=None, leaf_cache=None) -> dict:
     pass much cheaper because leaf files are shared between entries.
 
     Returns {"kind", "incomplete", "mixed", "n_files", "n_missing", "stamps"}:
-    - kind: "injection" (some leaf has deltas), "pmd" (binary morphs, unsupported),
-      "removal" (leaves re-declare channels as `name -`), "pose" (dials morph values,
-      no deltas), "missing" (every target unresolved), else "other".
+    - kind: "armature" (some file it reads sets bone rotations/translations, or carries
+      Poser's pose-file `thighLength` line: a body pose,
+      even when it also injects the morphs it dials, like V3 Spellcaster, or a "Fit"
+      package that moves the hip as well), "injection" (some leaf has deltas), "pmd"
+      (binary morphs, unsupported), "removal" (leaves re-declare channels as `name -`),
+      "pose" (dials morph values, no deltas), "missing" (every target unresolved), else
+      "other". Only injection and removal are shown (SHOWN_KINDS).
     - incomplete: some target could not be found, or the tree was too deep.
     - mixed: an injection that also contains removal leaves (it can offer both).
     - stamps: [(path, mtime_ns, size)] of every file read, to tell later whether
@@ -211,7 +225,13 @@ def classify_entry(path: str, roots, dir_cache=None, leaf_cache=None) -> dict:
     _visit(path, 0, set(), state)
 
     kinds = state.kinds
-    if kinds[LEAF_INJECTION]:
+    if state.moves_bones:
+        # Owner's rule (2026-11-17): the library holds morph packages only. Applying a pose
+        # means translating Poser's bone space through the FBX import's bone-roll fixes, which
+        # this add-on doesn't do; the morphs it would inject are still reachable through
+        # Apply's own dropdown.
+        kind = "armature"
+    elif kinds[LEAF_INJECTION]:
         kind = "injection"
     elif kinds[LEAF_PMD]:
         kind = "pmd"

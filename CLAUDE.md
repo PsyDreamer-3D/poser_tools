@@ -239,7 +239,11 @@ don't resume it without a specific reason to.
   Poser's own category folders under `Runtime/Libraries` (`POSER_LIBRARY_CATEGORIES`: pose, face, ...)
   are entries, as in Poser's Library palette: vendor folders beside them (`!DAZ`, `!Adz`) hold the files
   packages `readScript`, and a file-name rule alone missed `!Adz`'s `<morph>.InjDeltas.pz2` naming.
-  The Apply/Remove dropdowns still list those files on purpose (manual escape hatch). Catalogs are
+  The Apply/Remove dropdowns still list those files on purpose (manual escape hatch). A package any of
+  whose files sets a bone channel (`rotate`/`translate` X/Y/Z) or carries Poser's pose-file `thighLength` line
+  is an `"armature"` pose and hidden, even when
+  it also injects (V3 Spellcaster, Channing "Fit" packages that move the hip): the library is morph packages
+  only, poses stay out (FBX bone rolls). MAT poses are planned as Phase 8 in the handoff doc. Catalogs are
   `<Runtime>/<Category>/...` like Poser's Library palette: the Runtime's Preferences Label, else its folder
   name (`runtime_names()`), and the category folder's first letter capitalized (`pose`/`Pose` merged).
   The names are layout (`manifest["layout"]`, outside the signature), so a renamed Label reuses every

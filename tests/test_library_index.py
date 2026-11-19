@@ -13,7 +13,7 @@ from core.cr2.injection_package import resolve_package_files
 from core.cr2.injection_scan import scan_channels
 from core.cr2.poser_io import read_poser_file
 from synthetic_library import (  # noqa: F401  (the fixtures are used by name)
-    HIDE_LEAF, HIDE_NAMED_LEAF, INJ_LEAF, OTHER_LEAF, PMD_LEAF, PMD_REMOVAL_LEAF, POSE_LEAF, REM_HIDDEN_LEAF,
+    BONE_LEAF, HIDE_LEAF, HIDE_NAMED_LEAF, INJ_LEAF, OTHER_LEAF, PMD_LEAF, PMD_REMOVAL_LEAF, POSE_LEAF, REM_HIDDEN_LEAF,
     REM_LEAF, _orchestrator, lib, library,
 )
 
@@ -82,6 +82,7 @@ def test_targets_are_matched_ignoring_case(lib):
 
 @pytest.mark.parametrize("leaf, kind", [
     (REM_LEAF, "removal"), (HIDE_LEAF, "pose"), (POSE_LEAF, "pose"), (PMD_LEAF, "pmd"), (OTHER_LEAF, "other"),
+    (BONE_LEAF, "armature"),
     (HIDE_NAMED_LEAF, "pose"), (REM_HIDDEN_LEAF, "removal"), (PMD_REMOVAL_LEAF, "pmd"),
 ])
 def test_entry_kinds(lib, leaf, kind):
@@ -476,3 +477,45 @@ def test_renaming_a_runtime_reuses_every_answer_and_rewrites_only_its_folders(li
     assert len(li.changed_folders(first, renamed)["write"]) == len(renamed["folders"])
     again = li.build_manifest([library.path], previous=renamed, runtime_labels={library.path: "Mine"})
     assert li.changed_folders(renamed, again)["write"] == []
+
+
+# ---- packages that move bones are poses, whatever else they do (owner, 2026-11-17) -------
+
+def _inline(*parts):
+    """One file: readScript lines, then actor blocks, the way a pose file is laid out."""
+    return "{\n" + "".join(parts) + "}\n"
+
+
+def test_a_pose_that_injects_its_expression_morphs_is_an_armature_pose(lib):
+    # V3 Spellcaster: readScript the InjDeltas it dials, then pose the body in the same file.
+    lib.write("!DAZ/V3/Deltas/InjDeltas.Mouth O.pz2", INJ_LEAF)
+    body = BONE_LEAF[BONE_LEAF.index("\tactor"):BONE_LEAF.rindex("}")]
+    spell = lib.write("pose/V3 Spellcaster/LB_Spell 01.pz2", _inline(
+        '\treadScript ":Runtime:libraries:!DAZ:V3:Deltas:InjDeltas.Mouth O.pz2"\n', body))
+    assert li.classify_entry(spell, [lib.path])["kind"] == "armature"
+
+
+def test_a_fit_package_that_also_moves_the_hip_is_hidden_and_a_plain_one_is_not(lib):
+    lib.write("Channing/Deltas/InjDeltas.V3 Fit.pz2", INJ_LEAF)
+    lib.write("Channing/Deltas/RemDeltas.V3 Fit.pz2", REM_LEAF)
+    lib.write("Channing/Pose/Hip.pz2", BONE_LEAF)
+    target = '\treadScript ":Runtime:libraries:Channing:Deltas:{}"\n'
+    body = BONE_LEAF[BONE_LEAF.index("\tactor"):BONE_LEAF.rindex("}")]
+    lib.write("pose/Fit INJ/V3 Fit INJ.pz2", _inline(target.format("InjDeltas.V3 Fit.pz2"), body))
+    lib.write("pose/Fit REM/V3 Fit REM.pz2", _inline(target.format("RemDeltas.V3 Fit.pz2"), body))
+    # Bone channels in a file the package loads count the same as in the package itself.
+    lib.write("pose/Fit INJ/V3 Fit Nested.pz2", _orchestrator(
+        ":Runtime:libraries:Channing:Deltas:InjDeltas.V3 Fit.pz2", ":Runtime:libraries:Channing:Pose:Hip.pz2"))
+    lib.write("pose/Fit INJ/V3 Morph Only.pz2", _orchestrator(":Runtime:libraries:Channing:Deltas:InjDeltas.V3 Fit.pz2"))
+    m = li.build_manifest([lib.path])
+    assert sorted(_entries(m)) == ["pose/Fit INJ/V3 Morph Only.pz2"]
+    assert m["stats"]["kinds"]["armature"] == 3
+
+
+def test_thigh_length_marks_a_pose_file_without_any_bone_channel(lib):
+    # A saved pose can end in a block holding only `thighLength` and an empty `figure`.
+    lib.write("!DAZ/V3/Deltas/InjDeltas.Brow.pz2", INJ_LEAF)
+    entry = lib.write("pose/Lady/Pose 01.pz2", _inline(
+        '\treadScript ":Runtime:libraries:!DAZ:V3:Deltas:InjDeltas.Brow.pz2"\n',
+        "thighLength 0.17748\n", "figure\n\t{\n\t}\n"))
+    assert li.classify_entry(entry, [lib.path])["kind"] == "armature"
