@@ -1817,6 +1817,34 @@ Toon BSDF (Cycles only) for `toon` and an RGB/Color node for `simple_color`, but
 reproducing them isn't worth the work. The translator keeps reporting these nodes as left out, so a toon
 MAT still applies its other settings and says what it skipped.
 
+#### 8.3 as built (2026-11-19): finding textures the way Poser does
+
+**Measured first** (every texture reference in the owner's 2,643 MAT poses, 24,542 in all). Only 4 distinct
+absolute Windows paths (24 references, 5 MATs: CookieMilCat, the owner's Aiko3 ToonShaders, TreadZ WorkBootZ),
+but **45% of ordinary colon paths failed**: 10,469 of 23,294 in 863 MATs, plus all 973 bare file names. Most
+are written relative to `Runtime:Textures` (`:DAZ:...`, `:Stonemason:...`) or to `Runtime` (`:textures:DAZ:...`),
+which Poser resolves (owner); 1,360 were `:NO_MAP:`, Poser's "no texture", reported as missing; 685 named a
+`.bum` (Poser's own bump format) that doesn't exist, each with its source image beside the name.
+
+**As built.** `core/cr2/texture_paths.py` (GPL, no bpy) `resolve_texture(ref, mat_file, roots, index)` tries in
+order: NO_MAP (any spelling) is no texture; the path as written; a colon path missing its leading `:`;
+relative to `Runtime`, then `Runtime:Textures`; a Windows path's tail from its last `Runtime\`; a `.bum`'s
+source image (same stem, image extensions, through the same steps); last, the file name anywhere under the
+roots (`TextureIndex`, one walk, built only when a lookup needs it), preferring the match sharing the most
+trailing folders with the reference, then the MAT's own content root. The owner's view: the Windows and
+by-name steps are what Poser does before asking the user to find a file. `material_builder.make_image_loader`
+uses it; the MAT report lists each texture found by a fallback once (reference, file, which step) and still
+warns once per texture not found.
+
+**Result on the whole library:** 12,825 as written; 6,120 relative to Runtime:Textures, 388 relative to Runtime,
+250 without the leading `:`; 685 `.bum` via their image; 494 by file name plus 31 chosen among several; 12 by
+a Windows path's Runtime tail; 1,360 NO_MAP now silent. **Still missing: 2,377 references, all `.jpg`, in 94
+MAT poses**, whose file name exists nowhere under the 13 roots (e.g. David's `D_BodyMapHi.jpg`: content not
+installed). Headless 5.0.1 on a real Aiko3 with the roots configured: `! All Aiko Map Male 01` loaded all 8
+textures (its `:textures:DAZ:...` eye maps relative to Runtime), the toon `!!Skin 01` found both
+`D:\My Documents\Poser\CelShaders\...` images by name in its own Runtime (not Silent Shadow (2016)'s copy) and
+now reports no missing texture (was 6), only the toon nodes left out.
+
 #### 8.2 as built (2026-11-18): MAT poses in the library, the Asset Browser and a shelf
 
 Owner: list every MAT pose, props and clothing included ("we can import props as well": a prop

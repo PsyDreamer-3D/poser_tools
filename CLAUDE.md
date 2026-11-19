@@ -284,6 +284,10 @@ don't resume it without a specific reason to.
   library edits the user's preferences, so it happens only from that explicit click, on the main
   thread. `INVOKE_DEFAULT` runs `execute()` under `--background`, so the interactive path is the same
   `_work()` called inline; the modal wrapper itself needs the GUI.
+- **Phase 8.3: textures found the way Poser does** (`core/cr2/texture_paths.resolve_texture`, used by
+  `material_builder.make_image_loader`): as written, then relative to Runtime / Runtime:Textures, a Windows
+  path's Runtime tail, a `.bum`'s source image, and the file name across the roots (shared trailing folders,
+  then the MAT's own root). NO_MAP is no texture. Every fallback is listed in the MAT report.
 - **Phase 8.2: MAT poses in the library.** Kind `"material"` (`library_index._is_mat_pose`: one file of
   `material` blocks and nothing else, judged on the whole file) is shown, every MAT included, props and
   clothing too (owner). On the shelf behind its MAT Poses switch; `poser.use_morph_package` (idname kept for its bindings) sends MAT

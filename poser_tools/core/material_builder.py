@@ -9,35 +9,47 @@ legacy `KdColor`/`textureMap`/`bumpMap`/`transparencyMap` fields.
 Adapted from cr2_importer (PsyDreamer-3D's own, now unmaintained CR2 importer),
 core/material_pipeline.py `MaterialMixin._build_material_nodes()`/`_load_image()`, for
 Phase 8 MAT poses (docs/handoff-morph-injection.md). MIT like the rest of the adapted code.
-Changes: plain functions instead of a mixin; textures resolve through poser_paths'
-case-insensitive lookup across the configured Runtime roots (Phase 7.0); transparency uses
+Changes: plain functions instead of a mixin; textures resolve the way Poser finds them
+(core/cr2/texture_paths.py: relative forms, Windows paths, .bum, file name; Phase 8.3); transparency uses
 Blender 4.2+'s `surface_render_method` (`shadow_method` no longer exists); warnings go to a
 `reporter(types, message)` callback instead of print().
 """
 
-from .cr2.poser_paths import resolve_poser_path
+from .cr2.texture_paths import TextureIndex, resolve_texture
 from .shader_translator import build_shader_tree
 
 
 def make_image_loader(source_file: str, extra_roots=None, reporter=None):
-    """A `load_image(poser_colon_path)` for one MAT file: an image datablock, or None.
+    """A `load_image(texture reference)` for one MAT file: an image datablock, or None.
 
-    Paths resolve against the MAT file's own Runtime, then the configured roots (a character's
-    textures often live in another library). Images already loaded are reused, so 30 materials
-    pointing at one body texture load it once.
+    References resolve the way Poser finds them (core/cr2/texture_paths.resolve_texture): as
+    written, relative to Runtime or Runtime:Textures, a Windows path's Runtime tail, a .bum's
+    source image, and last the file name across the configured roots. A texture found by a
+    fallback is reported once as INFO, a missing one once as WARNING; NO_MAP says nothing.
+    Images already loaded are reused, so 30 materials pointing at one body texture load it once.
     """
-    def load_image(poser_path):
+    index = TextureIndex(extra_roots or [])      # walked only if a file-name search is needed
+    dir_cache = {}
+    told = set()
+
+    def tell(types, message):
+        if reporter and message not in told:
+            told.add(message)
+            reporter(types, message)
+
+    def load_image(reference):
         import bpy
-        path = resolve_poser_path(poser_path, source_file, extra_roots=extra_roots)
-        if not path:
-            if reporter:
-                reporter({'WARNING'}, f"Texture not found: {poser_path}")
+        path, note = resolve_texture(reference, source_file, extra_roots, index, dir_cache)
+        if path is None:
+            if note != "no map":
+                tell({'WARNING'}, f"Texture not found: {reference}")
             return None
+        if note:
+            tell({'INFO'}, f"{reference} -> {path} ({note})")
         try:
             return bpy.data.images.load(path, check_existing=True)
         except RuntimeError as exc:
-            if reporter:
-                reporter({'WARNING'}, f"Could not load texture {path}: {exc}")
+            tell({'WARNING'}, f"Could not load texture {path}: {exc}")
             return None
     return load_image
 
