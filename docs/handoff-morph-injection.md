@@ -794,7 +794,8 @@ the index must rebuild when the roots change; the unresolved list could also poi
 "30+ seconds per morph" is really **30+ seconds per Apply *run***: the correspondence build repeats
 on every run, so adding morphs one at a time pays it every time, while a whole package pays it
 once. Peak RSS was 2.7 GB, almost all from the FBX import, not from applying.
-Not measured: applying the 259-morph Victoria 3 head package (no V3 figure here). Its *load* is
+Not measured: applying the 259-morph Victoria 3 head package. (Thought impossible here at the time; Aiko 3
+shares V3's base mesh, so the Aiko3 test figure takes V3 packages — owner, 2026-11-18.) Its *load* is
 16.4s (257 leaf files, ~64 ms each, dominated by delta parsing), and per-morph cost should scale
 linearly but I haven't seen it. Implications:
 
@@ -1059,8 +1060,9 @@ missing, conflict, never Basis), and the real `MOR INJ.pz2` (59 dials, `PBMBreas
 Headless on 5.0.1 with a real Aiko3 import and a test package (the real BrowHeavy delta file plus dials):
 BrowHeavy injected at -0.4 with its slider minimum widened, an FBX key dialed to 2.5 with its maximum
 widened, a missing morph and the scale reported; after resetting both to 0, the dials-only call set them again.
-**Not verified:** the picker's hand-over to the dials-only call (the dialog needs the GUI), and a real V3
-character on a V3 mesh (no V3 figure here).
+**Owner GUI test (2026-11-18):** character injection works on the owner's install. Aiko 3 is built on
+Victoria 3's base mesh, so V3 packages (Lady Xtaci's included) apply to the Aiko3 test figure.
+**Not verified by me:** the picker's hand-over to the dials-only call (the dialog needs the GUI).
 
 ### 7.3 plan: the library index (scoped 2026-11-15; 7.3a, 7.3b and 7.3c built)
 
@@ -1671,8 +1673,8 @@ same-named assets from different files.
 ~~Live reading of custom `asset_data` keys through `asset.metadata`~~ (read live in a 5.3 Asset
 Browser, 7.4; the shelf hands the same `AssetRepresentation`, not yet clicked live); shelf
 behavior for same-named assets across files; the Asset Browser with 10k+ Image assets in a real
-session; applying the 259-morph Victoria 3 head package (no V3 figure here, so per-morph cost at
-that size is extrapolated); the asset API's stability (5.3 added projects/remote-library
+session; applying the 259-morph Victoria 3 head package (per-morph cost at that size is extrapolated; Aiko3 shares
+V3's base mesh, so it can be measured on the Aiko3 test figure); the asset API's stability (5.3 added projects/remote-library
 parameters; additive so far). Prototype scripts live in the session scratchpad and are not
 committed.
 
