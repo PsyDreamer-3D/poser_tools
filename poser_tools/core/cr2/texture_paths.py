@@ -15,10 +15,10 @@ A MAT pose's texture reference is meant to be a colon path from the content root
 - `NO_MAP`, Poser's "no texture", sometimes written as a path (`:NO_MAP:`);
 - `.bum` files, Poser's own bump format: none of the 685 referenced exists, but each has its
   source image beside the name. A .bum is an uncompressed Windows BMP that Poser computes from that
-  image (all 18 on the owner's drive): 24-bit ones hold slopes, red the horizontal one and green the
-  vertical one inverted, blue 0, 0.5 flat (correlation about +/-0.7 with the source's slopes); 8-bit
-  ones are the source's greyscale as is. So the source image is the bump map to use; a slope .bum
-  read as a height map would be wrong.
+  image (all 18 on the owner's drive): 24-bit ones are a tangent-space normal map with Z dropped
+  (R and G are the normal's X and Y, blue 0; X²+Y² never exceeds 1, owner spotted the normal-map
+  look), 8-bit ones are the source's greyscale as is. So the source image is the bump map to use;
+  a .bum read as a height map would be wrong.
 resolve_texture() tries, in order: the path as written; relative to Runtime, then to
 Runtime:Textures; a Windows path's tail after its `Runtime\\`; and last, the file name anywhere
 under the content roots, preferring the match that shares the most trailing folders with the
@@ -115,8 +115,10 @@ def resolve_texture(reference: str, source_file: str, roots=None, index: Texture
                 return found, "Poser .bum bump map, used the image it was made from" + (f" ({note})" if note else "")
         if resolve_poser_path(ref if ref.startswith(":") else ":" + ref, source_file, extra_roots=roots,
                               dir_cache=dir_cache) and not _WINDOWS_ABSOLUTE_RE.match(ref):
-            # The .bum is there but its source image isn't: a slope map can't stand in for a height map.
-            return None, "Poser .bum without the image it was made from (not usable as a bump map)"
+            # The .bum is there but its source image isn't. It is a normal map missing its Z channel
+            # (and with X inverted against Blender's convention, by correlation), not a height map;
+            # converting it isn't done, since no .bum on the owner's drive lacks its image.
+            return None, "Poser .bum without the image it was made from (a normal map with no Z channel, not converted)"
         return None, "not found"
 
     def colon(path):

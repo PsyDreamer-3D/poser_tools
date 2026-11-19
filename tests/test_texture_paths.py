@@ -102,3 +102,4 @@ def test_a_bum_whose_source_image_is_gone_is_reported_as_such(content):
         fh.write(b"BM")
     path, note = resolve_texture(":Runtime:textures:Orphan.bum", mat, roots, index)
     assert path is None and note.startswith("Poser .bum without the image it was made from")
+    assert "normal map" in note
