@@ -262,6 +262,10 @@ don't resume it without a specific reason to.
   on 5.0.1, 5.2.4 and 5.3.0 and reading every asset back. **Stand-ins are `Scene`s, and must stay a type
   the Asset Browser lists** (Action, Brush, Collection, Material, Node Tree, Object, Scene, World): an
   `Image` library registers, shows its catalogs and then "No items", which no headless check can see.
+  The library's name is a preference (**Library Name**, default "Poser", was "Poser Morph Packages"); the add-on
+  finds its own entry by folder (`library_build.find_asset_library`: this version's `poser_tools/library`, else
+  any `poser_tools/library`, as preferences carried over from another Blender version point at that one), so
+  renames, the old name and version upgrades never leave a second entry.
   Scene was picked because it has no drop target and no other consumer; Object/World/Material are drop
   targets, Action feeds the Pose Library, NodeTree the Add menus. A removal is a channel that
   re-declares its delta list empty (`indexes 0`), not just `name -`: `Hide.*` visibility files have
@@ -366,7 +370,8 @@ Everything else is manual smoke test only — no `bpy`-dependent code has automa
    cursor shows a percentage and the status bar names the phase (reading files / classifying packages /
    writing asset files), Esc cancels and changes nothing; on success an INFO message, a **Poser Library
    Index Report** text block, and the panel shows the package count, thumbnail/placeholder counts and
-   "registered". An Asset Browser pointed at **Poser Morph Packages** shows the packages by folder.
+   "registered". An Asset Browser pointed at **Poser** (the default **Library Name**) shows the packages by folder. Rename it in
+   Preferences: the registered entry follows, found by its folder, never duplicated.
    Run it again: seconds, "0 written". Change the Runtime folders or a Label: the panel says to update; a renamed Label rewrites only that Runtime's files. The Asset Browser lists one catalog per Runtime, each with a capitalized category (Pose) below.
 6c. With that library built and a mesh active: in the Asset Browser, right-click a package →
    **Apply to Active Mesh...** (or the button in the side panel's **Poser Morph Package** box) opens the

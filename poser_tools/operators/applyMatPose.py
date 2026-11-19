@@ -6,7 +6,7 @@ import bpy
 from bpy.props import CollectionProperty, StringProperty
 
 from ..core.cr2 import runtime_index
-from ..core.cr2.mat_pose import match_materials_to_slots, read_mat_pose
+from ..core.cr2.mat_pose import match_materials_to_slots, read_mat_pose, slot_prefix
 from ..core.material_builder import build_material_nodes, make_image_loader
 from ..core.utils import _write_report
 from ..properties.poserToolsPreferences import get_runtime_roots
@@ -39,6 +39,16 @@ def _read_cached(path):
 
 def _slot_material_names(obj):
     return [slot.material.name for slot in obj.material_slots if slot.material]
+
+
+def _draw_name_list(layout, heading, names, per_line=5, max_lines=3):
+    """`heading` and the names under it, a few per line, capped with "and N more"."""
+    layout.label(text=heading)
+    shown = names[:per_line * max_lines]
+    for start in range(0, len(shown), per_line):
+        layout.label(text="    " + ", ".join(shown[start:start + per_line]))
+    if len(names) > len(shown):
+        layout.label(text=f"    and {len(names) - len(shown)} more (all in the report after Apply)")
 
 
 class OT_ApplyMatPose_Operator(bpy.types.Operator):
@@ -111,12 +121,18 @@ class OT_ApplyMatPose_Operator(bpy.types.Operator):
         if not materials:
             box.label(text="This file has no materials: not a MAT pose.", icon='ERROR')
             return
-        match = match_materials_to_slots(list(materials), _slot_material_names(obj), obj.name)
-        box.label(text=f"Replaces {len(match['pairs'])} of {obj.name}'s "
-                       f"{len(_slot_material_names(obj))} materials.", icon='MATERIAL')
+        slots = _slot_material_names(obj)
+        match = match_materials_to_slots(list(materials), slots, obj.name)
+        box.label(text=f"Replaces {len(match['pairs'])} of {obj.name}'s {len(slots)} materials.", icon='MATERIAL')
+        # Both sides of a mismatch, before anything changes: a run that matched 26 of 34 once
+        # (owner's report, Phase 8) could only be explained from the report afterwards.
         if match["no_slot"]:
-            shown = ", ".join(match["no_slot"][:4]) + (" ..." if len(match["no_slot"]) > 4 else "")
-            box.label(text=f"{len(match['no_slot'])} in the file have no slot on this mesh: {shown}")
+            _draw_name_list(box, f"{len(match['no_slot'])} in the file have no material of that name on this mesh:",
+                            match["no_slot"])
+        if match["untouched"]:
+            prefix = slot_prefix(slots, obj.name)
+            bare = [name[len(prefix):] if name.startswith(prefix) else name for name in match["untouched"]]
+            _draw_name_list(box, f"{len(bare)} of the mesh's materials aren't in the file and stay as they are:", bare)
         box.label(text="Each original is kept as '<name> (original)' the first time a MAT replaces it.")
 
     def execute(self, context):

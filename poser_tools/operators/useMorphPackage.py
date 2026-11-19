@@ -49,7 +49,7 @@ class OT_UseMorphPackage_Operator(bpy.types.Operator):
             cls.poll_message_set("Select the mesh to apply the package to")
             return False
         if not package_asset_kind(context_asset(context)):
-            cls.poll_message_set("Pick a package from the Poser Morph Packages library")
+            cls.poll_message_set("Pick a package from the Poser package library")
             return False
         return True
 

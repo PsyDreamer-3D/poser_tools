@@ -27,11 +27,29 @@ class PoserRuntimePathItem(bpy.types.PropertyGroup):
     )
 
 
+def _rename_registered_library(self, context):
+    # Only an entry already registered is renamed; an unbuilt library gets the name when it is built.
+    # Never creates one: registering edits the user's asset libraries, which only Build does.
+    from ..core import library_build
+    library = library_build.find_asset_library(context.preferences.filepaths.asset_libraries,
+                                               library_build.library_dir(create=False))
+    if library is not None:
+        library_build.ensure_asset_library(context.preferences.filepaths.asset_libraries,
+                                           self.library_name, library.path)
+
+
 class PoserToolsPreferences(bpy.types.AddonPreferences):
     bl_idname = _ADDON_PKG
 
     runtime_paths: CollectionProperty(type=PoserRuntimePathItem)
     runtime_paths_index: IntProperty(default=0)
+    library_name: StringProperty(
+        name="Library Name",
+        description="The name the package library has in the Asset Browser's library list "
+                    "(blank means \"Poser\")",
+        default="Poser",
+        update=_rename_registered_library,
+    )
 
     def draw(self, context):
         layout = self.layout
@@ -72,8 +90,9 @@ class PoserToolsPreferences(bpy.types.AddonPreferences):
 
         layout.separator()
         box = layout.box()
-        box.label(text="Morph Package Library", icon='ASSET_MANAGER')
+        box.label(text="Package Library", icon='ASSET_MANAGER')
         box.label(text="Index your injection and removal packages and MAT poses as a Blender asset library, with thumbnails.")
+        box.prop(self, "library_name")
 
         roots = get_runtime_roots(context)
         status = library_build.read_status(library_build.library_dir(create=False))
@@ -101,13 +120,28 @@ class PoserToolsPreferences(bpy.types.AddonPreferences):
         full.force = True
 
         libraries = context.preferences.filepaths.asset_libraries
-        registered = any(lib.name == library_build.LIBRARY_NAME for lib in libraries)
+        registered = library_build.find_asset_library(libraries, library_build.library_dir(create=False))
         row = box.row()
-        if registered:
-            row.label(text=f"Asset library '{library_build.LIBRARY_NAME}' is registered.", icon='CHECKMARK')
+        if registered is not None:
+            wanted = library_build.library_name(self.library_name)
+            if registered.name == wanted:
+                note = ""
+            elif registered.name.startswith(wanted + "."):
+                note = f" ('{wanted}' is taken by another library)"   # Blender added .001
+            else:
+                note = f" (becomes '{wanted}' on the next update)"     # e.g. the old "Poser Morph Packages"
+            row.label(text=f"Asset library '{registered.name}' is registered.{note}", icon='CHECKMARK')
             row.operator("poser.remove_library_entry", icon='X')
         elif status:
             row.label(text="Built, but not registered as an asset library: update the index to add it.", icon='INFO')
+
+
+def get_library_name(context) -> str:
+    """The asset library's name from Preferences (library_build.library_name() fills in a blank)."""
+    try:
+        return context.preferences.addons[_ADDON_PKG].preferences.library_name
+    except (KeyError, AttributeError):
+        return ""
 
 
 def get_runtime_labels(context) -> dict:

@@ -1861,9 +1861,23 @@ imported through FBX takes a MAT the same way a figure does), on the same branch
   thumbnail too small to mark without hiding it. `ASSET_FORMAT_VERSION` 3, so the next Update rewrites every
   asset file. Real library into scratch on 5.3: 6,296 assets, 4,639 badged thumbnails, 0 failures; looked at
   in a real Asset Browser and shelf (Lady Xtaci: swatch, plus, minus).
-- **Library name:** still "Poser Morph Packages" though it now holds MAT poses. Renaming it would leave
-  the old entry registered under the old name (`ensure_asset_library` matches by name); left for the
-  owner to decide.
+- **Library name (owner, same day): "Poser" by default, user-editable** (Preferences, **Library Name**). That
+  needed the add-on to stop finding its entry by name: `library_build.find_asset_library()` matches by folder,
+  this version's `poser_tools/library` first, else any `poser_tools/library` (only this add-on makes one;
+  preferences carried over from another Blender version point at that version's folder, and it is
+  repointed instead of duplicated). `ensure_asset_library()` renames that entry in place, so the old
+  "Poser Morph Packages" entry becomes "Poser" on the next update, and editing the name renames it at once
+  (`_rename_registered_library`, only when one is registered; registering stays the build's job). Probed on
+  5.3: Blender turns a name another library has into `Name.001` (on `new()` and on rename) and allows an
+  empty name; a blank preference means "Poser", and a `.001` result is accepted rather than retried each
+  build (Preferences says the wanted name is taken). Remove Library Entry also goes by folder. Nothing
+  else used the name: clicks, the shelf and double-click resolve packages from each asset's own keys.
+- **MAT dialog names the mismatches (owner, same day).** After an unexplained "26 of 34" on one shelf click
+  (gone after a restart; there is one `! All Aiko Map 01`, it matches 34/34 by name, and both the pre-fix
+  and current parser read its 35 materials, so not a wrong file or a parser fault), the dialog now lists, by
+  name and before Apply, the file's materials with no slot and the mesh's materials the file leaves alone
+  (prefix stripped, five a line, capped with "and N more"). Looked at in a real window: Lady Xtaci on Aiko3
+  lists `SkinLeg`, and `SkinKnee, SkinShin, SkinThigh`.
 
 ## Open decisions
 

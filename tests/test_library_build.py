@@ -209,29 +209,53 @@ class _Libraries(list):
         return lib
 
 
-def test_registering_is_idempotent_and_corrects_the_path():
+OURS = "/cfg/5.3/config/poser_tools/library"
+
+
+def test_registering_is_idempotent_and_finds_our_entry_by_folder():
     libs = _Libraries([_Lib("User Library", "/home/u/Assets")])
-    lib, action = lb.ensure_asset_library(libs, lb.LIBRARY_NAME, "/cfg/library")
-    assert (action, lib.path, len(libs)) == ("created", "/cfg/library", 2)
-    again, action = lb.ensure_asset_library(libs, lb.LIBRARY_NAME, "/cfg/library/")
-    assert (action, again is lib, len(libs)) == ("unchanged", True, 2)      # a trailing slash is not a change
-    moved, action = lb.ensure_asset_library(libs, lb.LIBRARY_NAME, "/elsewhere")
-    assert (action, moved.path, len(libs)) == ("updated", "/elsewhere", 2)
-    assert [l.name for l in libs] == ["User Library", lb.LIBRARY_NAME]      # never a "Name.001"
+    lib, action = lb.ensure_asset_library(libs, "", OURS)
+    assert (action, lib.name, lib.path, len(libs)) == ("created", "Poser", OURS, 2)   # blank -> the default
+    again, action = lb.ensure_asset_library(libs, "Poser", OURS + "/")
+    assert (action, again is lib, len(libs)) == ("unchanged", True, 2)               # a trailing slash is not a change
+
+
+def test_the_old_morph_packages_entry_is_renamed_in_place_not_duplicated():
+    libs = _Libraries([_Lib("Poser Morph Packages", OURS)])
+    lib, action = lb.ensure_asset_library(libs, "Poser", OURS)
+    assert (action, [l.name for l in libs]) == ("renamed", ["Poser"])
+    lib, action = lb.ensure_asset_library(libs, "My Poser Stuff", OURS)
+    assert (action, lib.name, len(libs)) == ("renamed", "My Poser Stuff", 1)
+
+
+def test_another_blender_versions_entry_is_repointed():
+    # Preferences carried over from 5.2 still point at 5.2's folder.
+    libs = _Libraries([_Lib("Poser", "/cfg/5.2/config/poser_tools/library")])
+    lib, action = lb.ensure_asset_library(libs, "Poser", OURS)
+    assert (action, lib.path, len(libs)) == ("updated", OURS, 1)
+
+
+def test_someone_elses_library_with_our_name_is_left_alone():
+    libs = _Libraries([_Lib("Poser", "/home/u/My Poser Renders")])
+    lib, action = lb.ensure_asset_library(libs, "Poser", OURS)
+    assert (action, lib.name, lib.path) == ("created", "Poser.001", OURS)
+    assert libs[0].path == "/home/u/My Poser Renders"
+    # Blender's `.001` is accepted, not fought over on every build.
+    assert lb.ensure_asset_library(libs, "Poser", OURS)[1] == "unchanged"
 
 
 def test_a_disabled_library_is_switched_back_on_where_that_exists():
-    libs = _Libraries([_Lib(lb.LIBRARY_NAME, "/cfg/library", enabled=False)])
-    lib, action = lb.ensure_asset_library(libs, lb.LIBRARY_NAME, "/cfg/library")
+    libs = _Libraries([_Lib("Poser", OURS, enabled=False)])
+    lib, action = lb.ensure_asset_library(libs, "Poser", OURS)
     assert (action, lib.enabled) == ("updated", True)
 
 
 def test_removing_the_library_only_touches_its_own_entry():
-    libs = _Libraries([_Lib("User Library", "/a"), _Lib(lb.LIBRARY_NAME, "/b")])
+    libs = _Libraries([_Lib("User Library", "/a"), _Lib("Renamed By User", OURS)])
     libs.remove = lambda lib: list.remove(libs, lib)
-    assert lb.remove_asset_library(libs, lb.LIBRARY_NAME) is True
+    assert lb.remove_asset_library(libs, OURS) == "Renamed By User"
     assert [l.name for l in libs] == ["User Library"]
-    assert lb.remove_asset_library(libs, lb.LIBRARY_NAME) is False
+    assert lb.remove_asset_library(libs, OURS) is None
 
 
 # ---- status, staleness, progress, report ---------------------------------------------------
