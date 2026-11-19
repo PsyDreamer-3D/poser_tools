@@ -240,7 +240,8 @@ don't resume it without a specific reason to.
   are entries, as in Poser's Library palette: vendor folders beside them (`!DAZ`, `!Adz`) hold the files
   packages `readScript`, and a file-name rule alone missed `!Adz`'s `<morph>.InjDeltas.pz2` naming.
   The Apply/Remove dropdowns still list those files on purpose (manual escape hatch). A package any of
-  whose files sets a bone channel (`rotate`/`translate` X/Y/Z) is an `"armature"` pose and hidden, even when
+  whose files sets a bone channel (`rotate`/`translate` X/Y/Z) or carries Poser's pose-file `thighLength` line
+  is an `"armature"` pose and hidden, even when
   it also injects (V3 Spellcaster, Channing "Fit" packages that move the hip): the library is morph packages
   only, poses stay out (FBX bone rolls). MAT poses are planned as Phase 8 in the handoff doc. Catalogs are
   `<Runtime>/<Category>/...` like Poser's Library palette: the Runtime's Preferences Label, else its folder

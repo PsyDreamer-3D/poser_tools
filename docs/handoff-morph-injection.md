@@ -1585,6 +1585,13 @@ folders; the 130 removed are exactly V3 Spellcaster 25, UlfGens 2 Expansion Fits
 Expansion Pack 1 Fit INJ DS / Fit INJ Poser / Fit REM 20 each; nothing added, no kept entry renamed.
 `MANIFEST_VERSION` 4.
 
+*Owner's review:* pose files can also be told by the `thighLength` line Poser writes into them, and their
+actors' `channels` hold only `rotateX/Y/Z` (and translations). Added `thighLength` to the same marker
+(`_BONE_CHANNEL_RE`), `MANIFEST_VERSION` 5. On the owner's library 3,352 files have it, 70 of them with no
+bone channel at all (e.g. the second, empty block of a saved pose such as Lady Xtaci's `Pose 01.pz2`);
+none of the 70 were listed, so the shown set is unchanged (3,653), and 72 hidden files move from
+`other`/`pose` to `armature`.
+
 **GUI items above** (right-click entry, side panel, shelf clicks, dialogs from the Asset Browser):
 confirmed by the owner's test. Still not exercised: Windows/macOS.
 
@@ -1684,9 +1691,12 @@ the rest of `core/cr2/`):
    and LaFemme and compare their slot names to a MAT file's materials.
 2. **Textures across Runtimes.** `_load_image()` resolves against the file's own Runtime; route it through
    `resolve_poser_path(..., extra_roots=get_runtime_roots())` (case-insensitive, Phase 7.0), as packages do.
-3. **Classification.** A MAT kind in `library_index`: a file whose own content is `material` blocks, with no
-   bone channels (the armature rule still wins) and no deltas. Measure how many of the owner's hidden
-   `"other"`/`"pose"` entries that is before deciding the shelf layout (a third shelf, or a tag).
+3. **Classification.** Owner's rule: a MAT pose has `material` blocks and nothing else (example: Lady Xtaci's
+   `! MAT Lady Xtaci !.pz2`, one `figure` block of 30 `material` blocks). Measured on the owner's library
+   (13 roots, every classified entry): 2,680 files have `material` blocks; **2,643 have nothing else** (no
+   `channels`, no `readScript`), e.g. `MAT MillenniumCat/Abyssinian.pz2`; 37 mix materials with other
+   content (29 body poses, 5 `other`, 3 morph-value poses) and stay out. So the MAT kind is "material blocks
+   only"; the armature rule still runs first. The shelf layout (a third shelf, or a tag) is still open.
 4. **Applying.** One operator (shelf click, double-click, right-click through `poser.use_morph_package`'s
    pattern, or a separate `poser.use_material_package`), on the active mesh, with Ctrl+Z. It replaces node
    trees, so it is more destructive than an injection: a confirm, or apply to copies, is an open decision.

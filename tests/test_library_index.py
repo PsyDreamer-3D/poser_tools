@@ -510,3 +510,12 @@ def test_a_fit_package_that_also_moves_the_hip_is_hidden_and_a_plain_one_is_not(
     m = li.build_manifest([lib.path])
     assert sorted(_entries(m)) == ["pose/Fit INJ/V3 Morph Only.pz2"]
     assert m["stats"]["kinds"]["armature"] == 3
+
+
+def test_thigh_length_marks_a_pose_file_without_any_bone_channel(lib):
+    # A saved pose can end in a block holding only `thighLength` and an empty `figure`.
+    lib.write("!DAZ/V3/Deltas/InjDeltas.Brow.pz2", INJ_LEAF)
+    entry = lib.write("pose/Lady/Pose 01.pz2", _inline(
+        '\treadScript ":Runtime:libraries:!DAZ:V3:Deltas:InjDeltas.Brow.pz2"\n',
+        "thighLength 0.17748\n", "figure\n\t{\n\t}\n"))
+    assert li.classify_entry(entry, [lib.path])["kind"] == "armature"
