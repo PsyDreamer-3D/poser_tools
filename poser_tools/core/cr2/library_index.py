@@ -308,9 +308,9 @@ def find_thumbnail(path: str, dir_cache=None) -> tuple:
     """(thumbnail path, "image"|"rsr"|"none") for a library file.
 
     A Poser thumbnail sits next to the file with the same stem. `.rsr` is a classic
-    Mac resource fork holding a PICT, which Blender can't read, so it is reported
-    but not returned as a usable image. Case-insensitive, one directory listing per
-    folder.
+    Mac resource fork holding a PICT, which Blender can't read; the asset writer decodes it
+    with core/mac_pict.py (Phase 7.3d). An image file wins over an `.rsr`. Case-insensitive,
+    one directory listing per folder.
     """
     cache = {} if dir_cache is None else dir_cache
     folder, name = os.path.split(path)
@@ -325,8 +325,9 @@ def find_thumbnail(path: str, dir_cache=None) -> tuple:
         hit = listing.get(stem + ext)
         if hit:
             return os.path.join(folder, hit), "image"
-    if stem + ".rsr" in listing:
-        return "", "rsr"
+    hit = listing.get(stem + ".rsr")
+    if hit:
+        return os.path.join(folder, hit), "rsr"
     return "", "none"
 
 
@@ -436,7 +437,7 @@ def _folder_hash(entries: list) -> str:
 _CATALOG_NAMESPACE = uuid.UUID("5f6c1e3a-0b0e-4a52-9d7e-5b7f3c1f2a10")
 # Bump when what the asset files contain changes (placeholders, tags, payload keys), so
 # existing ones are rebuilt: it goes into the manifest signature.
-ASSET_FORMAT_VERSION = 3   # 2: stand-ins are Scenes (the Asset Browser doesn't list Images); 3: kind badge on thumbnails
+ASSET_FORMAT_VERSION = 4   # 2: stand-ins are Scenes (the Asset Browser doesn't list Images); 3: kind badge on thumbnails; 4: .rsr thumbnails decoded
 
 
 def asset_signature(blender_version: str) -> str:

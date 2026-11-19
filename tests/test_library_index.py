@@ -157,7 +157,7 @@ def test_find_thumbnail(tmp_path):
     for name in ("A.pz2", "A.PNG", "B.pz2", "B.rsr", "C.pz2", "D.pz2", "D.jpg", "D.rsr"):
         (folder / name).write_text("x")
     assert li.find_thumbnail(str(folder / "A.pz2")) == (str(folder / "A.PNG"), "image")
-    assert li.find_thumbnail(str(folder / "B.pz2")) == ("", "rsr")
+    assert li.find_thumbnail(str(folder / "B.pz2")) == (str(folder / "B.rsr"), "rsr")
     assert li.find_thumbnail(str(folder / "C.pz2")) == ("", "none")
     assert li.find_thumbnail(str(folder / "D.pz2")) == (str(folder / "D.jpg"), "image")   # an image beats .rsr
 
@@ -217,7 +217,7 @@ def test_manifest_entry_fields(library):
     entries = _entries(li.build_manifest([library.path]))
     inj, rem, half = entries["pose/Fig INJ/Brow.pz2"], entries["pose/Fig REM/Brow.pz2"], entries["pose/Fig2 INJ/Half.pz2"]
     assert inj["thumbnail"].endswith("Brow.png") and inj["thumbnail_kind"] == "image"
-    assert (rem["thumbnail"], rem["thumbnail_kind"]) == ("", "rsr")
+    assert rem["thumbnail"].endswith("Brow.rsr") and rem["thumbnail_kind"] == "rsr"
     assert inj["tags"] == ["injection", "poser"] and rem["tags"] == ["removal", "poser"]
     assert half["tags"] == ["injection", "incomplete", "poser"]
     assert half["description"] == "[INCOMPLETE: 1 of 2 files missing] Runtime/libraries/pose/Fig2 INJ/Half.pz2"
