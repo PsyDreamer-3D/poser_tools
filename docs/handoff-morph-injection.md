@@ -1028,7 +1028,7 @@ later, "remove the selected morphs"); a disk cache; off-thread parsing.
 ### Package dials (owner's review, 2026-11-18)
 
 **Problem.** Some injection packages load their files and then dial the morphs, like Poser's character
-presets. Lady Xtaci's `MOR INJ.pz2` `readScript`s 46 V3 InjDeltas files, then sets 38 `valueParm`s on BODY
+presets. Lady Xtaci's `MOR INJ.pz2` `readScript`s 55 V3 InjDeltas files (and 55 `Unhide.*`), then sets 37 `valueParm`s on BODY
 (`PBMTone` 0.232, `PBMBreastSize8` -1.012...), 18 `targetGeom`s on the head (`HdCeltic` 0.798...), the eyes'
 `CorneaBulge`/`IrisIn` (1, already in the figure) and a BODY `propagatingScale` of 0.93. Apply injected the
 morphs at 0, so the character never appeared. Measured on the owner's library: 20 of the 2,030 listed
