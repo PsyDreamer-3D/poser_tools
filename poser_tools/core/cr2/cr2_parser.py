@@ -388,9 +388,25 @@ class CR2Parser:
     # Material block — appears at root level or inside prop actors (HR2)
     # ------------------------------------------------------------------
 
+    # A material name is a bare token run, like a channel's: "material Quilt Trim" (Poser allows
+    # spaces). Reading one token lost every such material; 41 of the owner's 2,643 MAT files read
+    # nothing (docs/handoff-morph-injection.md, Phase 8). The run is only taken when a '{' follows
+    # within a few tokens, so a stray `material X` line can't swallow what comes after it.
+    _MAX_MATERIAL_NAME_TOKENS = 8
+
     def _parse_material_block(self) -> Optional[PoserMaterial]:
         self.consume()  # 'material'
-        name = self.consume()
+        run = 0           # tokens before this block's '{', or 0 when no block follows the name
+        for i, tok in enumerate(self.tokens[self.pos:self.pos + self._MAX_MATERIAL_NAME_TOKENS + 1]):
+            if tok == "{":
+                run = i
+                break
+            if tok in ("}", "material"):
+                break
+        if run:
+            name = " ".join(self.consume() for _ in range(run))
+        else:
+            name = self.consume()
 
         if self.peek() != '{':
             return None
@@ -544,9 +560,14 @@ class CR2Parser:
                                  self.consume_float())
                 elif tok == 'file':
                     self.consume()
-                    path = self.consume()
-                    if path not in ('NO_MAP', '"NO_MAP"'):
-                        inp.file = path
+                    # Poser writes a bare `file` line for an input with no image (DAZ Firearms'
+                    # shader trees). Consuming the next token anyway took the input's closing '}'
+                    # as the path and lost the rest of the file: 52 of 53 materials in
+                    # 22Caliber-R.pz2 (docs/handoff-morph-injection.md, Phase 8).
+                    if self.peek() not in ('}', '{', None):
+                        path = self.consume()
+                        if path not in ('NO_MAP', '"NO_MAP"'):
+                            inp.file = path
                 elif tok == 'node':
                     self.consume()
                     ref = self.consume()

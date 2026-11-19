@@ -22,7 +22,10 @@ import time
 
 from .cr2 import library_index
 
-LIBRARY_NAME = "Poser Morph Packages"
+# The name the asset library gets unless the user sets another in Preferences (owner, 2026-11-18;
+# was "Poser Morph Packages" until MAT poses joined the library). The add-on finds its own entry by
+# folder, not by name (find_asset_library), so the name is free to change.
+DEFAULT_LIBRARY_NAME = "Poser"
 MANIFEST_FILE = "poser_index.json.gz"
 STATUS_FILE = "status.json"
 CATALOG_FILE = "blender_assets.cats.txt"
@@ -316,46 +319,78 @@ def build_assets(manifest: dict, previous, out_dir: str, command_for, progress=N
 # Registering the folder as an asset library
 # ---------------------------------------------------------------------------
 
-def ensure_asset_library(libraries, name: str, directory: str) -> tuple:
-    """Make sure `libraries` (preferences.filepaths.asset_libraries) has `name` pointing at `directory`.
+def library_name(name: str) -> str:
+    """The name to register: the user's, trimmed, or the default when it is blank."""
+    return (name or "").strip() or DEFAULT_LIBRARY_NAME
 
-    Returns (library, "created" | "updated" | "unchanged"). Idempotent: calling
-    `libraries.new()` twice with one name silently makes `Name.001` (probed on Blender 5.3.0
-    and 5.0.1), so an existing entry is reused and only its path is corrected. `enabled`
-    exists from 5.3 and is switched back on if the user turned it off.
+
+_OUR_FOLDER_TAIL = os.path.join("poser_tools", "library")
+
+
+def find_asset_library(libraries, directory: str):
+    """This add-on's entry in `libraries` (preferences.filepaths.asset_libraries), or None.
+
+    Found by folder, never by name: the user can rename it, and Blender renames a clashing name
+    to `Name.001` on its own. First the entry for `directory`; failing that, one pointing at a
+    `poser_tools/library` folder, which only this add-on creates (library_dir()): preferences
+    carried over from another Blender version still point at that version's folder.
     """
+    wanted = os.path.normpath(directory)
     for library in libraries:
-        if library.name == name:
-            action = "unchanged"
-            if os.path.normpath(library.path) != os.path.normpath(directory):
-                library.path = directory
-                action = "updated"
-            if hasattr(library, "enabled") and not library.enabled:
-                library.enabled = True
-                action = "updated"
-            return library, action
-    return libraries.new(name=name, directory=directory), "created"
+        if os.path.normpath(library.path) == wanted:
+            return library
+    for library in libraries:
+        if os.path.normpath(library.path).endswith(os.sep + _OUR_FOLDER_TAIL):
+            return library
+    return None
 
 
-def remove_asset_library(libraries, name: str) -> bool:
-    """Remove the registered library called `name`; False if there was none."""
-    for library in list(libraries):
-        if library.name == name:
-            libraries.remove(library)
-            return True
-    return False
+def ensure_asset_library(libraries, name: str, directory: str) -> tuple:
+    """Make sure this add-on's library is registered at `directory` under `name`.
+
+    Returns (library, "created" | "renamed" | "updated" | "unchanged"). Idempotent: an existing
+    entry (find_asset_library) is reused, repointed and renamed, since `libraries.new()` with a
+    taken name silently makes `Name.001` (probed on 5.3.0 and 5.0.1). A name another library already
+    has comes back from Blender as `Name.001`; that is accepted as done, not retried every build.
+    `enabled` exists from 5.3 and is switched back on if the user turned it off.
+    """
+    name = library_name(name)
+    library = find_asset_library(libraries, directory)
+    if library is None:
+        return libraries.new(name=name, directory=directory), "created"
+    action = "unchanged"
+    if os.path.normpath(library.path) != os.path.normpath(directory):
+        library.path = directory
+        action = "updated"
+    if library.name != name and not re.fullmatch(re.escape(name) + r"\.\d{3}", library.name):
+        library.name = name
+        action = "renamed" if action == "unchanged" else action
+    if hasattr(library, "enabled") and not library.enabled:
+        library.enabled = True
+        action = "updated"
+    return library, action
+
+
+def remove_asset_library(libraries, directory: str):
+    """Unregister this add-on's library; returns the name it had, or None if there was none."""
+    library = find_asset_library(libraries, directory)
+    if library is None:
+        return None
+    name = library.name
+    libraries.remove(library)
+    return name
 
 
 # ---------------------------------------------------------------------------
 # From a library asset back to its package (7.4: Asset Browser and shelf clicks)
 # ---------------------------------------------------------------------------
 
-PACKAGE_KINDS = ("injection", "removal")
+PACKAGE_KINDS = ("injection", "removal", "material")
 _INCOMPLETE_PREFIX_RE = re.compile(r'^\[INCOMPLETE:[^\]]*\]\s*')
 
 
 def package_kind(fields: dict, tags) -> str:
-    """"injection" or "removal" for one of our assets, "" for any other asset.
+    """"injection", "removal" or "material" for one of our assets, "" for any other asset.
 
     `fields` are the asset's custom metadata (poser_kind etc.), `tags` its tag names. The
     tags are the fallback because they are Blender's own metadata and always survive.

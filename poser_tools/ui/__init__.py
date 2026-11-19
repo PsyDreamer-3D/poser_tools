@@ -1,12 +1,13 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 
+from .applyMatPose import ApplyMatPose_Panel
 from .applyMorphInjection import ApplyMorphInjection_Panel
 from .fixPoserShapekeys import FixPoserShapekeys_Panel
 from .importPoserFBX import ImportPoserFBX_Panel
 from .packageAssets import (
+    POSER_PT_library_shelf,
     POSER_PT_package_asset,
-    VIEW3D_AST_poser_injection_packages,
-    VIEW3D_AST_poser_removal_packages,
+    VIEW3D_AST_poser_packages,
     register_menus,
     unregister_menus,
 )
@@ -23,13 +24,14 @@ classes = (
     ImportPoserFBX_Panel,
     FixPoserShapekeys_Panel,
     ApplyMorphInjection_Panel,
+    ApplyMatPose_Panel,
     RenameArmatureBones_Panel,
     PrefixArmatureBones_Panel,
     RenameWeightGroups_Panel,
     PrefixWeightGroups_Panel,
     POSER_PT_package_asset,
-    VIEW3D_AST_poser_injection_packages,
-    VIEW3D_AST_poser_removal_packages,
+    VIEW3D_AST_poser_packages,
+    POSER_PT_library_shelf,
 )
 
 

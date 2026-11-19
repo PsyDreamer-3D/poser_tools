@@ -1518,8 +1518,9 @@ accepts ours and refuses others, removal through the operator removed `BrowHeavy
 written), injection reached Apply with the package path, the picker branch was taken when a figure
 was remembered, and a missing package gives a message naming where it looked.
 
-**Owner GUI test (2026-11-17):** the Asset Browser right-click entry, side panel and both shelves
-work. The owner notes the right-click entry isn't where a user would look first, but it is enough
+**Owner GUI test (2026-11-17):** the Asset Browser right-click entry, side panel and the shelf
+work. (Recorded at the time as "both shelves"; only the injection shelf was ever reachable, see the
+8.2 shelf correction below.) The owner notes the right-click entry isn't where a user would look first, but it is enough
 for now.
 
 **Category-folder rule (owner, same test).** The library listed `.pz2` files from vendor folders
@@ -1632,7 +1633,7 @@ none of the 70 were listed, so the shown set is unchanged (3,653), and 72 hidden
 `other`/`pose` to `armature`.
 
 **GUI items above** (right-click entry, side panel, shelf clicks, dialogs from the Asset Browser):
-confirmed by the owner's test. Still not exercised: Windows/macOS.
+confirmed by the owner's test, for the injection shelf only (8.2 shelf correction). Still not exercised: Windows/macOS.
 
 ### Decisions
 
@@ -1740,10 +1741,143 @@ the rest of `core/cr2/`):
    pattern, or a separate `poser.use_material_package`), on the active mesh, with Ctrl+Z. It replaces node
    trees, so it is more destructive than an injection: a confirm, or apply to copies, is an open decision.
 
-**Phasing (proposed):** 8.1 port the parser pieces and translator with pytest on real MAT files, plus the
-slot-name spike; 8.2 apply operator (manual file pick); 8.3 index + shelf. **Out of scope at first:**
+**Spike results (2026-11-18, headless 5.0.1, owner's library).**
+- **Slot names.** The FBX import names every slot `<object>_<material>`: Aiko3 `Figure_SkinTorso`,
+  `Figure_Lips`...; LaFemme `LaFemme_Pro_SkinTorso`... (the same convention `cr2_importer` stripped). No
+  CR2 name matches a slot exactly; with the prefix stripped, Aiko3 matches 34/35 of its CR2's materials
+  and LaFemme 18/20. The ones left over are `Preview` (Poser's viewport material, never on the mesh) and
+  LaFemme's `Invisible`.
+- **A V3 MAT on Aiko3** (they share a base mesh): Lady Xtaci's `! MAT Lady Xtaci !.pz2` sets 31 of its 33
+  materials. The two without a slot are `Preview` and `SkinLeg`; Aiko3's CR2 splits the leg into
+  `SkinKnee`/`SkinShin`/`SkinThigh`, which the MAT leaves alone, as Poser would. So matching is exact
+  after the prefix; whatever doesn't match is reported, not guessed.
+- **The import's own materials** are a Principled BSDF and a Normal Map. Aiko3's have no image, and
+  LaFemme's carry the FBX's embedded `PoserTexture*` images. Applying a MAT replaces that tree.
+- **Textures.** All 5 of Lady Xtaci's `:Runtime:Textures:Ecstasy_Jai:...` paths resolve through
+  `resolve_poser_path()` with the configured roots. The folder on disk is lowercase `textures`; Phase 7.0's
+  case-insensitive lookup covers that.
+- **Parsing needs no port.** `poser_tools`' own `CR2Parser` reads 2,602 of the 2,643 material-only files
+  (6.4 s for all). Their layouts are `figure { material ... }` (2,545) and per-`actor` (98), and none uses
+  `setMaterial`, so `cr2_importer`'s `PZ2Parser` adds nothing here. 460 carry shader trees, the rest are
+  legacy `KdColor`/`textureMap` materials. Of the 2,643, 51 read fewer materials than they have blocks, and
+  that is correct: the file sets each material twice (A3H3 Casuals shoes, 10 blocks, 5 names). **The 41 that
+  read nothing all have a space in a material name** (`material Quilt Trim`, the Bed Mats props). That is
+  the same kind of bug Phase 5 fixed for channel names (`Blink Right`), still in `_parse_material_block`.
+- **Still to port** (bpy, so outside `core/cr2/`): `shader_translator.build_shader_tree()` for the 460
+  shader-tree materials, and the Principled fallback plus `_load_image()` from `material_pipeline.py`.
+  Their `blend_method`/`shadow_method` lines are `hasattr`-guarded; check them against 5.x's
+  `surface_render_method` when porting.
+
+**Phasing (proposed):** 8.1 fix spaced material names, port the translator and fallback, and a manual
+"Apply MAT Pose" operator with prefix-stripped matching and a report
+(manual file pick); 8.2 a MAT kind in the index (material blocks only) and its shelf. **Out of scope at first:**
 Poser's Materials-library collections (`.mt5`/`.mc6`), Firefly-only shaders, EEVEE-specific tuning.
-**Open:** confirm-or-not on apply; what a MAT does to a material the mesh doesn't have.
+**Decided (owner, 2026-11-18):** rebuild the slot's material in place (not a new material per slot); ask
+first, and keep the original node tree before the MAT replaces it. A MAT material with no slot is reported,
+not added.
+
+#### 8.1 as built (2026-11-18)
+
+- **Parser fixes** in `core/cr2/cr2_parser.py`: `_parse_material_block` reads a multi-token name up to its
+  `{` (bounded look-ahead that stops at `}` or another `material`, so a block-less `material X` line can't
+  swallow the next one); a shader node's bare `file` line no longer consumes the input's closing `}`. On
+  the owner's 2,643 MAT-only files: 0 read nothing (was 41), and every file's parsed names equal its
+  `material` lines (7 DAZ Firearms files read 1 of 53 before); 3,531 materials carry shader trees.
+- `core/cr2/mat_pose.py` (GPL, no bpy): `read_mat_pose()`, `slot_prefix()` (the object's name + `_`, else
+  the longest shared prefix cut at its last `_`), `match_materials_to_slots()` (exact after prefix and
+  `.NNN`, case ignored only as a fallback; `Preview` dropped; returns pairs, no-slot and untouched).
+- `core/shader_translator.py` (MIT, from `cr2_importer`, only the import path changed) now reports the node
+  types it has no mapping for, once per material, instead of skipping them silently.
+- `core/material_builder.py` (MIT, from `cr2_importer`'s `MaterialMixin`): `build_material_nodes()` (shader
+  tree through the translator, else the Principled fallback) and `make_image_loader()` (textures through
+  `resolve_poser_path()` with the configured roots, `images.load(check_existing=True)`). Transparency sets
+  `surface_render_method = 'DITHERED'` (5.x has no `shadow_method`; `blend_method` is the legacy setting).
+- `poser.apply_mat_pose` (UNDO; reports through `say()` so 8.2's shelf can nest it): a dialog with a
+  library dropdown and a path field that previews the match ("Replaces 31 of Figure's 34 materials",
+  the names with no slot) and confirms with **Apply**; execute keeps a fake-user copy `<slot> (original)`
+  the first time a MAT touches a material (`mat["poser_mat_backup"]`), rebuilds in place, writes the
+  **Poser MAT Pose Report**. A **MAT Poses** panel in the sidebar.
+
+**Verified** (headless 5.0.1, real Aiko3 import): Lady Xtaci's MAT replaced 31 materials with her 5
+textures (eyelashes on her transparency map, dithered), kept 31 originals with fake users holding the
+import's node trees, reported `SkinLeg` and the three untouched leg materials. The owner's own
+`Aiko3 ToonShaders/!!Skin 01.pz2` (35 shader-tree materials) on top replaced 34, added backups only for
+the 3 leg materials, kept the import's SkinTorso original, and reported the textures it couldn't find
+(`:Runtime:Textures:DAZ:...` with no roots configured headless; `D:\My Documents\Poser\CelShaders\...`
+absolute Windows paths) and the nodes it left out (`toon`, `simple_color`). pytest: matching, prefix,
+suffix/case, the real Lady Xtaci MAT against Aiko3's CR2 names, and the parser fixes. Registration on
+5.0.1, 5.2.4, 5.3.0. **Not verified:** the dialog's preview and Ctrl+Z (GUI), how the materials look.
+**Gaps found:** the translator has no `toon` or `simple_color` mapping, so a toon MAT comes out a plain
+Principled; absolute Windows texture paths in old MATs never resolve (a basename search across the roots
+could find them).
+
+#### 8.2 as built (2026-11-18): MAT poses in the library, the Asset Browser and a shelf
+
+Owner: list every MAT pose, props and clothing included ("we can import props as well": a prop
+imported through FBX takes a MAT the same way a figure does), on the same branch as 8.1.
+- `library_index`: kind `"material"` in `SHOWN_KINDS`, for an entry that is one file (no `readScript`)
+  of `material` blocks and nothing else, judged on the **whole file** (`_is_mat_pose`: a material-only
+  16 KB head proves nothing; a shoe MAT runs 5,000 lines). It runs only when the entry would otherwise be
+  `"other"`, so the armature and morph rules keep priority. `MANIFEST_VERSION` 6.
+- **Old Mac line endings.** 8 MATs (`DP-Thourobread`, `LongHair_evo_Univ`) end lines with a bare `\r`;
+  `read_head()` decoded raw bytes, so every `^`-anchored pattern (bone channels, material blocks, channel
+  names) missed them, while `read_poser_file()`'s text mode had always normalized. `read_head()` now
+  normalizes too. Diffing every classification on the owner's library before and after: only those 8
+  moved (`other` → `material`).
+- Child: a violet placeholder tile with a white swatch for a MAT pose without a thumbnail.
+- `poser.use_morph_package` (idname kept: the shelves and the double-click keymap item are bound to it;
+  label now "Use Poser Package") sends a `"material"` asset to `poser.apply_mat_pose` through
+  `call_nested()`, whose dialog previews the match and is the confirmation; a mesh with no materials gets
+  a warning instead. Right-click / side panel read **Apply MAT Pose to Active Mesh...**. (Built first as a
+  third shelf, `VIEW3D_AST_poser_material_packages`; see the shelf correction below.)
+- **Real library** (13 roots): 6,296 entries in 265 folders = 2,030 injection + 1,623 removal (unchanged)
+  + **2,643 MAT poses** (Clothing 856, Hair 607, Base Figures 497, Custom Character Sets 329, Scenes,
+  Props and Objects 308...); written by the real child on 5.3 in 9.4 s, 0 failures, 4,639 thumbnails and
+  1,657 placeholders; looked at in a real Asset Browser (Lady Xtaci's MAT beside her MOR INJ/REM, the
+  DP-Thourobread MATs with their thumbnails). Headless 5.0.1: a stand-in MAT asset through the click
+  operator applied Lady Xtaci to a real Aiko3 (31 replaced); a cube without materials got the warning;
+  a missing file said where it looked.
+- **Shelf correction (owner's GUI test, same day).** MAT poses showed in the Asset Browser but not on the
+  shelf. Probed on 5.3 with stand-in shelves: with three shelves polling alike, the 3D View's shelf region
+  shows the **first registered one only** (`context.asset_shelf` was always the injection shelf), and Blender's
+  UI has no switcher between shelves (5.0.1's and 5.3's `bl_ui/asset_shelf.py` hold only the display popover).
+  So the removal shelf had never been reachable either, since 7.4; the owner's 7.4 test had only exercised
+  the injection one. Fixed with **one shelf**, `VIEW3D_AST_poser_packages`, whose `asset_poll` reads
+  `WindowManager.poser_shelf_kind` (All / Injection / Removal / MAT Poses, per session). The
+  same probe showed a filter read in `asset_poll` re-filters on the next redraw, no library refresh needed.
+  The switch is in the shelf's own settings popover (appended to `ASSETSHELF_PT_display`, only when it is
+  our shelf) and in a **Poser Library Shelf** sidebar panel, which also says how to open the shelf. Built
+  first with no "All" (a removal tile among injection tiles is one stray click from deleting shape keys);
+  the owner asked for **All as the default** after testing, and every thumbnail now carries its kind badge
+  (next item). Checked in a real window: the one shelf lists morph packages, removal tiles and MAT poses as
+  the switch changes.
+- **Kind badges (owner, same day).** An INJ, its REM and a character's MAT often ship the same picture, so
+  in a mixed shelf they were indistinguishable (Lady Xtaci's three tiles). Duplicate detection was measured
+  first: by file content, 940 shown entries share 428 pictures, 375 of them across kinds (all INJ/REM pairs),
+  but Lady Xtaci's three PNGs are separately saved files (12,780 / 12,778 / 13,863 bytes, different hashes)
+  that only look alike, so exact matching misses exactly the case reported. Owner's choice: **badge every
+  real thumbnail**. The child draws the kind tile (blue +, amber −, violet swatch; the placeholder's own
+  drawing, now `kind_tile(kind, n)`) into the top-right corner, 32% of the shorter side, skipped on a
+  thumbnail too small to mark without hiding it. `ASSET_FORMAT_VERSION` 3, so the next Update rewrites every
+  asset file. Real library into scratch on 5.3: 6,296 assets, 4,639 badged thumbnails, 0 failures; looked at
+  in a real Asset Browser and shelf (Lady Xtaci: swatch, plus, minus).
+- **Library name (owner, same day): "Poser" by default, user-editable** (Preferences, **Library Name**). That
+  needed the add-on to stop finding its entry by name: `library_build.find_asset_library()` matches by folder,
+  this version's `poser_tools/library` first, else any `poser_tools/library` (only this add-on makes one;
+  preferences carried over from another Blender version point at that version's folder, and it is
+  repointed instead of duplicated). `ensure_asset_library()` renames that entry in place, so the old
+  "Poser Morph Packages" entry becomes "Poser" on the next update, and editing the name renames it at once
+  (`_rename_registered_library`, only when one is registered; registering stays the build's job). Probed on
+  5.3: Blender turns a name another library has into `Name.001` (on `new()` and on rename) and allows an
+  empty name; a blank preference means "Poser", and a `.001` result is accepted rather than retried each
+  build (Preferences says the wanted name is taken). Remove Library Entry also goes by folder. Nothing
+  else used the name: clicks, the shelf and double-click resolve packages from each asset's own keys.
+- **MAT dialog names the mismatches (owner, same day).** After an unexplained "26 of 34" on one shelf click
+  (gone after a restart; there is one `! All Aiko Map 01`, it matches 34/34 by name, and both the pre-fix
+  and current parser read its 35 materials, so not a wrong file or a parser fault), the dialog now lists, by
+  name and before Apply, the file's materials with no slot and the mesh's materials the file leaves alone
+  (prefix stripped, five a line, capped with "and N more"). Looked at in a real window: Lady Xtaci on Aiko3
+  lists `SkinLeg`, and `SkinKnee, SkinShin, SkinThigh`.
 
 ## Open decisions
 

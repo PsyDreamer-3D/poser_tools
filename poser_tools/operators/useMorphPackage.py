@@ -20,7 +20,7 @@ def asset_fields(asset) -> dict:
 
 
 def package_asset_kind(asset) -> str:
-    """"injection"/"removal" when `asset` is one of the library's packages, else ""."""
+    """"injection"/"removal"/"material" when `asset` is one of the library's packages, else ""."""
     if asset is None or asset.id_type != 'SCENE':
         return ""
     return package_kind(asset_fields(asset), [tag.name for tag in asset.metadata.tags])
@@ -33,9 +33,11 @@ def context_asset(context):
 
 
 class OT_UseMorphPackage_Operator(bpy.types.Operator):
-    """Apply or remove the Poser morph package this asset stands for, on the active mesh"""
+    """Apply or remove the Poser morph package, or apply the MAT pose, this asset stands for, on the active mesh"""
+    # The idname predates MAT poses (Phase 8.2); kept, since the shelves' bl_activate_operator and
+    # the Asset Browser's double-click keymap item are bound to it.
     bl_idname = "poser.use_morph_package"
-    bl_label = "Use Morph Package"
+    bl_label = "Use Poser Package"
     # Needs an asset in the context (Asset Browser, asset shelf), so it isn't offered in search.
     # No UNDO of its own: it only starts Apply, the picker or Remove, which push their own steps.
     bl_options = {'INTERNAL'}
@@ -47,7 +49,7 @@ class OT_UseMorphPackage_Operator(bpy.types.Operator):
             cls.poll_message_set("Select the mesh to apply the package to")
             return False
         if not package_asset_kind(context_asset(context)):
-            cls.poll_message_set("Pick a package from the Poser Morph Packages library")
+            cls.poll_message_set("Pick a package from the Poser package library")
             return False
         return True
 
@@ -66,6 +68,13 @@ class OT_UseMorphPackage_Operator(bpy.types.Operator):
             return {'CANCELLED'}
 
         obj = context.active_object
+        if kind == "material":
+            if not any(slot.material for slot in obj.material_slots):
+                say(self, {'WARNING'}, f"{obj.name} has no materials for a MAT pose to replace.")
+                return {'CANCELLED'}
+            # Its dialog previews what will be replaced and is the confirmation (owner's call).
+            result = call_nested(self, bpy.ops.poser.apply_mat_pose, mat_filepath=path)
+            return {'CANCELLED'} if 'CANCELLED' in result else {'FINISHED'}
         if kind == "removal":
             if obj.data.shape_keys is None:
                 say(self, {'WARNING'}, f"{obj.name} has no shape keys; nothing to remove.")

@@ -43,15 +43,18 @@ from .runtime_index import walk_roots
 # 3: only files in Poser's own library category folders are entries (POSER_LIBRARY_CATEGORIES).
 # 4: a package that moves bones is an "armature" pose and hidden, even if it also injects.
 # 5: `thighLength` marks a pose file too (owner's tip; 70 pose files have it but no bone channel).
+# 6: MAT poses (`material` blocks and nothing else) are entries too, kind "material" (Phase 8.2).
 # Entry answers are cached by file stamps alone, so a rule change must invalidate them here; the
 # bump also makes Preferences say the index needs rebuilding.
-MANIFEST_VERSION = 5
+MANIFEST_VERSION = 6
 HEAD_BYTES = 16384
 # Orchestrators nest two or three deep in practice (an entry, an "all" file, the leaves).
 # The cap only stops a pathological tree; hitting it marks the entry incomplete.
 MAX_DEPTH = 8
 PACKAGE_EXTENSIONS = {"pz2", "p2z"}
-SHOWN_KINDS = ("injection", "removal")
+# Morph packages, and MAT poses since Phase 8.2 (all of them, props and clothing included: a
+# prop imported through FBX takes a MAT the same way a figure does; owner, 2026-11-18).
+SHOWN_KINDS = ("injection", "removal", "material")
 # Blender ID names are 63 bytes of UTF-8.
 ID_NAME_LIMIT = 63
 
@@ -67,6 +70,9 @@ _INDEXES_RE = re.compile(r"\bindexes\s+[1-9]")
 # line Poser writes into pose files (owner's tip: 3,352 files on their library have it, 70 of them
 # with no bone channel at all, e.g. the empty second block of a saved pose).
 _BONE_CHANNEL_RE = re.compile(r"^[ \t]*(?:(?:rotate|translate)[XYZ][ \t]|thighLength\b)", re.M)
+# A MAT pose is `material` blocks and nothing else (owner's rule): no channels, no readScript.
+_MATERIAL_BLOCK_RE = re.compile(r"^[ \t]*material[ \t]+\S", re.M)
+_CHANNELS_RE = re.compile(r"^[ \t]*channels\b", re.M)
 _DELTAS_RE = re.compile(r"\bdeltas\b")
 
 
@@ -98,18 +104,28 @@ def is_delta_leaf(name: str, category: str) -> bool:
 
 
 def read_head(path: str):
-    """The first 16 KB of a Poser file as text (decompressing `.p2z`), or None if unreadable."""
+    """The first 16 KB of a Poser file as text (decompressing `.p2z`), or None if unreadable.
+
+    Line endings are normalized to `\n`, as read_poser_file()'s text mode does: old Mac
+    content ends lines with a bare `\r`, and every `^`-anchored pattern here (bone channels,
+    material blocks, channel names) missed such files until this (Phase 8.2: 8 MAT poses,
+    `DP-Thourobread`, `LongHair_evo_Univ`, read as "other").
+    """
     try:
         if os.path.splitext(path)[1].lower() in COMPRESSED_EXTENSIONS:
             try:
                 with gzip.open(path, "rb") as fh:
-                    return fh.read(HEAD_BYTES).decode("utf-8", "replace")
+                    return _normalize_newlines(fh.read(HEAD_BYTES).decode("utf-8", "replace"))
             except (OSError, EOFError, zlib.error):
                 pass   # a ".p2z" that isn't gzip, which read_poser_file() also tolerates
         with open(path, "rb") as fh:
-            return fh.read(HEAD_BYTES).decode("utf-8", "replace")
+            return _normalize_newlines(fh.read(HEAD_BYTES).decode("utf-8", "replace"))
     except OSError:
         return None
+
+
+def _normalize_newlines(text: str) -> str:
+    return text.replace("\r\n", "\n").replace("\r", "\n")
 
 
 def sniff_leaf(head: str) -> str:
@@ -213,8 +229,9 @@ def classify_entry(path: str, roots, dir_cache=None, leaf_cache=None) -> dict:
       even when it also injects the morphs it dials, like V3 Spellcaster, or a "Fit"
       package that moves the hip as well), "injection" (some leaf has deltas), "pmd"
       (binary morphs, unsupported), "removal" (leaves re-declare channels as `name -`),
+      "material" (a MAT pose: one file of `material` blocks and nothing else; Phase 8.2),
       "pose" (dials morph values, no deltas), "missing" (every target unresolved), else
-      "other". Only injection and removal are shown (SHOWN_KINDS).
+      "other". Injection, removal and material are shown (SHOWN_KINDS).
     - incomplete: some target could not be found, or the tree was too deep.
     - mixed: an injection that also contains removal leaves (it can offer both).
     - stamps: [(path, mtime_ns, size)] of every file read, to tell later whether
@@ -243,6 +260,8 @@ def classify_entry(path: str, roots, dir_cache=None, leaf_cache=None) -> dict:
         kind = "missing"
     else:
         kind = "other"
+    if kind == "other" and state.visited == [path] and _is_mat_pose(path):
+        kind = "material"
     return {
         "kind": kind,
         "incomplete": bool(state.missing or state.truncated),
@@ -251,6 +270,23 @@ def classify_entry(path: str, roots, dir_cache=None, leaf_cache=None) -> dict:
         "n_missing": state.missing,
         "stamps": [s for s in map(_stamp, state.visited) if s is not None],
     }
+
+
+def _is_mat_pose(path: str) -> bool:
+    """`material` blocks and nothing else, judged on the whole file.
+
+    The 16 KB head the rest of classification reads can't prove "nothing else": a shoe MAT runs
+    5,000 lines, and a pose-with-materials file could put its channels after them. So a file whose
+    head has a material block is read in full; on the owner's library that is ~2,700 small files.
+    """
+    head = read_head(path)
+    if not head or not _MATERIAL_BLOCK_RE.search(head) or _CHANNELS_RE.search(head) or "readScript" in head:
+        return False
+    try:
+        text = read_poser_file(path)
+    except OSError:
+        return False
+    return not _CHANNELS_RE.search(text) and "readScript" not in text
 
 
 def _stamps_current(stamps) -> bool:
@@ -400,7 +436,7 @@ def _folder_hash(entries: list) -> str:
 _CATALOG_NAMESPACE = uuid.UUID("5f6c1e3a-0b0e-4a52-9d7e-5b7f3c1f2a10")
 # Bump when what the asset files contain changes (placeholders, tags, payload keys), so
 # existing ones are rebuilt: it goes into the manifest signature.
-ASSET_FORMAT_VERSION = 2   # 2: stand-ins are Scenes (the Asset Browser doesn't list Images)
+ASSET_FORMAT_VERSION = 3   # 2: stand-ins are Scenes (the Asset Browser doesn't list Images); 3: kind badge on thumbnails
 
 
 def asset_signature(blender_version: str) -> str:

@@ -9,9 +9,9 @@ from bpy.props import BoolProperty
 
 from ..core import library_build
 from ..core.cr2 import library_index
-from ..core.library_build import LIBRARY_NAME, library_dir
+from ..core.library_build import library_dir
 from ..core.utils import _write_report
-from ..properties.poserToolsPreferences import get_runtime_labels, get_runtime_roots
+from ..properties.poserToolsPreferences import get_library_name, get_runtime_labels, get_runtime_roots
 
 _REPORT_TEXT = "Poser Library Index Report"
 
@@ -215,16 +215,16 @@ class OT_BuildLibraryIndex_Operator(bpy.types.Operator):
 
         # On the main thread because it edits the user's preferences: the library entry is what
         # makes the files appear in the Asset Browser. Only ever done from this explicit click.
-        _library, action = library_build.ensure_asset_library(
-            context.preferences.filepaths.asset_libraries, LIBRARY_NAME, job.out_dir)
+        library, action = library_build.ensure_asset_library(
+            context.preferences.filepaths.asset_libraries, get_library_name(context), job.out_dir)
         _write_report(context, _REPORT_TEXT, library_build.report_lines(
-            job.manifest, job.result, job.seconds, f"{LIBRARY_NAME!r} {action} at {job.out_dir}"))
+            job.manifest, job.result, job.seconds, f"{library.name!r} {action} at {job.out_dir}"))
 
         stats = job.manifest["stats"]
         self.report({'INFO'}, (
             f"Library index built: {stats['shown']} package(s) in {stats['folders']} folder(s), "
             f"{job.result['written']} file(s) written, {job.seconds:.0f}s. "
-            f"Open the Asset Browser and pick '{LIBRARY_NAME}'. See the '{_REPORT_TEXT}' text block."))
+            f"Open the Asset Browser and pick '{library.name}'. See the '{_REPORT_TEXT}' text block."))
         if not bpy.app.background:
             # Last, and deferred: this runs from the Preferences window, whose context can't be
             # overridden into another window's screen.
@@ -233,16 +233,18 @@ class OT_BuildLibraryIndex_Operator(bpy.types.Operator):
 
 
 class OT_RemoveLibraryEntry_Operator(bpy.types.Operator):
-    """Remove the Poser Morph Packages entry from Blender's asset libraries (the index files stay on disk)"""
+    """Remove the Poser package library from Blender's asset libraries (the index files stay on disk)"""
     bl_idname = "poser.remove_library_entry"
     bl_label = "Remove Library Entry"
     bl_options = {'INTERNAL'}
 
     @classmethod
     def poll(cls, context):
-        return any(lib.name == LIBRARY_NAME for lib in context.preferences.filepaths.asset_libraries)
+        return library_build.find_asset_library(context.preferences.filepaths.asset_libraries,
+                                                library_dir(create=False)) is not None
 
     def execute(self, context):
-        library_build.remove_asset_library(context.preferences.filepaths.asset_libraries, LIBRARY_NAME)
-        self.report({'INFO'}, f"Removed '{LIBRARY_NAME}' from the asset libraries. Build Library Index adds it back.")
+        name = library_build.remove_asset_library(context.preferences.filepaths.asset_libraries,
+                                                  library_dir(create=False))
+        self.report({'INFO'}, f"Removed '{name}' from the asset libraries. Build Library Index adds it back.")
         return {'FINISHED'}

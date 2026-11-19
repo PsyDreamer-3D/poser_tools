@@ -28,7 +28,7 @@ Standard scaffold layout. Two things worth knowing:
   `core/cr2/injection_scan.py` (a cheap brace-walking listing of a package's morphs for the picker;
   must agree with `CR2Parser`, see its tests), `core/cr2/library_index.py` (Phase 7.3a: classifies
   the owner's whole Poser library into injection/removal entries and builds the asset-index
-  manifest; same rule, its sniff is tested against the parser), and `core/cr2/apply_injection.py` (morph-injection Phases 1 and 3, see below) live in the same package
+  manifest; same rule, its sniff is tested against the parser), `core/cr2/mat_pose.py` (Phase 8: MAT pose reading and slot matching), and `core/cr2/apply_injection.py` (morph-injection Phases 1 and 3, see below) live in the same package
   but are original `poser_tools` code, not adapted from `cr2_importer` — GPL-3.0-or-later, not MIT.
   Same no-`bpy` / plain-`pytest` discipline (`tests/test_mesh_correspondence.py`,
   `tests/test_injection_package.py`, `tests/test_apply_injection.py`).
@@ -42,6 +42,9 @@ Standard scaffold layout. Two things worth knowing:
   `cr2_importer`'s own `pz2_parser.py` only *detects* that an orchestrator file exists, it never
   actually follows one — or `poser_library_prefs.py`, which reads Poser's own `LibraryPrefs.xml`,
   something `cr2_importer` never does at all).
+  Outside `core/cr2/` because they use `bpy`: `core/shader_translator.py` and `core/material_builder.py`
+  (Phase 8 MAT poses) are MIT, adapted from `cr2_importer`'s `core/shader_translator.py` and
+  `core/material_pipeline.py`, and maintained here from now on, like the parser.
 
 ## Key design decisions
 
@@ -224,7 +227,9 @@ don't resume it without a specific reason to.
   `docs/handoff-morph-injection.md`; 7.0 to 7.4 are built (7.2, 7.3 and 7.4 below).
 - Phase 7.4: **using a package from the library** (`poser.use_morph_package`,
   `operators/useMorphPackage.py`; `ui/packageAssets.py`). One operator behind the Asset Browser's
-  right-click entry, a side panel there, and two 3D Viewport shelves (injection, removal; opened from
+  right-click entry, a side panel there, and the one Poser Library shelf (All, the default / Injection / Removal / MAT Poses
+  switch, `WindowManager.poser_shelf_kind`: Blender shows one shelf per 3D View and can't switch between
+  shelves that poll alike, so kinds share it; opened from
   View → Asset Shelf). It reads the asset's `poser_root`/`poser_rel_path`/`poser_kind` through
   `context.asset.metadata` (read live on 5.3; `core/library_build.resolve_package_asset()` falls back to
   tags + description and to the other Runtime roots). Injection opens the 7.2 picker when the mesh
@@ -257,6 +262,10 @@ don't resume it without a specific reason to.
   on 5.0.1, 5.2.4 and 5.3.0 and reading every asset back. **Stand-ins are `Scene`s, and must stay a type
   the Asset Browser lists** (Action, Brush, Collection, Material, Node Tree, Object, Scene, World): an
   `Image` library registers, shows its catalogs and then "No items", which no headless check can see.
+  The library's name is a preference (**Library Name**, default "Poser", was "Poser Morph Packages"); the add-on
+  finds its own entry by folder (`library_build.find_asset_library`: this version's `poser_tools/library`, else
+  any `poser_tools/library`, as preferences carried over from another Blender version point at that one), so
+  renames, the old name and version upgrades never leave a second entry.
   Scene was picked because it has no drop target and no other consumer; Object/World/Material are drop
   targets, Action feeds the Pose Library, NodeTree the Add menus. A removal is a channel that
   re-declares its delta list empty (`indexes 0`), not just `name -`: `Hide.*` visibility files have
@@ -275,6 +284,21 @@ don't resume it without a specific reason to.
   library edits the user's preferences, so it happens only from that explicit click, on the main
   thread. `INVOKE_DEFAULT` runs `execute()` under `--background`, so the interactive path is the same
   `_work()` called inline; the modal wrapper itself needs the GUI.
+- **Phase 8.2: MAT poses in the library.** Kind `"material"` (`library_index._is_mat_pose`: one file of
+  `material` blocks and nothing else, judged on the whole file) is shown, every MAT included, props and
+  clothing too (owner). On the shelf behind its MAT Poses switch; `poser.use_morph_package` (idname kept for its bindings) sends MAT
+  assets to `poser.apply_mat_pose`'s dialog. `read_head()` normalizes `\r` line endings: old Mac files
+  slipped past every `^`-anchored pattern.
+- **Phase 8.1: MAT poses** (`poser.apply_mat_pose`, `operators/applyMatPose.py`, `ui/applyMatPose.py`;
+  `core/cr2/mat_pose.py` no bpy; `core/material_builder.py` and `core/shader_translator.py` are bpy, MIT,
+  adapted from `cr2_importer`). The FBX import names slots `<object>_<material>`, so matching strips that
+  prefix (and `.001`) and compares names exactly; unmatched names are reported, never guessed, and
+  `Preview` (Poser's viewport material) is ignored. Owner's calls: rebuild the slot's material in place,
+  and ask first; the dialog is the confirmation (it previews the match), and the first MAT on a material keeps
+  a fake-user copy `<name> (original)` (`mat["poser_mat_backup"]`), never overwritten by later MATs. The
+  translator now reports node types it has no mapping for (Poser `toon`, `simple_color`) instead of
+  skipping them silently. Parsing needed no port of `cr2_importer`'s `PZ2Parser`; `CR2Parser` reads every
+  MAT on the owner's library after two fixes (spaced material names, a bare `file` line in a shader node).
 - **Package dials** (owner, 2026-11-18): a character package `readScript`s its morphs and then dials them
   (`valueParm PBMTone k 0 0.232` on BODY). `core/cr2/injection_package.package_dials()` reads those values
   from the package's own files, the ones holding `readScript`, never from the delta files, whose `k 0 0`
@@ -346,7 +370,8 @@ Everything else is manual smoke test only — no `bpy`-dependent code has automa
    cursor shows a percentage and the status bar names the phase (reading files / classifying packages /
    writing asset files), Esc cancels and changes nothing; on success an INFO message, a **Poser Library
    Index Report** text block, and the panel shows the package count, thumbnail/placeholder counts and
-   "registered". An Asset Browser pointed at **Poser Morph Packages** shows the packages by folder.
+   "registered". An Asset Browser pointed at **Poser** (the default **Library Name**) shows the packages by folder. Rename it in
+   Preferences: the registered entry follows, found by its folder, never duplicated.
    Run it again: seconds, "0 written". Change the Runtime folders or a Label: the panel says to update; a renamed Label rewrites only that Runtime's files. The Asset Browser lists one catalog per Runtime, each with a capitalized category (Pose) below.
 6c. With that library built and a mesh active: in the Asset Browser, right-click a package →
    **Apply to Active Mesh...** (or the button in the side panel's **Poser Morph Package** box) opens the
@@ -354,12 +379,20 @@ Everything else is manual smoke test only — no `bpy`-dependent code has automa
    package's **Remove from Active Mesh** removes its keys at once, Ctrl+Z restores them. Double-clicking
    one of our packages does the same (a keymap item; other libraries' assets keep Blender's own
    double-click). `Window.event_simulate` can't produce a double-click, so test it by hand. In the 3D
-   Viewport, View → Asset Shelf shows the injection and removal shelves in Object Mode; clicking a tile
+   Viewport, View → Asset Shelf shows the Poser Library shelf in Object Mode; its settings popover (or the
+   sidebar's Poser Library Shelf panel) switches All / Injection / Removal / MAT Poses; every real thumbnail carries
+   its kind badge (blue +, amber −, violet swatch); clicking a tile
    does the same.
 6. Same mesh → **Remove Morph Injection**, pick the same package's `RemDeltas.*` file (or the
    original `InjDeltas.*` one — either works) via the same searchable dropdown. Expect: near-instant
    (no correspondence build), the matching shape key(s) gone, a **Poser Morph Removal Report** text
    block. Re-run with the same package → reports 0 removed / already not present, no error.
+7. Aiko3 mesh → **MAT Poses** → **Apply MAT Pose**, pick Lady Xtaci's `! MAT Lady Xtaci !.pz2`: the dialog
+   says "Replaces 31 of Figure's 34 materials" and lists `SkinLeg` as having no slot; Apply → textured
+   materials in Material Preview, 31 `... (original)` materials with fake users, a **Poser MAT Pose Report**.
+   Ctrl+Z restores them. A second MAT adds backups only for materials the first didn't touch. With the
+   library index updated, the same MAT in the Asset Browser (double-click, right-click → **Apply MAT Pose to
+   Active Mesh...**) or on the shelf switched to MAT Poses opens that dialog with the file picked.
 
 For a quick check without Blender: `python -m py_compile` the tree, or import `poser_tools` under a
 stubbed `bpy` and call `register()`/`unregister()` — that catches class-tuple typos and bad import
