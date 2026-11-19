@@ -8,6 +8,8 @@ import pytest
 
 from core.cr2.injection_package import (
     load_injection_package,
+    match_dials_to_shape_keys,
+    package_dials,
     paired_injection_path,
     resolve_package_files,
 )
@@ -385,3 +387,106 @@ def test_only_leaves_parses_just_those_files_and_still_reports_unresolved(tmp_pa
     assert only_b["unresolved_paths"] == [":Runtime:libraries:gone.pz2"]   # describes the package, not the subset
 
     assert load_injection_package(str(orchestrator), only_leaves=[])["figure"].actors == []
+
+
+# ---- the morph values a package dials (Apply sets them; owner, 2026-11-18) ----------------
+
+_KEYED_LEAF = """\
+    {
+    version { number 4.01 }
+    actor head:1
+        {
+        channels
+            {
+            targetGeom Brow
+                {
+                name BrowHeavy
+                keys { k 0 0 }
+                indexes 1
+                deltas { d 0 0.1 0.2 0.3 }
+                }
+            }
+        }
+    }
+    """
+
+
+def _character_package(tmp_path):
+    """A Lady Xtaci-style package: load the deltas, then dial the morphs and scale the body."""
+    root = tmp_path / "Content"
+    _write(root / "Runtime" / "libraries" / "!V" / "Deltas" / "InjDeltas.Brow.pz2", _KEYED_LEAF)
+    _write(root / "Runtime" / "libraries" / "!V" / "Dials.pz2", """\
+        {
+        actor head:1 { channels { targetGeom Smile { keys { k 0 0.5 } } } }
+        }
+        """)
+    pkg = root / "Runtime" / "libraries" / "pose" / "Char" / "MOR INJ.pz2"
+    _write(pkg, """\
+        {
+        version { number 3.0 }
+        readScript ":Runtime:libraries:!V:Deltas:InjDeltas.Brow.pz2"
+        readScript ":Runtime:libraries:!V:Dials.pz2"
+        actor BODY
+            {
+            channels
+                {
+                valueParm PBMTone { keys { k 0 0.232 } }
+                propagatingScale scale { keys { k 0 0.93 } }
+                }
+            }
+        actor head
+            {
+            channels
+                {
+                targetGeom Brow { keys { k 0 -0.4 } }
+                }
+            }
+        actor leftEye { channels { targetGeom CorneaBulge { keys { k 0 1 } } } }
+        actor rightEye { channels { targetGeom CorneaBulge { keys { k 0 0.8 } } } }
+        }
+        """)
+    return str(pkg)
+
+
+def test_package_dials_come_from_the_package_files_not_the_delta_files(tmp_path):
+    result = package_dials(_character_package(tmp_path))
+    # The leaf's own `k 0 0` on Brow is not a dial; the package's -0.4 is. Dials.pz2 is a leaf
+    # (no readScript), so its Smile value is not read either: only orchestrators set values.
+    assert result["dials"] == [("BODY", "PBMTone", 0.232), ("head", "Brow", -0.4),
+                               ("leftEye", "CorneaBulge", 1.0), ("rightEye", "CorneaBulge", 0.8)]
+    assert [(actor, kind, value) for actor, _name, kind, value in result["other"]] == [("BODY", "scale", 0.93)]
+    assert len(result["files"]) == 1
+
+
+def test_a_single_delta_file_dials_nothing(tmp_path):
+    leaf = tmp_path / "InjDeltas.Brow.pz2"
+    _write(leaf, _KEYED_LEAF)
+    assert package_dials(str(leaf)) == {"dials": [], "other": [], "files": []}
+
+
+def test_dials_find_their_shape_keys_like_apply_finds_present_morphs():
+    dials = [("BODY", "PBMTone", 0.232), ("head", "PBMDC_39", 0.5), ("head", "pEarDeer", 0.3),
+             ("leftEye", "CorneaBulge", 1.0), ("rightEye", "CorneaBulge", 0.8), ("head", "Gone", 1.0)]
+    result = match_dials_to_shape_keys(
+        dials, ["Basis", "Tone", "BrowHeavy", "EarDeer", "CorneaBulge"],
+        injected_record={"PBMTone": "Tone"}, display_names={"PBMDC_39": "BrowHeavy", "pEarDeer": "pEarDeer"})
+    assert result["values"] == {"Tone": 0.232, "BrowHeavy": 0.5, "EarDeer": 0.3, "CorneaBulge": 1.0}
+    assert result["missing"] == ["Gone"]
+    assert result["conflicts"] == [("CorneaBulge", 1.0, 0.8)]
+
+
+def test_a_dial_never_targets_the_basis_key():
+    result = match_dials_to_shape_keys([("BODY", "Basis", 1.0)], ["Basis"])
+    assert result == {"values": {}, "missing": ["Basis"], "conflicts": []}
+
+
+@pytest.mark.skipif(not os.path.isdir(_REAL_CONTENT_ROOT), reason="Poser content drive not mounted")
+def test_real_character_package_dials():
+    pkg = os.path.join(_REAL_CONTENT_ROOT, "Custom Character Sets/Runtime/libraries/Pose/Lady Xtaci/MOR INJ.pz2")
+    result = package_dials(pkg, extra_roots=[os.path.join(_REAL_CONTENT_ROOT, "Base Figures")])
+    dials = {(actor, name): value for actor, name, value in result["dials"]}
+    assert len(dials) == 59
+    assert dials[("BODY", "PBMTone")] == pytest.approx(0.232)
+    assert dials[("BODY", "PBMBreastSize8")] == pytest.approx(-1.012)
+    assert dials[("head", "HdCeltic")] == pytest.approx(0.798)
+    assert [(a, k, v) for a, _n, k, v in result["other"]] == [("BODY", "scale", pytest.approx(0.93))]
