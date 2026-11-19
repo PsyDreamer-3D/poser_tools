@@ -93,3 +93,12 @@ def test_a_poser_bum_uses_the_image_it_was_made_from(content):
     path, note = resolve_texture(":Runtime:Textures:DAZ:Lady:Body.bum", mat, roots, index)
     assert path == files["body"] and note.startswith("Poser .bum bump map, used the image it was made from")
     assert resolve_texture(":DAZ:Lady:Nothing.bum", mat, roots, index) == (None, "not found")
+
+
+def test_a_bum_whose_source_image_is_gone_is_reported_as_such(content):
+    mat, roots, index, files = content
+    bum = os.path.join(roots[0], "Runtime", "textures", "Orphan.bum")
+    with open(bum, "wb") as fh:
+        fh.write(b"BM")
+    path, note = resolve_texture(":Runtime:textures:Orphan.bum", mat, roots, index)
+    assert path is None and note.startswith("Poser .bum without the image it was made from")

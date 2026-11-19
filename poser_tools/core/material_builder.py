@@ -41,8 +41,10 @@ def make_image_loader(source_file: str, extra_roots=None, reporter=None):
         import bpy
         path, note = resolve_texture(reference, source_file, extra_roots, index, dir_cache)
         if path is None:
-            if note != "no map":
+            if note == "not found":
                 tell({'WARNING'}, f"Texture not found: {reference}")
+            elif note != "no map":
+                tell({'WARNING'}, f"Texture not used: {reference} ({note})")
             return None
         if note:
             tell({'INFO'}, f"{reference} -> {path} ({note})")

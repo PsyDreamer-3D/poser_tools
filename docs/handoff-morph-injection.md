@@ -1845,6 +1845,22 @@ textures (its `:textures:DAZ:...` eye maps relative to Runtime), the toon `!!Ski
 `D:\My Documents\Poser\CelShaders\...` images by name in its own Runtime (not Silent Shadow (2016)'s copy) and
 now reports no missing texture (was 6), only the toon nodes left out.
 
+**The `.bum` format (investigated 2026-11-19, all 18 on the owner's drive).** Every `.bum` is an uncompressed
+Windows BMP (`BM` header, 54-byte header, or 1,078 with a 256-colour palette) with another extension; Blender
+loads it as BMP by its header. Two kinds:
+- **15 are 24-bit slope maps:** mean R and G ~0.5, B always 0. Against the slopes of the same-named `.jpg`
+  beside each (finite differences of its luminance), R correlates with the horizontal slope (+0.47 to +0.78)
+  and G with the vertical one inverted (-0.53 to -0.74), the crossed pairs near 0 except in diagonal patterns.
+  So Poser computes them from the height image; the ~0.7 rather than 1 says its slope filter or smoothing differs
+  (and the .bum likely predates the .jpg's compression). One, `Roof.bum`, is 512 px from a 191 px `.jpg`, so
+  Poser also resamples.
+- **3 are 8-bit greyscale** (ardath3d): exactly the `.jpg`'s pixels (correlation 1.000).
+Every one has its source `.jpg` beside it, and every one of the 685 `.bum` references in MAT poses names a
+missing `.bum` whose source image exists. **Decision:** use the source image as the height map (what the
+.bum step does), not the .bum: a slope map fed to a Bump node as height would be wrong, and converting it would
+only approximate Poser's filter. A `.bum` found without its image is reported as "not usable as a bump map"
+rather than "not found".
+
 #### 8.2 as built (2026-11-18): MAT poses in the library, the Asset Browser and a shelf
 
 Owner: list every MAT pose, props and clothing included ("we can import props as well": a prop
