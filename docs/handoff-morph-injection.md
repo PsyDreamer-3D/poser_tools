@@ -1811,6 +1811,12 @@ suffix/case, the real Lady Xtaci MAT against Aiko3's CR2 names, and the parser f
 Principled; absolute Windows texture paths in old MATs never resolve (a basename search across the roots
 could find them).
 
+**Ruled out (owner, 2026-11-19): translating Poser's toon nodes.** Blender's nearest equivalents are the
+Toon BSDF (Cycles only) for `toon` and an RGB/Color node for `simple_color`, but the owner's own toon MATs
+(`Aiko3 ToonShaders`) were a specialized setup they have since replaced with better results in EEVEE, so
+reproducing them isn't worth the work. The translator keeps reporting these nodes as left out, so a toon
+MAT still applies its other settings and says what it skipped.
+
 #### 8.2 as built (2026-11-18): MAT poses in the library, the Asset Browser and a shelf
 
 Owner: list every MAT pose, props and clothing included ("we can import props as well": a prop
