@@ -1771,7 +1771,44 @@ the rest of `core/cr2/`):
 "Apply MAT Pose" operator with prefix-stripped matching and a report
 (manual file pick); 8.2 a MAT kind in the index (material blocks only) and its shelf. **Out of scope at first:**
 Poser's Materials-library collections (`.mt5`/`.mc6`), Firefly-only shaders, EEVEE-specific tuning.
-**Open:** confirm-or-not on apply; what a MAT does to a material the mesh doesn't have.
+**Decided (owner, 2026-11-18):** rebuild the slot's material in place (not a new material per slot); ask
+first, and keep the original node tree before the MAT replaces it. A MAT material with no slot is reported,
+not added.
+
+#### 8.1 as built (2026-11-18)
+
+- **Parser fixes** in `core/cr2/cr2_parser.py`: `_parse_material_block` reads a multi-token name up to its
+  `{` (bounded look-ahead that stops at `}` or another `material`, so a block-less `material X` line can't
+  swallow the next one); a shader node's bare `file` line no longer consumes the input's closing `}`. On
+  the owner's 2,643 MAT-only files: 0 read nothing (was 41), and every file's parsed names equal its
+  `material` lines (7 DAZ Firearms files read 1 of 53 before); 3,531 materials carry shader trees.
+- `core/cr2/mat_pose.py` (GPL, no bpy): `read_mat_pose()`, `slot_prefix()` (the object's name + `_`, else
+  the longest shared prefix cut at its last `_`), `match_materials_to_slots()` (exact after prefix and
+  `.NNN`, case ignored only as a fallback; `Preview` dropped; returns pairs, no-slot and untouched).
+- `core/shader_translator.py` (MIT, from `cr2_importer`, only the import path changed) now reports the node
+  types it has no mapping for, once per material, instead of skipping them silently.
+- `core/material_builder.py` (MIT, from `cr2_importer`'s `MaterialMixin`): `build_material_nodes()` (shader
+  tree through the translator, else the Principled fallback) and `make_image_loader()` (textures through
+  `resolve_poser_path()` with the configured roots, `images.load(check_existing=True)`). Transparency sets
+  `surface_render_method = 'DITHERED'` (5.x has no `shadow_method`; `blend_method` is the legacy setting).
+- `poser.apply_mat_pose` (UNDO; reports through `say()` so 8.2's shelf can nest it): a dialog with a
+  library dropdown and a path field that previews the match ("Replaces 31 of Figure's 34 materials",
+  the names with no slot) and confirms with **Apply**; execute keeps a fake-user copy `<slot> (original)`
+  the first time a MAT touches a material (`mat["poser_mat_backup"]`), rebuilds in place, writes the
+  **Poser MAT Pose Report**. A **MAT Poses** panel in the sidebar.
+
+**Verified** (headless 5.0.1, real Aiko3 import): Lady Xtaci's MAT replaced 31 materials with her 5
+textures (eyelashes on her transparency map, dithered), kept 31 originals with fake users holding the
+import's node trees, reported `SkinLeg` and the three untouched leg materials. The owner's own
+`Aiko3 ToonShaders/!!Skin 01.pz2` (35 shader-tree materials) on top replaced 34, added backups only for
+the 3 leg materials, kept the import's SkinTorso original, and reported the textures it couldn't find
+(`:Runtime:Textures:DAZ:...` with no roots configured headless; `D:\My Documents\Poser\CelShaders\...`
+absolute Windows paths) and the nodes it left out (`toon`, `simple_color`). pytest: matching, prefix,
+suffix/case, the real Lady Xtaci MAT against Aiko3's CR2 names, and the parser fixes. Registration on
+5.0.1, 5.2.4, 5.3.0. **Not verified:** the dialog's preview and Ctrl+Z (GUI), how the materials look.
+**Gaps found:** the translator has no `toon` or `simple_color` mapping, so a toon MAT comes out a plain
+Principled; absolute Windows texture paths in old MATs never resolve (a basename search across the roots
+could find them).
 
 ## Open decisions
 

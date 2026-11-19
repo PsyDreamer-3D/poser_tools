@@ -28,7 +28,7 @@ Standard scaffold layout. Two things worth knowing:
   `core/cr2/injection_scan.py` (a cheap brace-walking listing of a package's morphs for the picker;
   must agree with `CR2Parser`, see its tests), `core/cr2/library_index.py` (Phase 7.3a: classifies
   the owner's whole Poser library into injection/removal entries and builds the asset-index
-  manifest; same rule, its sniff is tested against the parser), and `core/cr2/apply_injection.py` (morph-injection Phases 1 and 3, see below) live in the same package
+  manifest; same rule, its sniff is tested against the parser), `core/cr2/mat_pose.py` (Phase 8: MAT pose reading and slot matching), and `core/cr2/apply_injection.py` (morph-injection Phases 1 and 3, see below) live in the same package
   but are original `poser_tools` code, not adapted from `cr2_importer` — GPL-3.0-or-later, not MIT.
   Same no-`bpy` / plain-`pytest` discipline (`tests/test_mesh_correspondence.py`,
   `tests/test_injection_package.py`, `tests/test_apply_injection.py`).
@@ -42,6 +42,9 @@ Standard scaffold layout. Two things worth knowing:
   `cr2_importer`'s own `pz2_parser.py` only *detects* that an orchestrator file exists, it never
   actually follows one — or `poser_library_prefs.py`, which reads Poser's own `LibraryPrefs.xml`,
   something `cr2_importer` never does at all).
+  Outside `core/cr2/` because they use `bpy`: `core/shader_translator.py` and `core/material_builder.py`
+  (Phase 8 MAT poses) are MIT, adapted from `cr2_importer`'s `core/shader_translator.py` and
+  `core/material_pipeline.py`, and maintained here from now on, like the parser.
 
 ## Key design decisions
 
@@ -275,6 +278,16 @@ don't resume it without a specific reason to.
   library edits the user's preferences, so it happens only from that explicit click, on the main
   thread. `INVOKE_DEFAULT` runs `execute()` under `--background`, so the interactive path is the same
   `_work()` called inline; the modal wrapper itself needs the GUI.
+- **Phase 8.1: MAT poses** (`poser.apply_mat_pose`, `operators/applyMatPose.py`, `ui/applyMatPose.py`;
+  `core/cr2/mat_pose.py` no bpy; `core/material_builder.py` and `core/shader_translator.py` are bpy, MIT,
+  adapted from `cr2_importer`). The FBX import names slots `<object>_<material>`, so matching strips that
+  prefix (and `.001`) and compares names exactly; unmatched names are reported, never guessed, and
+  `Preview` (Poser's viewport material) is ignored. Owner's calls: rebuild the slot's material in place,
+  and ask first; the dialog is the confirmation (it previews the match), and the first MAT on a material keeps
+  a fake-user copy `<name> (original)` (`mat["poser_mat_backup"]`), never overwritten by later MATs. The
+  translator now reports node types it has no mapping for (Poser `toon`, `simple_color`) instead of
+  skipping them silently. Parsing needed no port of `cr2_importer`'s `PZ2Parser`; `CR2Parser` reads every
+  MAT on the owner's library after two fixes (spaced material names, a bare `file` line in a shader node).
 - **Package dials** (owner, 2026-11-18): a character package `readScript`s its morphs and then dials them
   (`valueParm PBMTone k 0 0.232` on BODY). `core/cr2/injection_package.package_dials()` reads those values
   from the package's own files, the ones holding `readScript`, never from the delta files, whose `k 0 0`
@@ -360,6 +373,10 @@ Everything else is manual smoke test only — no `bpy`-dependent code has automa
    original `InjDeltas.*` one — either works) via the same searchable dropdown. Expect: near-instant
    (no correspondence build), the matching shape key(s) gone, a **Poser Morph Removal Report** text
    block. Re-run with the same package → reports 0 removed / already not present, no error.
+7. Aiko3 mesh → **MAT Poses** → **Apply MAT Pose**, pick Lady Xtaci's `! MAT Lady Xtaci !.pz2`: the dialog
+   says "Replaces 31 of Figure's 34 materials" and lists `SkinLeg` as having no slot; Apply → textured
+   materials in Material Preview, 31 `... (original)` materials with fake users, a **Poser MAT Pose Report**.
+   Ctrl+Z restores them. A second MAT adds backups only for materials the first didn't touch.
 
 For a quick check without Blender: `python -m py_compile` the tree, or import `poser_tools` under a
 stubbed `bpy` and call `register()`/`unregister()` — that catches class-tuple typos and bad import

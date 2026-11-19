@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 
+from .applyMatPose import ApplyMatPose_Panel
 from .applyMorphInjection import ApplyMorphInjection_Panel
 from .fixPoserShapekeys import FixPoserShapekeys_Panel
 from .importPoserFBX import ImportPoserFBX_Panel
@@ -23,6 +24,7 @@ classes = (
     ImportPoserFBX_Panel,
     FixPoserShapekeys_Panel,
     ApplyMorphInjection_Panel,
+    ApplyMatPose_Panel,
     RenameArmatureBones_Panel,
     PrefixArmatureBones_Panel,
     RenameWeightGroups_Panel,

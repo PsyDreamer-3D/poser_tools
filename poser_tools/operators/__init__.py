@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 
+from .applyMatPose import OT_ApplyMatPose_Operator
 from .applyMorphInjection import OT_ApplyMorphInjection_Operator, PoserLibraryItem
 from .fixPoserShapekeys import OT_FixPoserShapekeys_Operator
 from .importPoserFBX import OT_ImportPoserFBX
@@ -24,6 +25,7 @@ classes = (
     OT_ApplyMorphInjection_Operator,
     OT_PickInjectionMorphs_Operator,
     OT_RemoveMorphInjection_Operator,
+    OT_ApplyMatPose_Operator,
     OT_BuildLibraryIndex_Operator,
     OT_RemoveLibraryEntry_Operator,
     OT_UseMorphPackage_Operator,

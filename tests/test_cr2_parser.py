@@ -6,6 +6,10 @@ Phase 5): CR2Parser._parse_channel() used to truncate and drop the body of any
 targetGeom channel whose internal_name contains a space.
 """
 
+import os
+
+import pytest
+
 from core.cr2.cr2_parser import CR2Parser, resolve_geom_file
 
 
@@ -201,3 +205,49 @@ def test_resolve_geom_file_leaves_unresolvable_path_untouched(tmp_path):
     )
     resolve_geom_file(figure, str(cr2_path))
     assert figure.geom_file == ":Runtime:Geometries:Missing.obj"
+
+
+# ---- material names with spaces (Phase 8: 41 of the owner's MAT files read nothing) --------
+
+def _mat_file(*blocks):
+    return "{\nversion\n\t{\n\tnumber 4.01\n\t}\nfigure\n\t{\n" + "".join(blocks) + "\t}\n}\n"
+
+
+def _mat(name, kd="0.5 0.25 0.125 1"):
+    return f"\tmaterial {name}\n\t\t{{\n\t\tKdColor {kd}\n\t\ttextureMap NO_MAP\n\t\t}}\n"
+
+
+def test_material_name_with_spaces_is_read_whole():
+    figure = CR2Parser.parse_text(_mat_file(_mat("Quilt Trim"), _mat("Skin Torso Main")))
+    assert list(figure.materials) == ["Quilt Trim", "Skin Torso Main"]
+    assert figure.materials["Quilt Trim"].diffuse_color[:3] == (0.5, 0.25, 0.125)
+
+
+def test_single_word_material_names_are_unchanged():
+    figure = CR2Parser.parse_text(_mat_file(_mat("SkinTorso"), _mat("Lips")))
+    assert list(figure.materials) == ["SkinTorso", "Lips"]
+
+
+def test_a_material_line_without_a_block_does_not_swallow_the_next_material():
+    text = _mat_file("\tmaterial Orphan\n", _mat("SkinTorso"))
+    assert "SkinTorso" in CR2Parser.parse_text(text).materials
+
+
+_BED_MATS = ("/run/media/jess-green/236a91c9-2598-40dd-b968-9c0f0be8a903/Artwork/Poser Content/"
+             "Scenes, Props and Objects/Runtime/libraries/Pose/Bed Mats/Quilt Trim 04.pz2")
+
+
+@pytest.mark.skipif(not os.path.isfile(_BED_MATS), reason="Poser content drive not mounted")
+def test_real_prop_mat_with_a_spaced_material_name():
+    from core.cr2.poser_io import read_poser_file
+    assert list(CR2Parser.parse_text(read_poser_file(_BED_MATS)).materials) == ["Quilt Trim"]
+
+
+def test_a_bare_file_line_in_a_shader_node_does_not_end_the_material_early():
+    node_input = ('\t\t\t\tnodeInput "Quality"\n\t\t\t\t\t{\n\t\t\t\t\tname "Quality"\n'
+                  '\t\t\t\t\tvalue 0.2 0 1\n\t\t\t\t\tnode NO_NODE\n\t\t\t\t\tfile\n\t\t\t\t\t}\n')
+    first = ('\tmaterial scope\n\t\t{\n\t\tKdColor 1 1 1 1\n\t\tshaderTree\n\t\t\t{\n'
+             '\t\t\tnode "poser" "PoserSurface"\n\t\t\t\t{\n' + node_input + '\t\t\t\t}\n\t\t\t}\n\t\t}\n')
+    figure = CR2Parser.parse_text(_mat_file(first, _mat("barrel")))
+    assert list(figure.materials) == ["scope", "barrel"]
+    assert figure.materials["scope"].shader_tree.nodes
