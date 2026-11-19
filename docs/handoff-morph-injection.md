@@ -1740,8 +1740,35 @@ the rest of `core/cr2/`):
    pattern, or a separate `poser.use_material_package`), on the active mesh, with Ctrl+Z. It replaces node
    trees, so it is more destructive than an injection: a confirm, or apply to copies, is an open decision.
 
-**Phasing (proposed):** 8.1 port the parser pieces and translator with pytest on real MAT files, plus the
-slot-name spike; 8.2 apply operator (manual file pick); 8.3 index + shelf. **Out of scope at first:**
+**Spike results (2026-11-18, headless 5.0.1, owner's library).**
+- **Slot names.** The FBX import names every slot `<object>_<material>`: Aiko3 `Figure_SkinTorso`,
+  `Figure_Lips`...; LaFemme `LaFemme_Pro_SkinTorso`... (the same convention `cr2_importer` stripped). No
+  CR2 name matches a slot exactly; with the prefix stripped, Aiko3 matches 34/35 of its CR2's materials
+  and LaFemme 18/20. The ones left over are `Preview` (Poser's viewport material, never on the mesh) and
+  LaFemme's `Invisible`.
+- **A V3 MAT on Aiko3** (they share a base mesh): Lady Xtaci's `! MAT Lady Xtaci !.pz2` sets 31 of its 33
+  materials. The two without a slot are `Preview` and `SkinLeg`; Aiko3's CR2 splits the leg into
+  `SkinKnee`/`SkinShin`/`SkinThigh`, which the MAT leaves alone, as Poser would. So matching is exact
+  after the prefix; whatever doesn't match is reported, not guessed.
+- **The import's own materials** are a Principled BSDF and a Normal Map. Aiko3's have no image, and
+  LaFemme's carry the FBX's embedded `PoserTexture*` images. Applying a MAT replaces that tree.
+- **Textures.** All 5 of Lady Xtaci's `:Runtime:Textures:Ecstasy_Jai:...` paths resolve through
+  `resolve_poser_path()` with the configured roots. The folder on disk is lowercase `textures`; Phase 7.0's
+  case-insensitive lookup covers that.
+- **Parsing needs no port.** `poser_tools`' own `CR2Parser` reads 2,602 of the 2,643 material-only files
+  (6.4 s for all). Their layouts are `figure { material ... }` (2,545) and per-`actor` (98), and none uses
+  `setMaterial`, so `cr2_importer`'s `PZ2Parser` adds nothing here. 460 carry shader trees, the rest are
+  legacy `KdColor`/`textureMap` materials. Of the 2,643, 51 read fewer materials than they have blocks, and
+  that is correct: the file sets each material twice (A3H3 Casuals shoes, 10 blocks, 5 names). **The 41 that
+  read nothing all have a space in a material name** (`material Quilt Trim`, the Bed Mats props). That is
+  the same kind of bug Phase 5 fixed for channel names (`Blink Right`), still in `_parse_material_block`.
+- **Still to port** (bpy, so outside `core/cr2/`): `shader_translator.build_shader_tree()` for the 460
+  shader-tree materials, and the Principled fallback plus `_load_image()` from `material_pipeline.py`.
+  Their `blend_method`/`shadow_method` lines are `hasattr`-guarded; check them against 5.x's
+  `surface_render_method` when porting.
+
+**Phasing (proposed):** 8.1 fix spaced material names, port the translator and fallback, and a manual
+"Apply MAT Pose" operator with prefix-stripped matching and a report; 8.2 apply operator (manual file pick); 8.3 index + shelf. **Out of scope at first:**
 Poser's Materials-library collections (`.mt5`/`.mc6`), Firefly-only shaders, EEVEE-specific tuning.
 **Open:** confirm-or-not on apply; what a MAT does to a material the mesh doesn't have.
 
