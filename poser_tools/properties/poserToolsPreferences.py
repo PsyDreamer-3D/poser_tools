@@ -103,8 +103,11 @@ class PoserToolsPreferences(bpy.types.AddonPreferences):
             built = time.strftime("%Y-%m-%d %H:%M", time.localtime(status["built_at"]))
             box.label(text=f"{stats['shown']:,} packages in {stats['folders']} folders, built {built}")
             thumbs = stats.get("thumbnails", {})
-            box.label(text=f"{thumbs.get('image', 0):,} thumbnails, "
-                           f"{thumbs.get('rsr', 0) + thumbs.get('none', 0):,} placeholders")
+            # .rsr thumbnails are decoded since 7.3d (a damaged one still gets a placeholder; the
+            # build report counts those).
+            box.label(text=f"{thumbs.get('image', 0) + thumbs.get('rsr', 0):,} thumbnails "
+                           f"({thumbs.get('rsr', 0):,} from old Mac .rsr files), "
+                           f"{thumbs.get('none', 0):,} placeholders")
             if library_build.status_is_stale(status, roots, bpy.app.version_string,
                                                 get_runtime_labels(context)):
                 warn = box.row()

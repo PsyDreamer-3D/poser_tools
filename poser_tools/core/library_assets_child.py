@@ -22,7 +22,8 @@ dropped stand-in would add an empty, replace the world, or assign a blank materi
 has no thumbnail on 5.0.1. A `Scene` has no drop target. `Mesh`/`Text` can't hold a thumbnail.
 
 This file must stay stand-alone (stdlib, bpy, numpy only): the child has no add-on on its
-path. The parent (core/library_build.py) plans the work, writes the catalog file and
+path. The one exception is mac_pict.py beside it, itself stdlib only, imported by putting this
+file's own folder on sys.path. The parent (core/library_build.py) plans the work, writes the catalog file and
 deletes stale files; this only builds datablocks. It talks back on stdout:
   POSER_PROGRESS <done> <total>   after each folder
   POSER_DONE {json}               summary, last line on success
@@ -37,6 +38,9 @@ import traceback
 
 import bpy
 import numpy as np
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import mac_pict  # noqa: E402  (beside this file; see the module docstring)
 
 # A preview larger than this only costs file size; the shelf draws previews small.
 PREVIEW_MAX = 256
@@ -115,6 +119,22 @@ def load_thumbnail(path: str):
         bpy.data.images.remove(image)
 
 
+def load_rsr_thumbnail(path: str):
+    """(width, height, flat float32 RGBA) for the PICT in an old Mac `.rsr`, or None if it can't be read.
+
+    Values are the decoded 8-bit colours / 255, like a loaded image's pixels, so previews from the
+    two sources look alike. PICT rows run top to bottom, Blender's bottom to top.
+    """
+    try:
+        width, height, rgb = mac_pict.decode_rsr(path)
+    except (OSError, mac_pict.PictError):
+        return None
+    image = np.frombuffer(bytes(rgb), dtype=np.uint8).reshape(height, width, 3)[::-1]
+    pixels = np.ones((height, width, 4), dtype=np.float32)
+    pixels[..., :3] = image / 255.0
+    return width, height, pixels.ravel()
+
+
 def make_standin(entry: dict, catalog_ids: dict, counts: dict):
     """One asset-marked Scene for a manifest entry, with its preview, tags and payload."""
     scene = bpy.data.scenes.new(entry["name"])
@@ -132,7 +152,13 @@ def make_standin(entry: dict, catalog_ids: dict, counts: dict):
     data["poser_rel_path"] = entry["rel_path"]
     data["poser_kind"] = entry["kind"]
 
-    loaded = load_thumbnail(entry["thumbnail"]) if entry["thumbnail"] else None
+    thumbnail = entry["thumbnail"]
+    if not thumbnail:
+        loaded = None
+    elif thumbnail.lower().endswith(".rsr"):
+        loaded = load_rsr_thumbnail(thumbnail)
+    else:
+        loaded = load_thumbnail(thumbnail)
     if loaded is not None:
         width, height, pixels = loaded
         pixels = add_kind_badge(pixels, width, height, entry["kind"])

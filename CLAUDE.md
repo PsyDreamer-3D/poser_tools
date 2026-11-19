@@ -284,6 +284,11 @@ don't resume it without a specific reason to.
   library edits the user's preferences, so it happens only from that explicit click, on the main
   thread. `INVOKE_DEFAULT` runs `execute()` under `--background`, so the interactive path is the same
   `_work()` called inline; the modal wrapper itself needs the GUI.
+- **7.3d: old Mac `.rsr` thumbnails** (`core/mac_pict.py`, stdlib only, imported by the asset child from its
+  own folder): a resource fork holding one PICT v2; the four PackBits bitmap formats on the owner's drive are
+  decoded, anything else refused. Checked against ImageMagick on all 8,560 PICTs (identical except the 16-bit
+  ones' 5-to-8-bit widening, which here replicates bits). All 1,644 `.rsr`-only library entries now have their
+  picture.
 - **Phase 8.3: textures found the way Poser does** (`core/cr2/texture_paths.resolve_texture`, used by
   `material_builder.make_image_loader`): as written, then relative to Runtime / Runtime:Textures, a Windows
   path's Runtime tail, a `.bum`'s source image, and the file name across the roots (shared trailing folders,

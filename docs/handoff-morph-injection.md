@@ -1704,6 +1704,35 @@ V3's base mesh, so it can be measured on the Aiko3 test figure); the asset API's
 parameters; additive so far). Prototype scripts live in the session scratchpad and are not
 committed.
 
+### 7.3d as built (2026-11-19): old Mac `.rsr` thumbnails decoded
+
+1,644 library entries (about a quarter) had only a `.rsr` thumbnail and showed a placeholder. Each `.rsr` is a
+classic Mac OS resource fork holding one `PICT` (QuickDraw picture). **Surveyed all 8,645 `.rsr` files** on the
+owner's drive: 8,560 hold a PICT, all version 2, 8,547 of them 91 x 91; the rest are other resources (Poser
+plugin dialogs, `ACTR`) or unreadable. Every PICT is a few header records (HeaderOp, Clip, DefHilite, comments,
+among them Photoshop's `8BIM` and an embedded ICC profile) and then **exactly one bitmap**, in one of four
+PackBits formats: DirectBitsRect 32-bit with 4 planes (8,033), 16-bit 5-5-5 packed per word (257), 32-bit with
+3 planes (183), PackBitsRect 8-bit indexed with a colour table (87). No QuickTime/JPEG-compressed PICTs.
+
+**Prior art:** Pillow has no PICT reader; ImageMagick and netpbm decode PICT but are native tools users won't
+have. So `core/mac_pict.py` (GPL, stdlib only) decodes exactly those four formats and refuses anything else
+(`PictError`), and ImageMagick is the oracle it was checked against: **8,293 files decode identically**; 257
+(the 16-bit ones) differ by up to 7 levels because ImageMagick widens 5 bits by shifting (31 -> 248) and this
+decoder replicates the top bits (31 -> 255, the usual full-range widening; kept); 10 are damaged (a bitmap whose
+rows run short or a file one byte short, DAZ Architecture props) and ImageMagick can't read them either.
+ImageMagick also reported a 500 x 500 canvas for 1,139 files whose picture frame and bitmap are 91 x 91; cropped
+to the bitmap they match exactly, so that is ImageMagick's canvas, not the decoder.
+
+**Wiring.** `library_index.find_thumbnail` now returns the `.rsr` path (an image file still wins). The child
+imports `mac_pict` from its own folder (the one exception to its stand-alone rule, itself stdlib only),
+decodes, flips PICT's top-down rows to Blender's bottom-up, and badges it like any thumbnail; a damaged one
+gets the placeholder and counts as "unreadable". `ASSET_FORMAT_VERSION` 4. Preferences counts `.rsr` thumbnails
+as thumbnails. **Real library on 5.3:** all 1,644 decoded, 0 failures; 13 placeholders remain (no thumbnail at
+all); the child takes 8.6 s instead of 4.8 (pure-Python decoding). Looked at in a real Asset Browser and shelf:
+`Clothing/Pose/MAT 3 Piece Suit` and the A3-H3 REM packages show their pictures. pytest builds real PICTs in all
+four formats inside a resource fork and checks exact pixels, plus PackBits, refusals and real files against
+ImageMagick (skipped without the drive or `convert`).
+
 ## Phase 8 — MAT pose support (plan, 2026-11-17; not started)
 
 Owner, after the Spellcaster fix: the library is morph packages only for now, but MAT poses (Poser
