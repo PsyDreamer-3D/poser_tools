@@ -21,6 +21,7 @@ composes with.
 import os
 
 from .cr2_parser import CR2Parser, CR2Tokenizer, Figure
+from .name_match import present_name_candidates
 from .poser_io import read_poser_file
 from .poser_paths import resolve_poser_path
 
@@ -124,8 +125,73 @@ def paired_injection_path(removal_path: str):
     return None
 
 
+# Channel kinds whose value is a morph dial. Anything else a package sets (scale, bones) is
+# reported, not applied: posing is out of scope (docs/handoff-morph-injection.md, 7.4).
+DIAL_KINDS = ("targetGeom", "valueParm")
+
+
+def package_dials(path: str, extra_roots=None) -> dict:
+    """The morph values a package sets once its files are loaded, as Poser would apply them.
+
+    Character packages (Lady Xtaci's `MOR INJ.pz2`, `!EM Dane INJ.pz2`) `readScript` their
+    InjDeltas files, then dial the morphs in the same file: `valueParm PBMTone k 0 0.232`
+    on BODY, `targetGeom HdCeltic k 0 0.798` on the head. Only the package's own files, the
+    ones holding `readScript`, are read for this. The delta files themselves carry `k 0 0`,
+    which must never reset a dial the user already set.
+
+    Returns {"dials": [(actor, internal_name, value)], "other": [(actor, internal_name, kind,
+    value)], "files": [the files read]} in file order. "other" is every other keyed channel
+    (`propagatingScale`, bone rotations), which Apply reports but doesn't apply.
+    """
+    orchestrators = []
+    _collect(path, [], [], seen=set(), dir_cache={}, extra_roots=extra_roots,
+             orchestrator_paths=orchestrators)
+    dials, other = [], []
+    for orchestrator in orchestrators:
+        figure = CR2Parser.parse_text(read_poser_file(orchestrator), source_file=orchestrator)
+        for actor in figure.actors:
+            for channel in actor.channels:
+                if channel.keyed_val is None:
+                    continue
+                if channel.kind in DIAL_KINDS:
+                    dials.append((actor.name, channel.internal_name, channel.keyed_val))
+                else:
+                    other.append((actor.name, channel.internal_name, channel.kind, channel.keyed_val))
+    return {"dials": dials, "other": other, "files": orchestrators}
+
+
+def match_dials_to_shape_keys(dials, shape_key_names, injected_record=None, display_names=None) -> dict:
+    """Which shape key each dial sets: {"values": {shape key: value}, "missing": [internal
+    names not on the mesh], "conflicts": [(shape key, kept value, other value)]}.
+
+    A dial names a channel by its internal name (`PBMTone`, `CorneaBulge`). It is found on
+    the mesh the way Apply finds an already-present morph: by Apply's own record of what it
+    named the key, then the label, the internal name and a `p`-less label
+    (name_match.present_name_candidates). That also reaches morphs the FBX import baked,
+    such as V3's `CorneaBulge`. One morph dialed on several actors (left and right eye) is one
+    shape key: the first value wins, and differing ones are listed as conflicts.
+    """
+    existing = set(shape_key_names)
+    existing.discard("Basis")
+    record = injected_record or {}
+    labels = display_names or {}
+    values, missing, conflicts = {}, [], []
+    for _actor, internal_name, value in dials:
+        candidates = [record.get(internal_name)]
+        candidates += present_name_candidates(labels.get(internal_name) or internal_name, internal_name)
+        target = next((name for name in candidates if name and name in existing), None)
+        if target is None:
+            if internal_name not in missing:
+                missing.append(internal_name)
+        elif target not in values:
+            values[target] = value
+        elif abs(values[target] - value) > 1e-9:
+            conflicts.append((target, values[target], value))
+    return {"values": values, "missing": missing, "conflicts": conflicts}
+
+
 def _collect(path: str, leaf_paths: list, unresolved_paths: list, seen: set,
-             dir_cache: dict, extra_roots=None) -> None:
+             dir_cache: dict, extra_roots=None, orchestrator_paths=None) -> None:
     real_path = os.path.realpath(path)
     if real_path in seen:
         return
@@ -137,6 +203,8 @@ def _collect(path: str, leaf_paths: list, unresolved_paths: list, seen: set,
     if "readScript" not in tokens:
         leaf_paths.append(path)
         return
+    if orchestrator_paths is not None:
+        orchestrator_paths.append(path)
 
     for i, tok in enumerate(tokens):
         if tok != "readScript" or i + 1 >= len(tokens):
@@ -148,4 +216,4 @@ def _collect(path: str, leaf_paths: list, unresolved_paths: list, seen: set,
         if resolved is None:
             unresolved_paths.append(colon_path)
             continue
-        _collect(resolved, leaf_paths, unresolved_paths, seen, dir_cache, extra_roots)
+        _collect(resolved, leaf_paths, unresolved_paths, seen, dir_cache, extra_roots, orchestrator_paths)

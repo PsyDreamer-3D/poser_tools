@@ -6,6 +6,7 @@ import os
 import bpy
 from bpy.props import BoolProperty, CollectionProperty, IntProperty, StringProperty
 
+from ..core.cr2.injection_package import package_dials
 from ..core.cr2.injection_scan import classify_morphs, estimate_apply, scan_injection_package
 from ..core.functionsShapeKeys import is_jcm_shapekey
 from ..properties.poserToolsPreferences import get_runtime_roots
@@ -78,6 +79,10 @@ class OT_PickInjectionMorphs_Operator(bpy.types.Operator):
         choosable = [morph for morph, status in classified if not status]
 
         if not choosable:
+            if package_dials(self.injection_filepath, extra_roots=get_runtime_roots(context))["dials"]:
+                # Nothing new to add, but a character package also dials its morphs: applying it
+                # again should still set those values, so Apply gets an empty selection.
+                return self._apply([])
             reasons = sorted({status for _m, status in classified})
             say(self,
                 {'WARNING'},

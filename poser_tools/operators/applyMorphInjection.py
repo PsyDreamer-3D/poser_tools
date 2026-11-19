@@ -18,7 +18,7 @@ from ..core.cr2.correspondence_cache import (
     unpack_correspondence,
 )
 from ..core.cr2.cr2_parser import CR2Parser, resolve_geom_file
-from ..core.cr2.injection_package import load_injection_package
+from ..core.cr2.injection_package import load_injection_package, match_dials_to_shape_keys, package_dials
 from ..core.cr2.mesh_correspondence import build_vertex_correspondence
 from ..core.cr2.name_match import (
     build_channel_index,
@@ -319,6 +319,10 @@ class OT_ApplyMorphInjection_Operator(bpy.types.Operator):
         except ValueError as exc:
             say(self, {'ERROR'}, f"Couldn't read the selected morphs: {exc}")
             return {'CANCELLED'}
+        if selected == []:
+            # From the picker when every morph is already on the mesh but the package still dials
+            # values (a character preset applied again): set those alone, nothing to parse or match.
+            return self._apply_dials_only(context, obj)
 
         pkg = load_injection_package(
             self.injection_filepath, extra_roots=get_runtime_roots(context), only_leaves=only_leaves
@@ -415,6 +419,65 @@ class OT_ApplyMorphInjection_Operator(bpy.types.Operator):
         context.window.cursor_set('WAIT')
         wm.modal_handler_add(self)
         return {'RUNNING_MODAL'}
+
+    def _set_package_dials(self, context, obj, index) -> tuple:
+        """Set every shape key the package dials to the package's value: (report lines, how many).
+
+        Poser applies a character package's dials once its morphs are loaded (Lady Xtaci's
+        `MOR INJ.pz2` sets 59), so without this the morphs arrive but the character doesn't.
+        Includes morphs that were already on the mesh, the FBX-baked ones too (owner's call,
+        2026-11-18). Scale and bone settings are reported, never applied.
+        """
+        dials = package_dials(self.injection_filepath, extra_roots=get_runtime_roots(context))
+        if obj.data.shape_keys is None or not (dials["dials"] or dials["other"]):
+            return [], 0
+        labels = {name: display_name_for(index, name) for name in index["by_internal"]} if index else {}
+        keys = obj.data.shape_keys.key_blocks
+        matched = match_dials_to_shape_keys(dials["dials"], keys.keys(), load_injected_morphs_record(obj), labels)
+
+        clamped = []
+        for name, value in matched["values"].items():
+            # Poser dials run past 0..1 (V3's BreastSize8 is -1.012). A shape key's value is held
+            # inside its slider range, so the range is widened; Blender caps it at -10..10.
+            target = min(max(value, -10.0), 10.0)
+            if target != value:
+                clamped.append(f"{name} ({value:g})")
+            key = keys[name]
+            key.slider_min = min(key.slider_min, target)
+            key.slider_max = max(key.slider_max, target)
+            key.value = target
+
+        lines = []
+        if matched["values"]:
+            lines.append(f"Set {len(matched['values'])} morph value(s) the package dials: "
+                         + ", ".join(f"{name}={value:g}" for name, value in matched["values"].items()))
+        if matched["missing"]:
+            lines.append(f"{len(matched['missing'])} dialed morph(s) aren't on this mesh, left alone: {matched['missing']}")
+        if matched["conflicts"]:
+            lines.append("Dialed differently on two actors, first value kept: "
+                         + ", ".join(f"{name} ({kept:g}, not {other:g})" for name, kept, other in matched["conflicts"]))
+        if clamped:
+            lines.append(f"Outside Blender's -10..10 slider range, clamped: {clamped}")
+        if dials["other"]:
+            lines.append(f"{len(dials['other'])} non-morph setting(s) not applied (scaling and posing aren't "
+                         "supported): " + ", ".join(f"{actor} {name or kind}={value:g}"
+                                                    for actor, name, kind, value in dials["other"]))
+        return lines, len(matched["values"])
+
+    def _apply_dials_only(self, context, obj):
+        lines, dials_set = self._set_package_dials(context, obj, None)
+        name = os.path.basename(self.injection_filepath)
+        _write_report(context, _REPORT_TEXT, [
+            f"Injection file: {self.injection_filepath}",
+            "Every morph in this package was already on the mesh; only its dial values were set.",
+            *lines])
+        if not dials_set:
+            say(self, {'WARNING'}, f"Nothing to apply from {name}: its morphs are already on the mesh, "
+                                   f"and none of the morphs it dials are. See the '{_REPORT_TEXT}' text block.")
+            return {'CANCELLED'}
+        say(self, {'INFO'}, f"Set {dials_set} morph value(s) from {name} (its morphs were already on the mesh) "
+                            f"— see the '{_REPORT_TEXT}' text block.")
+        return {'FINISHED'}
 
     def _set_correspondence_progress(self, fraction):
         self._correspondence_progress = fraction
@@ -567,6 +630,7 @@ class OT_ApplyMorphInjection_Operator(bpy.types.Operator):
             record = load_injected_morphs_record(obj)
             record.update(newly_applied)
             _save_injected_morphs_record(obj, record)
+        dial_lines, dials_set = self._set_package_dials(context, obj, index)
 
         total_elapsed = time.time() - self._op_start_time
         header = [f"Injection file: {self.injection_filepath}",
@@ -589,10 +653,13 @@ class OT_ApplyMorphInjection_Operator(bpy.types.Operator):
             header.append(f"{len(already_present)} morph(s) already present, skipped: {already_present}")
         if empty_skipped:
             header.append(f"{len(empty_skipped)} morph(s) had nothing to apply: {empty_skipped}")
+        header.extend(dial_lines)
 
         _write_report(context, _REPORT_TEXT, header + ["", *report_lines])
 
         summary = f"Applied {applied}/{n_morphs} morph(s) from {os.path.basename(self.injection_filepath)}"
+        if dials_set:
+            summary += f", set {dials_set} morph value(s)"
         has_warning = bool(pkg["unresolved_paths"] or empty_skipped or self._missing_selected)
         say(self,
             {'WARNING'} if has_warning else {'INFO'},

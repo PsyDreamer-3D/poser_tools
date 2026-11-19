@@ -275,6 +275,14 @@ don't resume it without a specific reason to.
   library edits the user's preferences, so it happens only from that explicit click, on the main
   thread. `INVOKE_DEFAULT` runs `execute()` under `--background`, so the interactive path is the same
   `_work()` called inline; the modal wrapper itself needs the GUI.
+- **Package dials** (owner, 2026-11-18): a character package `readScript`s its morphs and then dials them
+  (`valueParm PBMTone k 0 0.232` on BODY). `core/cr2/injection_package.package_dials()` reads those values
+  from the package's own files, the ones holding `readScript`, never from the delta files, whose `k 0 0`
+  would reset a dial. `match_dials_to_shape_keys()` finds each key the way Apply finds a present morph
+  (record, label, internal name, `p`-less label). Apply sets them after injecting, morphs already on the mesh
+  included, widening the slider (Blender caps it at ±10); non-dial settings (`propagatingScale`, bones) are
+  reported, not applied. When nothing is new but the package dials, the picker hands Apply
+  `selected_morphs="[]"`, which means "set the dials only".
 - Phase 7.2: **morph picker** (`poser.pick_injection_morphs`, `operators/pickInjectionMorphs.py`,
   `ui/pickInjectionMorphs.py`). Apply's popup (package + figure) hands over to a second dialog
   listing the package's morphs; its OK calls `poser.apply_morph_injection` with `selected_morphs`/
