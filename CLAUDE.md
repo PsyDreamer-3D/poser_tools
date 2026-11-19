@@ -227,7 +227,7 @@ don't resume it without a specific reason to.
   `docs/handoff-morph-injection.md`; 7.0 to 7.4 are built (7.2, 7.3 and 7.4 below).
 - Phase 7.4: **using a package from the library** (`poser.use_morph_package`,
   `operators/useMorphPackage.py`; `ui/packageAssets.py`). One operator behind the Asset Browser's
-  right-click entry, a side panel there, and the one Poser Library shelf (Injection / Removal / MAT Poses
+  right-click entry, a side panel there, and the one Poser Library shelf (All, the default / Injection / Removal / MAT Poses
   switch, `WindowManager.poser_shelf_kind`: Blender shows one shelf per 3D View and can't switch between
   shelves that poll alike, so kinds share it; opened from
   View → Asset Shelf). It reads the asset's `poser_root`/`poser_rel_path`/`poser_kind` through
@@ -375,7 +375,8 @@ Everything else is manual smoke test only — no `bpy`-dependent code has automa
    one of our packages does the same (a keymap item; other libraries' assets keep Blender's own
    double-click). `Window.event_simulate` can't produce a double-click, so test it by hand. In the 3D
    Viewport, View → Asset Shelf shows the Poser Library shelf in Object Mode; its settings popover (or the
-   sidebar's Poser Library Shelf panel) switches Injection / Removal / MAT Poses; clicking a tile
+   sidebar's Poser Library Shelf panel) switches All / Injection / Removal / MAT Poses; every real thumbnail carries
+   its kind badge (blue +, amber −, violet swatch); clicking a tile
    does the same.
 6. Same mesh → **Remove Morph Injection**, pick the same package's `RemDeltas.*` file (or the
    original `InjDeltas.*` one — either works) via the same searchable dropdown. Expect: near-instant

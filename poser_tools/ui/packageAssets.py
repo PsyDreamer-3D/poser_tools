@@ -80,7 +80,9 @@ class VIEW3D_AST_poser_packages(bpy.types.AssetShelf):
 
     @classmethod
     def asset_poll(cls, asset):
-        return package_asset_kind(asset) == bpy.context.window_manager.poser_shelf_kind
+        kind = package_asset_kind(asset)
+        wanted = bpy.context.window_manager.poser_shelf_kind
+        return bool(kind) and wanted in ("all", kind)
 
     @classmethod
     def draw_context_menu(cls, _context, asset, layout):

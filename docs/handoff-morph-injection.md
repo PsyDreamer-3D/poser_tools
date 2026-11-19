@@ -1843,12 +1843,24 @@ imported through FBX takes a MAT the same way a figure does), on the same branch
   UI has no switcher between shelves (5.0.1's and 5.3's `bl_ui/asset_shelf.py` hold only the display popover).
   So the removal shelf had never been reachable either, since 7.4; the owner's 7.4 test had only exercised
   the injection one. Fixed with **one shelf**, `VIEW3D_AST_poser_packages`, whose `asset_poll` reads
-  `WindowManager.poser_shelf_kind` (Injection / Removal / MAT Poses, default Injection, per session). The
+  `WindowManager.poser_shelf_kind` (All / Injection / Removal / MAT Poses, per session). The
   same probe showed a filter read in `asset_poll` re-filters on the next redraw, no library refresh needed.
   The switch is in the shelf's own settings popover (appended to `ASSETSHELF_PT_display`, only when it is
-  our shelf) and in a **Poser Library Shelf** sidebar panel, which also says how to open the shelf. No
-  "All": in a mixed shelf, a removal tile is one stray click from deleting shape keys. Checked in a real
-  window: the one shelf lists morph packages, removal tiles and MAT poses as the switch changes.
+  our shelf) and in a **Poser Library Shelf** sidebar panel, which also says how to open the shelf. Built
+  first with no "All" (a removal tile among injection tiles is one stray click from deleting shape keys);
+  the owner asked for **All as the default** after testing, and every thumbnail now carries its kind badge
+  (next item). Checked in a real window: the one shelf lists morph packages, removal tiles and MAT poses as
+  the switch changes.
+- **Kind badges (owner, same day).** An INJ, its REM and a character's MAT often ship the same picture, so
+  in a mixed shelf they were indistinguishable (Lady Xtaci's three tiles). Duplicate detection was measured
+  first: by file content, 940 shown entries share 428 pictures, 375 of them across kinds (all INJ/REM pairs),
+  but Lady Xtaci's three PNGs are separately saved files (12,780 / 12,778 / 13,863 bytes, different hashes)
+  that only look alike, so exact matching misses exactly the case reported. Owner's choice: **badge every
+  real thumbnail**. The child draws the kind tile (blue +, amber −, violet swatch; the placeholder's own
+  drawing, now `kind_tile(kind, n)`) into the top-right corner, 32% of the shorter side, skipped on a
+  thumbnail too small to mark without hiding it. `ASSET_FORMAT_VERSION` 3, so the next Update rewrites every
+  asset file. Real library into scratch on 5.3: 6,296 assets, 4,639 badged thumbnails, 0 failures; looked at
+  in a real Asset Browser and shelf (Lady Xtaci: swatch, plus, minus).
 - **Library name:** still "Poser Morph Packages" though it now holds MAT poses. Renaming it would leave
   the old entry registered under the old name (`ensure_asset_library` matches by name); left for the
   owner to decide.

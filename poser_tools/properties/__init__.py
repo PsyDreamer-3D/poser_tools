@@ -12,9 +12,10 @@ classes = (
 
 # What the one Poser Library asset shelf shows. Blender shows a single shelf per 3D View region
 # and has no switcher between shelves that poll alike (probed on 5.3: three shelves, only the first
-# ever appeared), so the kinds share one shelf and this picks between them. No "all": a removal tile
-# among injection tiles is one stray click from deleting shape keys. Per session, not saved in files.
+# ever appeared), so the kinds share one shelf and this picks between them. "All" is the default
+# (owner, 2026-11-18). Per session, not saved in files.
 SHELF_KINDS = (
+    ('all', "All", "Every package in the library"),
     ('injection', "Injection", "Morph packages that add shape keys"),
     ('removal', "Removal", "Packages that remove a package's shape keys"),
     ('material', "MAT Poses", "Material presets"),
@@ -34,7 +35,7 @@ def register():
         bpy.utils.register_class(cls)
     bpy.types.Scene.poser_shapekeys_addon = bpy.props.PointerProperty(type=PoserShapeKeysAddon_Settings)
     bpy.types.WindowManager.poser_shelf_kind = bpy.props.EnumProperty(
-        name="Shelf Shows", items=SHELF_KINDS, default='injection', update=_redraw_viewports,
+        name="Shelf Shows", items=SHELF_KINDS, default='all', update=_redraw_viewports,
         description="Which Poser Library packages the asset shelf lists")
 
 

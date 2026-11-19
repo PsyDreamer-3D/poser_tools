@@ -42,23 +42,27 @@ import numpy as np
 PREVIEW_MAX = 256
 PLACEHOLDER_SIZE = 128
 # Flat tiles by kind, with a glyph so they read apart even without colour: a plus for
-# injection, a minus for removal, a filled swatch for a MAT pose. Blender can't draw text onto an image in a background
-# process, and the shelf prints the name under the tile anyway.
+# injection, a minus for removal, a filled swatch for a MAT pose. Blender can't draw text onto an
+# image in a background process, and the shelf prints the name under the tile anyway. The same
+# tile, small, is the badge on every real thumbnail (owner, 2026-11-18): an INJ, its REM and a
+# character's MAT often ship the same picture, and the shelf lists every kind together by default.
 _TILE_COLORS = {"injection": (0.17, 0.36, 0.58), "removal": (0.58, 0.38, 0.17),
                 "material": (0.42, 0.24, 0.55)}
 _DEFAULT_TILE = (0.35, 0.35, 0.35)
+# Badge edge as a share of the thumbnail's shorter side; Poser thumbnails are ~91 px, so ~29 px.
+_BADGE_SHARE = 0.32
 
 
-def placeholder_pixels(kind: str) -> np.ndarray:
-    """A PLACEHOLDER_SIZE square RGBA float tile for `kind`."""
-    n = PLACEHOLDER_SIZE
+def kind_tile(kind: str, n: int) -> np.ndarray:
+    """An n x n RGBA float tile for `kind`: its colour, a lighter rim and a white glyph."""
     color = np.array(_TILE_COLORS.get(kind, _DEFAULT_TILE), dtype=np.float32)
     tile = np.empty((n, n, 4), dtype=np.float32)
     tile[..., :3] = color
     tile[..., 3] = 1.0
+    rim = max(1, round(n * 3 / 128))
     light = np.minimum(color + 0.18, 1.0)
-    tile[:3, :, :3] = tile[-3:, :, :3] = tile[:, :3, :3] = tile[:, -3:, :3] = light
-    bar, half = n // 10, n // 2
+    tile[:rim, :, :3] = tile[-rim:, :, :3] = tile[:, :rim, :3] = tile[:, -rim:, :3] = light
+    bar, half = max(1, n // 10), n // 2
     glyph = np.array([0.95, 0.95, 0.95], dtype=np.float32)
     lo, hi = n // 4, n - n // 4
     if kind == "material":
@@ -68,6 +72,23 @@ def placeholder_pixels(kind: str) -> np.ndarray:
     if kind != "removal":
         tile[lo:hi, half - bar // 2:half + bar // 2 + 1, :3] = glyph      # vertical bar too: a plus
     return tile
+
+
+def placeholder_pixels(kind: str) -> np.ndarray:
+    """A PLACEHOLDER_SIZE square RGBA float tile for `kind`."""
+    return kind_tile(kind, PLACEHOLDER_SIZE)
+
+
+def add_kind_badge(pixels, width: int, height: int, kind: str) -> np.ndarray:
+    """`pixels` (flat RGBA, Blender's bottom-up rows) with the kind tile in the top-right corner."""
+    image = np.array(pixels, dtype=np.float32).reshape(height, width, 4)
+    size = max(12, round(min(width, height) * _BADGE_SHARE))
+    if size + 2 > min(width, height):
+        return image.ravel()                 # too small to mark without hiding the picture
+    margin = max(1, round(min(width, height) * 0.03))
+    top = height - margin                    # row 0 is the bottom of the image
+    image[top - size:top, width - margin - size:width - margin] = kind_tile(kind, size)
+    return image.ravel()
 
 
 def load_thumbnail(path: str):
@@ -114,6 +135,7 @@ def make_standin(entry: dict, catalog_ids: dict, counts: dict):
     loaded = load_thumbnail(entry["thumbnail"]) if entry["thumbnail"] else None
     if loaded is not None:
         width, height, pixels = loaded
+        pixels = add_kind_badge(pixels, width, height, entry["kind"])
         counts["thumbnails"] += 1
     else:
         pixels = placeholder_pixels(entry["kind"]).ravel()

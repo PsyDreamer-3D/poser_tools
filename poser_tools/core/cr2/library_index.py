@@ -436,7 +436,7 @@ def _folder_hash(entries: list) -> str:
 _CATALOG_NAMESPACE = uuid.UUID("5f6c1e3a-0b0e-4a52-9d7e-5b7f3c1f2a10")
 # Bump when what the asset files contain changes (placeholders, tags, payload keys), so
 # existing ones are rebuilt: it goes into the manifest signature.
-ASSET_FORMAT_VERSION = 2   # 2: stand-ins are Scenes (the Asset Browser doesn't list Images)
+ASSET_FORMAT_VERSION = 3   # 2: stand-ins are Scenes (the Asset Browser doesn't list Images); 3: kind badge on thumbnails
 
 
 def asset_signature(blender_version: str) -> str:
