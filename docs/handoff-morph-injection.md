@@ -1768,7 +1768,8 @@ the rest of `core/cr2/`):
   `surface_render_method` when porting.
 
 **Phasing (proposed):** 8.1 fix spaced material names, port the translator and fallback, and a manual
-"Apply MAT Pose" operator with prefix-stripped matching and a report; 8.2 apply operator (manual file pick); 8.3 index + shelf. **Out of scope at first:**
+"Apply MAT Pose" operator with prefix-stripped matching and a report
+(manual file pick); 8.2 a MAT kind in the index (material blocks only) and its shelf. **Out of scope at first:**
 Poser's Materials-library collections (`.mt5`/`.mc6`), Firefly-only shaders, EEVEE-specific tuning.
 **Open:** confirm-or-not on apply; what a MAT does to a material the mesh doesn't have.
 
