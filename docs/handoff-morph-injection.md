@@ -1810,6 +1810,36 @@ suffix/case, the real Lady Xtaci MAT against Aiko3's CR2 names, and the parser f
 Principled; absolute Windows texture paths in old MATs never resolve (a basename search across the roots
 could find them).
 
+#### 8.2 as built (2026-11-18): MAT poses in the library, the Asset Browser and a shelf
+
+Owner: list every MAT pose, props and clothing included ("we can import props as well": a prop
+imported through FBX takes a MAT the same way a figure does), on the same branch as 8.1.
+- `library_index`: kind `"material"` in `SHOWN_KINDS`, for an entry that is one file (no `readScript`)
+  of `material` blocks and nothing else, judged on the **whole file** (`_is_mat_pose`: a material-only
+  16 KB head proves nothing; a shoe MAT runs 5,000 lines). It runs only when the entry would otherwise be
+  `"other"`, so the armature and morph rules keep priority. `MANIFEST_VERSION` 6.
+- **Old Mac line endings.** 8 MATs (`DP-Thourobread`, `LongHair_evo_Univ`) end lines with a bare `\r`;
+  `read_head()` decoded raw bytes, so every `^`-anchored pattern (bone channels, material blocks, channel
+  names) missed them, while `read_poser_file()`'s text mode had always normalized. `read_head()` now
+  normalizes too. Diffing every classification on the owner's library before and after: only those 8
+  moved (`other` → `material`).
+- Child: a violet placeholder tile with a white swatch for a MAT pose without a thumbnail.
+- `poser.use_morph_package` (idname kept: the shelves and the double-click keymap item are bound to it;
+  label now "Use Poser Package") sends a `"material"` asset to `poser.apply_mat_pose` through
+  `call_nested()`, whose dialog previews the match and is the confirmation; a mesh with no materials gets
+  a warning instead. Right-click / side panel read **Apply MAT Pose to Active Mesh...**; a third shelf,
+  `VIEW3D_AST_poser_material_packages`.
+- **Real library** (13 roots): 6,296 entries in 265 folders = 2,030 injection + 1,623 removal (unchanged)
+  + **2,643 MAT poses** (Clothing 856, Hair 607, Base Figures 497, Custom Character Sets 329, Scenes,
+  Props and Objects 308...); written by the real child on 5.3 in 9.4 s, 0 failures, 4,639 thumbnails and
+  1,657 placeholders; looked at in a real Asset Browser (Lady Xtaci's MAT beside her MOR INJ/REM, the
+  DP-Thourobread MATs with their thumbnails). Headless 5.0.1: a stand-in MAT asset through the click
+  operator applied Lady Xtaci to a real Aiko3 (31 replaced); a cube without materials got the warning;
+  a missing file said where it looked.
+- **Library name:** still "Poser Morph Packages" though it now holds MAT poses. Renaming it would leave
+  the old entry registered under the old name (`ensure_asset_library` matches by name); left for the
+  owner to decide.
+
 ## Open decisions
 
 - ~~Phase 1: `mathutils.kdtree` vs. pure-numpy.~~ Resolved: pure numpy, stays pytest-testable.

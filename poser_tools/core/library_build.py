@@ -350,12 +350,12 @@ def remove_asset_library(libraries, name: str) -> bool:
 # From a library asset back to its package (7.4: Asset Browser and shelf clicks)
 # ---------------------------------------------------------------------------
 
-PACKAGE_KINDS = ("injection", "removal")
+PACKAGE_KINDS = ("injection", "removal", "material")
 _INCOMPLETE_PREFIX_RE = re.compile(r'^\[INCOMPLETE:[^\]]*\]\s*')
 
 
 def package_kind(fields: dict, tags) -> str:
-    """"injection" or "removal" for one of our assets, "" for any other asset.
+    """"injection", "removal" or "material" for one of our assets, "" for any other asset.
 
     `fields` are the asset's custom metadata (poser_kind etc.), `tags` its tag names. The
     tags are the fallback because they are Blender's own metadata and always survive.

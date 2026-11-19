@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Where a library asset (Phase 7.3's index) can be used: the Asset Browser's right-click
-menu and side panel, and two asset shelves in the 3D Viewport. All of them run
-poser.use_morph_package on the active mesh.
+menu, side panel and double-click, and three asset shelves in the 3D Viewport (injection,
+removal, MAT poses). All of them run poser.use_morph_package on the active mesh.
 
 Dragging is left out on purpose. A Scene stand-in has no drop target (that is why Scene was
 chosen, docs/handoff-morph-injection.md "7.3 correction"), the Asset Browser has no Python hook
@@ -17,7 +17,9 @@ _OPERATOR = "poser.use_morph_package"
 _ACTIONS = {
     "injection": ("Apply to Active Mesh...", 'ADD'),
     "removal": ("Remove from Active Mesh", 'REMOVE'),
+    "material": ("Apply MAT Pose to Active Mesh...", 'MATERIAL'),
 }
+_KIND_LABELS = {"injection": "Injection package", "removal": "Removal package", "material": "MAT pose"}
 
 
 def _operator_button(layout, kind):
@@ -45,7 +47,7 @@ class POSER_PT_package_asset(asset_utils.AssetBrowserPanel, bpy.types.Panel):
     def draw(self, context):
         layout = self.layout
         kind = package_asset_kind(context.asset)
-        layout.label(text="Injection package" if kind == "injection" else "Removal package")
+        layout.label(text=_KIND_LABELS[kind])
         obj = context.active_object
         if obj is not None and obj.type == 'MESH':
             layout.label(text=f"Mesh: {obj.name}", icon='MESH_DATA')
@@ -84,6 +86,11 @@ class VIEW3D_AST_poser_injection_packages(_PackageShelf, bpy.types.AssetShelf):
 class VIEW3D_AST_poser_removal_packages(_PackageShelf, bpy.types.AssetShelf):
     bl_idname = "VIEW3D_AST_poser_removal_packages"
     kind = "removal"
+
+
+class VIEW3D_AST_poser_material_packages(_PackageShelf, bpy.types.AssetShelf):
+    bl_idname = "VIEW3D_AST_poser_material_packages"
+    kind = "material"
 
 
 # (keymap, item) pairs added by register_menus(), removed again by unregister_menus().

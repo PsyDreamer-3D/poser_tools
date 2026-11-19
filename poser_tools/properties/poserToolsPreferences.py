@@ -73,7 +73,7 @@ class PoserToolsPreferences(bpy.types.AddonPreferences):
         layout.separator()
         box = layout.box()
         box.label(text="Morph Package Library", icon='ASSET_MANAGER')
-        box.label(text="Index your injection and removal packages as a Blender asset library, with thumbnails.")
+        box.label(text="Index your injection and removal packages and MAT poses as a Blender asset library, with thumbnails.")
 
         roots = get_runtime_roots(context)
         status = library_build.read_status(library_build.library_dir(create=False))

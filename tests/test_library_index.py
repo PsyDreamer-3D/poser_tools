@@ -519,3 +519,48 @@ def test_thigh_length_marks_a_pose_file_without_any_bone_channel(lib):
         '\treadScript ":Runtime:libraries:!DAZ:V3:Deltas:InjDeltas.Brow.pz2"\n',
         "thighLength 0.17748\n", "figure\n\t{\n\t}\n"))
     assert li.classify_entry(entry, [lib.path])["kind"] == "armature"
+
+
+# ---- MAT poses: `material` blocks and nothing else (Phase 8.2) -----------------------------
+
+_MAT_BLOCK = "\tmaterial SkinTorso\n\t\t{\n\t\tKdColor 1 1 1 1\n\t\ttextureMap NO_MAP\n\t\t}\n"
+
+
+def _mat_pose(*blocks):
+    return "{\nversion\n\t{\n\tnumber 3.0\n\t}\nfigure\n\t{\n" + "".join(blocks) + "\t}\n}\n"
+
+
+def test_a_mat_pose_is_listed_and_mixed_files_are_not(lib):
+    lib.write("pose/Lady/! MAT Lady !.pz2", _mat_pose(_MAT_BLOCK, _MAT_BLOCK.replace("SkinTorso", "Lips")))
+    lib.write("props/Bed Mats/Quilt Trim 04.pz2", _mat_pose(_MAT_BLOCK.replace("SkinTorso", "Quilt Trim")))
+    # Materials plus morph dials, plus a readScript, plus a pose: not MAT poses.
+    lib.write("pose/Lady/MOR and MAT.pz2", _mat_pose(_MAT_BLOCK) + POSE_LEAF)
+    lib.write("!V/Deltas/InjDeltas.Brow.pz2", INJ_LEAF)
+    lib.write("pose/Lady/MAT plus INJ.pz2", '{\n\treadScript ":Runtime:libraries:!V:Deltas:InjDeltas.Brow.pz2"\n'
+              + _MAT_BLOCK + "}\n")
+    lib.write("pose/Lady/Pose with MAT.pz2", _mat_pose(_MAT_BLOCK) + BONE_LEAF)
+    m = li.build_manifest([lib.path])
+    shown = {rel: kind for rel, kind in ((e["rel_path"].split("libraries/")[1], e["kind"])
+                                         for f in m["folders"] for e in f["entries"])}
+    assert shown == {"pose/Lady/! MAT Lady !.pz2": "material", "props/Bed Mats/Quilt Trim 04.pz2": "material",
+                     "pose/Lady/MAT plus INJ.pz2": "injection"}
+    entry = next(e for f in m["folders"] for e in f["entries"] if e["kind"] == "material")
+    assert entry["tags"] == ["material", "poser"]
+
+
+def test_a_mat_pose_is_judged_on_the_whole_file_not_the_head(lib):
+    # Materials fill the first 16 KB; a channels block comes after them.
+    padding = _MAT_BLOCK * (li.HEAD_BYTES // len(_MAT_BLOCK) + 5)
+    path = lib.write("pose/Long/MAT then channels.pz2", _mat_pose(padding) + POSE_LEAF)
+    assert li.classify_entry(path, [lib.path])["kind"] != "material"
+    plain = lib.write("pose/Long/Long MAT.pz2", _mat_pose(padding))
+    assert li.classify_entry(plain, [lib.path])["kind"] == "material"
+
+
+def test_old_mac_line_endings_are_read_like_any_other(lib):
+    # DP-Thourobread's and LongHair_evo_Univ's MATs end lines with a bare `\r`.
+    mat = lib.write("pose/Old/Horse Red.pz2", _mat_pose(_MAT_BLOCK).replace("\n", "\r"))
+    pose = lib.write("pose/Old/Wave.pz2", BONE_LEAF.replace("\n", "\r"))
+    assert li.classify_entry(mat, [lib.path])["kind"] == "material"
+    assert li.classify_entry(pose, [lib.path])["kind"] == "armature"
+    assert "\r" not in li.read_head(mat)

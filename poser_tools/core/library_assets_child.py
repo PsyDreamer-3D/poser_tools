@@ -41,10 +41,11 @@ import numpy as np
 # A preview larger than this only costs file size; the shelf draws previews small.
 PREVIEW_MAX = 256
 PLACEHOLDER_SIZE = 128
-# Flat tiles by kind, with a glyph so the two read apart even without colour: a plus for
-# injection, a minus for removal. Blender can't draw text onto an image in a background
+# Flat tiles by kind, with a glyph so they read apart even without colour: a plus for
+# injection, a minus for removal, a filled swatch for a MAT pose. Blender can't draw text onto an image in a background
 # process, and the shelf prints the name under the tile anyway.
-_TILE_COLORS = {"injection": (0.17, 0.36, 0.58), "removal": (0.58, 0.38, 0.17)}
+_TILE_COLORS = {"injection": (0.17, 0.36, 0.58), "removal": (0.58, 0.38, 0.17),
+                "material": (0.42, 0.24, 0.55)}
 _DEFAULT_TILE = (0.35, 0.35, 0.35)
 
 
@@ -60,6 +61,9 @@ def placeholder_pixels(kind: str) -> np.ndarray:
     bar, half = n // 10, n // 2
     glyph = np.array([0.95, 0.95, 0.95], dtype=np.float32)
     lo, hi = n // 4, n - n // 4
+    if kind == "material":
+        tile[lo:hi, lo:hi, :3] = glyph                                      # a swatch
+        return tile
     tile[half - bar // 2:half + bar // 2 + 1, lo:hi, :3] = glyph          # horizontal bar: both kinds
     if kind != "removal":
         tile[lo:hi, half - bar // 2:half + bar // 2 + 1, :3] = glyph      # vertical bar too: a plus

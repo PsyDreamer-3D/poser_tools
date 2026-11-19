@@ -278,6 +278,11 @@ don't resume it without a specific reason to.
   library edits the user's preferences, so it happens only from that explicit click, on the main
   thread. `INVOKE_DEFAULT` runs `execute()` under `--background`, so the interactive path is the same
   `_work()` called inline; the modal wrapper itself needs the GUI.
+- **Phase 8.2: MAT poses in the library.** Kind `"material"` (`library_index._is_mat_pose`: one file of
+  `material` blocks and nothing else, judged on the whole file) is shown, every MAT included, props and
+  clothing too (owner). A third shelf; `poser.use_morph_package` (idname kept for its bindings) sends MAT
+  assets to `poser.apply_mat_pose`'s dialog. `read_head()` normalizes `\r` line endings: old Mac files
+  slipped past every `^`-anchored pattern.
 - **Phase 8.1: MAT poses** (`poser.apply_mat_pose`, `operators/applyMatPose.py`, `ui/applyMatPose.py`;
   `core/cr2/mat_pose.py` no bpy; `core/material_builder.py` and `core/shader_translator.py` are bpy, MIT,
   adapted from `cr2_importer`). The FBX import names slots `<object>_<material>`, so matching strips that
@@ -376,7 +381,9 @@ Everything else is manual smoke test only — no `bpy`-dependent code has automa
 7. Aiko3 mesh → **MAT Poses** → **Apply MAT Pose**, pick Lady Xtaci's `! MAT Lady Xtaci !.pz2`: the dialog
    says "Replaces 31 of Figure's 34 materials" and lists `SkinLeg` as having no slot; Apply → textured
    materials in Material Preview, 31 `... (original)` materials with fake users, a **Poser MAT Pose Report**.
-   Ctrl+Z restores them. A second MAT adds backups only for materials the first didn't touch.
+   Ctrl+Z restores them. A second MAT adds backups only for materials the first didn't touch. With the
+   library index updated, the same MAT in the Asset Browser (double-click, right-click → **Apply MAT Pose to
+   Active Mesh...**) or on the MAT shelf opens that dialog with the file picked.
 
 For a quick check without Blender: `python -m py_compile` the tree, or import `poser_tools` under a
 stubbed `bpy` and call `register()`/`unregister()` — that catches class-tuple typos and bad import

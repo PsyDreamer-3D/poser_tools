@@ -328,3 +328,10 @@ def test_other_assets_are_not_packages():
     assert lb.package_kind({}, ["injection"]) == ""           # someone else's tag, no "poser"
     assert lb.package_kind({"poser_kind": "pose"}, []) == ""
     assert lb.resolve_package_asset({}, "Runtime/x.pz2", [], [])[2]
+
+
+def test_a_mat_pose_asset_resolves_like_a_package(tmp_path):
+    root, rel, path = _package(tmp_path, "Runtime/libraries/pose/Lady/! MAT Lady !.pz2")
+    fields = {"poser_root": root, "poser_rel_path": rel, "poser_kind": "material"}
+    assert lb.resolve_package_asset(fields, rel, ["material", "poser"], []) == (path, "material", "")
+    assert lb.package_kind({}, ["material", "poser"]) == "material"
