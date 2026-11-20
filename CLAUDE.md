@@ -75,6 +75,19 @@ diagnostics (report text block), JCM deletion, overlap detection (tripwire), mer
 `obj.data`, and a CR2 cross-reference that was spiked and ruled out. Read it before touching
 `core/functionsShapeKeys.py` — it records why each piece is shaped the way it is.
 
+## Branching
+
+`main` carries finished, releasable work only. A large feature that spans many PRs gets a long-lived
+feature branch: its PRs target that branch (branch new work from it, not from `main`), and the
+branch merges into `main` once the feature is done. Small fixes unrelated to a feature can still go
+to `main` directly.
+
+- `feature/poser-library` holds the CR2 parser, morph injection, the Poser asset library and MAT /
+  material support (PRs #12 onward; its own CLAUDE.md and `docs/handoff-morph-injection.md` describe
+  it). Those PRs had merged straight into `main`; on 2026-11-20 `main` was reset to before #12 (the
+  merge of #11) plus PR #22's release-index commit, the one change from that range that stands on
+  its own, and force-pushed (owner's call). Nothing was lost: the old `main` is that branch's history.
+
 ## Testing
 
 No automated test harness (`tests/` absent) — manual smoke test only:
