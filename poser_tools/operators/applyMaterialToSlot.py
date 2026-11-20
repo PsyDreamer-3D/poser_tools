@@ -1,9 +1,11 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Apply a Poser single material (.mt5/.mz5) to the active material slot (Phase 8.4).
+"""Apply a Poser single material (.mt5/.mz5) to one of the mesh's materials (Phase 8.4).
 
-In Poser a single material is applied to whichever material is selected; the name inside the file
-(nearly always `Preview`, under `actor $CURRENT`) means nothing, so there is no matching to do. The
-rest is the MAT pose machinery: the same reader, builder, texture lookup and first-time backup.
+In Poser a single material is applied to whichever part or material is selected; the name inside the
+file (nearly always `Preview`, under `actor $CURRENT`) means nothing, so there is no matching to do.
+Blender has no "selected part" to stand in for that, so the dialog asks which of the mesh's materials
+to replace, starting from the active slot's (owner, 2026-11-19). The rest is the MAT pose machinery:
+the same reader, builder, texture lookup and first-time backup.
 """
 
 import os
@@ -19,6 +21,13 @@ from .applyMatPose import _REPORT_TEXT, _read_cached, keep_original, library_ite
 from .applyMorphInjection import PoserLibraryItem, say
 
 
+def _mesh_materials(obj):
+    """The materials in the mesh's slots, in slot order, each once."""
+    if obj is None or obj.type != 'MESH':
+        return []
+    return list(dict.fromkeys(slot.material for slot in obj.material_slots if slot.material))
+
+
 def _active_slot_material(obj):
     if obj is None or obj.type != 'MESH' or not obj.material_slots:
         return None
@@ -26,9 +35,9 @@ def _active_slot_material(obj):
 
 
 class OT_ApplyMaterialToSlot_Operator(bpy.types.Operator):
-    """Apply a Poser single material (.mt5) to the active material slot, keeping the original"""
+    """Apply a Poser single material (.mt5) to one of the active mesh's materials, keeping the original"""
     bl_idname = "poser.apply_material_to_slot"
-    bl_label = "Apply Material to Slot"
+    bl_label = "Apply Single Material"
     bl_options = {'REGISTER', 'UNDO'}
 
     mat_filepath: StringProperty(
@@ -45,10 +54,19 @@ class OT_ApplyMaterialToSlot_Operator(bpy.types.Operator):
         options={'SKIP_SAVE'},
     )
 
+    # The mesh's materials, for the searchable Material field (filled by invoke()).
+    target_items: CollectionProperty(type=PoserLibraryItem)
+    target_material: StringProperty(
+        name="Replace",
+        description="The material on this mesh to replace, as you'd select the part in Poser. "
+                    "Starts as the active slot's material",
+        options={'SKIP_SAVE'},
+    )
+
     @classmethod
     def poll(cls, context):
-        if _active_slot_material(context.active_object) is None:
-            cls.poll_message_set("Select a mesh and a material slot that has a material")
+        if not _mesh_materials(context.active_object):
+            cls.poll_message_set("Select a mesh with materials")
             return False
         return True
 
@@ -56,7 +74,23 @@ class OT_ApplyMaterialToSlot_Operator(bpy.types.Operator):
         self.selected_mat_name = library_items(context, self.library_items, ("mt5", "mz5"), self.mat_filepath)
         if self.selected_mat_name:
             self.mat_filepath = ""
+        obj = context.active_object
+        self.target_items.clear()
+        for material in _mesh_materials(obj):
+            self.target_items.add().name = material.name
+        if not self.target_material:
+            active = _active_slot_material(obj)
+            self.target_material = active.name if active else self.target_items[0].name
         return context.window_manager.invoke_props_dialog(self, width=560, confirm_text="Apply")
+
+    def _target(self, obj):
+        """The material to replace: the one picked, else (a scripted call) the active slot's.
+
+        Only a material on this mesh: a name typed or left over from elsewhere is refused.
+        """
+        if not self.target_material:
+            return _active_slot_material(obj)
+        return next((m for m in _mesh_materials(obj) if m.name == self.target_material), None)
 
     def _chosen_path(self):
         item = self.library_items.get(self.selected_mat_name) if self.selected_mat_name else None
@@ -71,25 +105,32 @@ class OT_ApplyMaterialToSlot_Operator(bpy.types.Operator):
         layout.prop(self, "mat_filepath")
 
         obj = context.active_object
-        target = _active_slot_material(obj)
+        layout.separator()
+        layout.prop_search(self, "target_material", self, "target_items", icon='MATERIAL')
+        target = self._target(obj)
         box = layout.box()
+        if target is None:
+            box.label(text=f"Pick one of {obj.name}'s materials to replace.", icon='ERROR')
+            return
         path = self._chosen_path()
         if not path or not os.path.isfile(path):
-            box.label(text=f"Pick a material to apply to {target.name}.", icon='INFO')
+            box.label(text=f"Pick a material file to apply to {target.name}.", icon='INFO')
             return
         materials = _read_cached(path)
         if not materials:
             box.label(text="This file has no materials.", icon='ERROR')
             return
-        box.label(text=f"Replaces {target.name} (slot {obj.active_material_index + 1} of {obj.name}).",
-                  icon='MATERIAL')
+        box.label(text=f"Replaces {target.name} on {obj.name}.", icon='MATERIAL')
         if len(materials) > 1:
             box.label(text=f"The file holds {len(materials)} materials; the first, {next(iter(materials))}, is used.")
         box.label(text="The original is kept as '<name> (original)' the first time it is replaced.")
 
     def execute(self, context):
         obj = context.active_object
-        bl_mat = _active_slot_material(obj)
+        bl_mat = self._target(obj)
+        if bl_mat is None:
+            say(self, {'ERROR'}, f"{self.target_material!r} isn't one of {obj.name}'s materials.")
+            return {'CANCELLED'}
         path = self._chosen_path()
         if not path or not os.path.isfile(path):
             say(self, {'ERROR'}, f"Material file not found: {path!r}")
@@ -116,7 +157,7 @@ class OT_ApplyMaterialToSlot_Operator(bpy.types.Operator):
         kind = build_material_nodes(bl_mat, pmat, load_image, reporter=lambda t, msg: collect(t, msg))
 
         lines = [f"Material file: {path}", f"Mesh: {obj.name}",
-                 f"Replaced {target_name} (slot {obj.active_material_index + 1}) <- {source_name} ({kind})",
+                 f"Replaced {target_name} <- {source_name} ({kind})",
                  f"Original kept as: {backup}" if backup else "Original already kept from an earlier replacement."]
         if len(materials) > 1:
             lines.append(f"The file holds {len(materials)} materials; only the first was used: {list(materials)}")

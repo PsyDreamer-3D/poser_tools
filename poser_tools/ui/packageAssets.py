@@ -21,7 +21,7 @@ _ACTIONS = {
     "injection": ("Apply to Active Mesh...", 'ADD'),
     "removal": ("Remove from Active Mesh", 'REMOVE'),
     "material": ("Apply Materials to Active Mesh...", 'MATERIAL'),
-    "slot_material": ("Apply to Active Material Slot...", 'MATERIAL'),
+    "slot_material": ("Apply to a Material of Active Mesh...", 'MATERIAL'),
 }
 _KIND_LABELS = {"injection": "Injection package", "removal": "Removal package",
                 "material": "MAT pose or material collection", "slot_material": "Single material"}

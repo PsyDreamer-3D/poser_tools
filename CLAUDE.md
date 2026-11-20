@@ -302,8 +302,10 @@ don't resume it without a specific reason to.
 - **Phase 8.4: material collections and single materials.** `.mc6`/`.mcz` (a `mtlCollection` of named
   materials) are kind `"material"`, applied by `poser.apply_mat_pose` like a MAT pose (same matching, preview,
   backup). `.mt5`/`.mz5` (one material under `actor $CURRENT`, nearly always named `Preview`) are kind
-  `"slot_material"`, applied to the active slot by `poser.apply_material_to_slot`
-  (`operators/applyMaterialToSlot.py`), name ignored, as Poser applies one to the selected material. `.mcz`/`.mz5`
+  `"slot_material"`, applied by `poser.apply_material_to_slot` (`operators/applyMaterialToSlot.py`, label "Apply
+  Single Material") to the mesh material picked in its dialog's searchable **Replace** field (starts on the active
+  slot's; a scripted call without `target_material` uses the active slot), name in the file ignored. Poser applies
+  one to the selected part; Blender has no selected part, so the dialog asks (owner, 2026-11-19). `.mcz`/`.mz5`
   are gzip (`poser_io.COMPRESSED_EXTENSIONS`); `runtime_index` lists all four (`CACHE_VERSION` 2);
   `library_index.classify_entry` judges them on `_is_mat_pose` alone (`MANIFEST_VERSION` 7). All 4,301 on the
   owner's drive parse; 18 hold no material (show/hide toggles, pose resets, 0-byte placeholders) and stay hidden.
@@ -422,9 +424,9 @@ Everything else is manual smoke test only — no `bpy`-dependent code has automa
    Ctrl+Z restores them. A second MAT adds backups only for materials the first didn't touch. With the
    library index updated, the same MAT in the Asset Browser (double-click, right-click → **Apply Materials to
    Active Mesh...**) or on the shelf switched to Materials opens that dialog with the file picked. A collection
-   (`Aiko3 ToonShade.mc6`) goes through the same dialog. Select a slot in Material Properties → **Apply Material
-   to Slot**, pick a `.mt5`/`.mz5` (`Blue Jeans.mt5`): the dialog names that slot's material; Apply replaces only
-   it and keeps `<name> (original)`. From the library, a single material (quarter-filled badge) opens that dialog.
+   (`Aiko3 ToonShade.mc6`) goes through the same dialog. **Apply Single Material**, pick a `.mt5`/`.mz5`
+   (`Blue Jeans.mt5`) and a material in **Replace** (starts on the active slot's): Apply replaces only that material
+   and keeps `<name> (original)`. From the library, a single material (quarter-filled badge) opens that dialog.
 
 For a quick check without Blender: `python -m py_compile` the tree, or import `poser_tools` under a
 stubbed `bpy` and call `register()`/`unregister()` — that catches class-tuple typos and bad import

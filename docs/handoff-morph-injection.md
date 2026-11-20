@@ -1907,15 +1907,18 @@ placeholders.
 
 **How they apply** (owner, 2026-11-19): a collection the way Poser applies one to the selected object, by
 material name, which is exactly a MAT pose, so it goes through `poser.apply_mat_pose` (dropdown and file field
-take `.mc6`/`.mcz`; label now "Apply MAT Pose or Collection"). A single material to the **active material slot**,
-its name ignored, as Poser applies it to the selected material: new `poser.apply_material_to_slot`, same reader,
-builder, texture lookup and first-time backup (`applyMatPose.keep_original`, shared). Its dialog says which slot
-material it replaces.
+take `.mc6`/`.mcz`; label now "Apply MAT Pose or Collection"). A single material to **one material the user picks**,
+its name ignored: new `poser.apply_material_to_slot` ("Apply Single Material"), same reader, builder, texture lookup
+and first-time backup (`applyMatPose.keep_original`, shared). Built first as "to the active material slot"; owner's
+correction (2026-11-19): Poser applies one to whichever part is selected, which Blender has no equivalent of, so
+the dialog has a searchable **Replace** field over the mesh's materials, starting on the active slot's. A scripted
+call without `target_material` still uses the active slot; a name that isn't one of the mesh's materials is
+refused.
 
 **Library**: kinds `"material"` (collections join MAT poses) and new `"slot_material"`, listed and badged (an
 outlined violet swatch with one filled quarter: it changes one of an object's materials). The shelf's MAT Poses
-switch is "Materials" and lists both. Applying from the Browser or shelf routes `slot_material` to the slot
-operator; with no slot material selected it says so. Owner's scope note: listing new kinds that reuse built code
+switch is "Materials" and lists both. Applying from the Browser or shelf routes `slot_material` to that
+operator's dialog; a mesh with no materials is refused up front. Owner's scope note: listing new kinds that reuse built code
 is fine; what 7.6 ruled out was reinventing Blender's search.
 
 **Verified**: pytest (classification of all four extensions, compressed and plain; the toggle file hidden; a
@@ -1923,9 +1926,12 @@ material file outside Poser's folders not an entry; reading through the MAT read
 resolution). Real library on 5.3, 14 top-level roots: 10,145 assets, 0 failures; 2,545 collections and 1,259
 single materials; every material file left out is explained (377 sit in two roots nested a level deeper than the
 test registered, 18 hold no material). Headless on Aiko3: `Aiko3 ToonShade.mc6` replaced 34/34 and named its 5
-unmatched; `Blue Jeans.mt5` replaced slot 4 and kept the original from the first replacement; the slot operator's
-poll refuses an empty slot. Looked at in a real window: both badges side by side in the Asset Browser, the shelf on
-Materials, the slot dialog.
+unmatched; `Blue Jeans.mt5` replaced slot 4 and kept the original from the first replacement. After the Replace field:
+picking `Figure_SkinTorso` while slot 4 is active replaces SkinTorso only; a name not on the mesh is refused; a
+scripted call with no pick uses the active slot; poll refuses a mesh with no materials. Looked at in a real window:
+both badges side by side in the Asset Browser, the shelf on Materials, the dialog with its Replace field. Owner's
+summary, which this matches: a single material is one material for the part you choose; a collection works like a
+MAT pose and only changes the materials whose names the figure has.
 
 #### 8.3 as built (2026-11-19): finding textures the way Poser does
 

@@ -19,7 +19,7 @@ class ApplyMatPose_Panel(bpy.types.Panel):
         row = layout.row()
         row.scale_y = 1.5
         row.operator("poser.apply_mat_pose")
-        layout.label(text="Single material (.mt5): to the active slot", icon='INFO')
+        layout.label(text="Single material (.mt5): to the material you pick", icon='INFO')
         row = layout.row()
         row.scale_y = 1.5
         row.operator("poser.apply_material_to_slot")

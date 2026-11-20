@@ -76,11 +76,10 @@ class OT_UseMorphPackage_Operator(bpy.types.Operator):
             result = call_nested(self, bpy.ops.poser.apply_mat_pose, mat_filepath=path)
             return {'CANCELLED'} if 'CANCELLED' in result else {'FINISHED'}
         if kind == "slot_material":
-            slot = obj.material_slots[obj.active_material_index] if obj.material_slots else None
-            if slot is None or slot.material is None:
-                say(self, {'WARNING'}, f"Select the material slot on {obj.name} to apply {os.path.basename(path)} to.")
+            if not any(slot.material for slot in obj.material_slots):
+                say(self, {'WARNING'}, f"{obj.name} has no materials for {os.path.basename(path)} to replace.")
                 return {'CANCELLED'}
-            # Same as a MAT pose: its dialog says which material it replaces and is the confirmation.
+            # Its dialog asks which of the mesh's materials to replace and is the confirmation.
             result = call_nested(self, bpy.ops.poser.apply_material_to_slot, mat_filepath=path)
             return {'CANCELLED'} if 'CANCELLED' in result else {'FINISHED'}
         if kind == "removal":
