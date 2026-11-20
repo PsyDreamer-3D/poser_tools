@@ -20,9 +20,13 @@ _OPERATOR = "poser.use_morph_package"
 _ACTIONS = {
     "injection": ("Apply to Active Mesh...", 'ADD'),
     "removal": ("Remove from Active Mesh", 'REMOVE'),
-    "material": ("Apply MAT Pose to Active Mesh...", 'MATERIAL'),
+    "material": ("Apply Materials to Active Mesh...", 'MATERIAL'),
+    "slot_material": ("Apply to Active Material Slot...", 'MATERIAL'),
 }
-_KIND_LABELS = {"injection": "Injection package", "removal": "Removal package", "material": "MAT pose"}
+_KIND_LABELS = {"injection": "Injection package", "removal": "Removal package",
+                "material": "MAT pose or material collection", "slot_material": "Single material"}
+# The shelf's Materials switch lists every material kind.
+_SHELF_GROUPS = {"material": ("material", "slot_material")}
 
 
 def _operator_button(layout, kind):
@@ -82,7 +86,7 @@ class VIEW3D_AST_poser_packages(bpy.types.AssetShelf):
     def asset_poll(cls, asset):
         kind = package_asset_kind(asset)
         wanted = bpy.context.window_manager.poser_shelf_kind
-        return bool(kind) and wanted in ("all", kind)
+        return bool(kind) and (wanted in ("all", kind) or kind in _SHELF_GROUPS.get(wanted, ()))
 
     @classmethod
     def draw_context_menu(cls, _context, asset, layout):

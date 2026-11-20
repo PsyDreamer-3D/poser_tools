@@ -20,7 +20,7 @@ def asset_fields(asset) -> dict:
 
 
 def package_asset_kind(asset) -> str:
-    """"injection"/"removal"/"material" when `asset` is one of the library's packages, else ""."""
+    """One of library_build.PACKAGE_KINDS when `asset` is one of the library's packages, else ""."""
     if asset is None or asset.id_type != 'SCENE':
         return ""
     return package_kind(asset_fields(asset), [tag.name for tag in asset.metadata.tags])
@@ -33,7 +33,7 @@ def context_asset(context):
 
 
 class OT_UseMorphPackage_Operator(bpy.types.Operator):
-    """Apply or remove the Poser morph package, or apply the MAT pose, this asset stands for, on the active mesh"""
+    """Apply or remove the Poser morph package, or apply the MAT pose or material file, this asset stands for, on the active mesh"""
     # The idname predates MAT poses (Phase 8.2); kept, since the shelves' bl_activate_operator and
     # the Asset Browser's double-click keymap item are bound to it.
     bl_idname = "poser.use_morph_package"
@@ -74,6 +74,14 @@ class OT_UseMorphPackage_Operator(bpy.types.Operator):
                 return {'CANCELLED'}
             # Its dialog previews what will be replaced and is the confirmation (owner's call).
             result = call_nested(self, bpy.ops.poser.apply_mat_pose, mat_filepath=path)
+            return {'CANCELLED'} if 'CANCELLED' in result else {'FINISHED'}
+        if kind == "slot_material":
+            slot = obj.material_slots[obj.active_material_index] if obj.material_slots else None
+            if slot is None or slot.material is None:
+                say(self, {'WARNING'}, f"Select the material slot on {obj.name} to apply {os.path.basename(path)} to.")
+                return {'CANCELLED'}
+            # Same as a MAT pose: its dialog says which material it replaces and is the confirmation.
+            result = call_nested(self, bpy.ops.poser.apply_material_to_slot, mat_filepath=path)
             return {'CANCELLED'} if 'CANCELLED' in result else {'FINISHED'}
         if kind == "removal":
             if obj.data.shape_keys is None:

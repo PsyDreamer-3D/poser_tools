@@ -1895,6 +1895,38 @@ Toon BSDF (Cycles only) for `toon` and an RGB/Color node for `simple_color`, but
 reproducing them isn't worth the work. The translator keeps reporting these nodes as left out, so a toon
 MAT still applies its other settings and says what it skipped.
 
+#### 8.4 as built (2026-11-19): material collections and single materials
+
+**What's on the drive**: `.mc6` 1,362, `.mcz` 1,374 (gzip: all 400 checked start `1f 8b`), `.mt5` 435, `.mz5`
+1,130; no `.mc5` (owner's guess; Poser 6+ writes `.mc6`). A collection is `version` plus one `mtlCollection` block
+of named `material` blocks, no figure or actor named, almost all under `Materials`; a single material is one
+`material` (nearly always `Preview`) under `actor $CURRENT`. `CR2Parser` reads every one of the 4,301 with no
+error and no change; every single material holds exactly one material. 18 hold none: show/hide toggles (`!Handles
+on`, `! Toes off`), `_MT_reset` files that carry `thighLength`, an empty collection, and 0-byte `.mt5` folder
+placeholders.
+
+**How they apply** (owner, 2026-11-19): a collection the way Poser applies one to the selected object, by
+material name, which is exactly a MAT pose, so it goes through `poser.apply_mat_pose` (dropdown and file field
+take `.mc6`/`.mcz`; label now "Apply MAT Pose or Collection"). A single material to the **active material slot**,
+its name ignored, as Poser applies it to the selected material: new `poser.apply_material_to_slot`, same reader,
+builder, texture lookup and first-time backup (`applyMatPose.keep_original`, shared). Its dialog says which slot
+material it replaces.
+
+**Library**: kinds `"material"` (collections join MAT poses) and new `"slot_material"`, listed and badged (an
+outlined violet swatch with one filled quarter: it changes one of an object's materials). The shelf's MAT Poses
+switch is "Materials" and lists both. Applying from the Browser or shelf routes `slot_material` to the slot
+operator; with no slot material selected it says so. Owner's scope note: listing new kinds that reuse built code
+is fine; what 7.6 ruled out was reinventing Blender's search.
+
+**Verified**: pytest (classification of all four extensions, compressed and plain; the toggle file hidden; a
+material file outside Poser's folders not an entry; reading through the MAT reader; the runtime walk; asset kind
+resolution). Real library on 5.3, 14 top-level roots: 10,145 assets, 0 failures; 2,545 collections and 1,259
+single materials; every material file left out is explained (377 sit in two roots nested a level deeper than the
+test registered, 18 hold no material). Headless on Aiko3: `Aiko3 ToonShade.mc6` replaced 34/34 and named its 5
+unmatched; `Blue Jeans.mt5` replaced slot 4 and kept the original from the first replacement; the slot operator's
+poll refuses an empty slot. Looked at in a real window: both badges side by side in the Asset Browser, the shelf on
+Materials, the slot dialog.
+
 #### 8.3 as built (2026-11-19): finding textures the way Poser does
 
 **Measured first** (every texture reference in the owner's 2,643 MAT poses, 24,542 in all). Only 4 distinct
