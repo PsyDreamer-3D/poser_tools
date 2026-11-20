@@ -654,7 +654,7 @@ Verified headless on the real Aiko3: applied EarFeline, EarDeer and BrowHeavy, t
 via its `RemDeltas.*`; all three gone, the record empty, and a repeat run reports "not present"
 with no error.
 
-## Phase 7 — Thumbnail library for picking packages (scoping, 2026-11-14; 7.0 to 7.4 and 7.7 done; 7.5 not started; 7.6 tabled)
+## Phase 7 — Thumbnail library for picking packages (scoping, 2026-11-14; 7.0 to 7.4 and 7.7 done; 7.5 and 7.6 tabled)
 
 **Goal.** Replace the two `prop_search()` dropdowns with a thumbnail grid for choosing injection and
 removal packages from the owner's Poser Runtime libraries, using Blender's Asset Shelf. The
@@ -874,7 +874,8 @@ The cache and the picker fix today's pain and don't depend on the library, so th
 - **7.4** Built 2026-11-17 (details below): using a package from the Asset Browser (right-click,
   side panel) and from two shelves; injection opens the (7.2) dialog pre-filled, removal runs.
   Dropdowns stay for setups with no Runtime roots or no index built yet.
-- **7.5** Figure shelf: pick a CR2 with a thumbnail, sets `poser_reference_cr2`.
+- **7.5** Figure shelf: pick a CR2 with a thumbnail, sets `poser_reference_cr2`. **Tabled** (owner,
+  2026-11-19), see "7.5 tabled" below.
 - **7.6** Phase 5 tie-in: search packages by the morphs they contain. **Tabled** (owner, 2026-11-19); the
   plan as first written doesn't work, see "7.6 tabled" below.
 - **7.7** Built 2026-11-19: Apply's package parse and per-morph positions moved off the main thread (below).
@@ -1734,6 +1735,20 @@ all); the child takes 8.6 s instead of 4.8 (pure-Python decoding). Looked at in 
 `Clothing/Pose/MAT 3 Piece Suit` and the A3-H3 REM packages show their pictures. pytest builds real PICTs in all
 four formats inside a resource fork and checks exact pixels, plus PackBits, refusals and real files against
 ImageMagick (skipped without the drive or `convert`).
+
+### 7.5 tabled (2026-11-19): the figure shelf
+
+7.5 would have replaced Apply's **Figure (CR2)** dropdown with a shelf of figure thumbnails. It never imports
+anything: it only tells the add-on which Poser figure an FBX-imported mesh is, since Poser numbers morph vertices
+against the figure's own `.obj` and an FBX carries no figure identity. Apply asks that once per mesh and saves the
+answer (`poser_reference_cr2` / `poser_reference_obj`), so a shelf would answer a once-per-mesh question, and a
+figure tile that only labels an FBX already in the scene reads as "add this figure", which it isn't. It is also
+shelf functionality, ruled out with 7.6.
+
+**Owner's reasoning:** the only way a figure picker would make sense is bridged with Poser's own FBX exporter, so
+picking a figure exported and imported it; Poser exposes nothing usable for that, and it would be hard to keep
+cross-platform. Figures (anything in the library as a CR2) come over as FBX, full stop. If naming the figure ever
+becomes a chore, the place to ask is **Import Poser FBX**, which knows a figure is being imported, not a shelf.
 
 ### 7.6 tabled (2026-11-19): searching packages by the morphs they contain
 
