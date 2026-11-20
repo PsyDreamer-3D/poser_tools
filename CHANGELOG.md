@@ -11,6 +11,10 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [1.0.2] - 2026-11-20
 
+### Changed
+
+- **Requires Blender 5.2 or later** (was 4.4). Blender 5.1.2 crashes when importing an FBX with several figures (Blender bug #156097, fixed in 5.2 and not backported), and 4.4 to 5.1 haven't been tested with this release. Stay on 1.0.1 for older Blender versions.
+
 ### Added
 
 - **Legacy Daz3D Figure** is detected automatically. Millennium 3 / 4 figures (Michael 4, Victoria 4, Aiko 3, …) name their morphs with a `p`/`PBM` prefix; the importer now spots that in the imported shape-key names, so the option (in the Import Poser FBX dialog and on **Fix Poser Shapekeys**) is a dropdown defaulting to **Auto-Detect**, with **Force On** / **Force Off** for when it guesses wrong. The decision is logged in the **Poser Shapekey Report** (`Legacy Daz3D naming: auto-detected yes/no`).
