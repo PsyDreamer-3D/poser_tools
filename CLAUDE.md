@@ -61,6 +61,14 @@ Standard scaffold layout. Two things worth knowing:
   `consolidate_poser_shapekeys()` removes them up front. FBX export bakes the corrective *shape*
   but discards the bone-rotation ERC link that drives it, so the key can never fire — keeping it
   is keeping dead weight. Poser's export uses both `"JCM Foo Bar"` and `"JCMrFooBar"` forms.
+- **Blender 5.1.2 crashes multi-figure FBX imports, and the add-on doesn't work around it.** Blender
+  bug #156097 in `BM_mesh_bm_from_me()` (behind both `bm.from_mesh()` and entering Edit Mode)
+  corrupts a mesh's UV / shape-key CustomData, so the 2nd or 3rd figure's `remove_loose_verts()`
+  crashed. Fixed upstream in PR #156302 for 5.2, not backported. A May 2026 branch tried four
+  workarounds (setting the active/render UV map, stripping UV layers, a sentinel UV layer plus
+  stripped shape keys); all were dropped once 5.2 shipped, the crash having stopped on 5.2+. Keep
+  `remove_loose_verts()` on plain BMesh; if 5.1.x users report the crash, raise
+  `blender_version_min` to 5.2 rather than reviving the workarounds.
 
 ## Out of scope (permanent)
 
