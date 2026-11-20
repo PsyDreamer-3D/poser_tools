@@ -2,6 +2,7 @@
 
 import json
 import os
+import queue
 import threading
 import time
 
@@ -10,23 +11,11 @@ import numpy as np
 from bpy.props import BoolProperty, CollectionProperty, StringProperty
 
 from ..core.cr2 import runtime_index
-from ..core.cr2.actor_vertex_index import load_obj_actor_vertex_groups
-from ..core.cr2.apply_injection import build_shape_key_positions
-from ..core.cr2.correspondence_cache import (
-    correspondence_key,
-    pack_correspondence,
-    unpack_correspondence,
-)
-from ..core.cr2.cr2_parser import CR2Parser, resolve_geom_file
-from ..core.cr2.injection_package import load_injection_package, match_dials_to_shape_keys, package_dials
-from ..core.cr2.mesh_correspondence import build_vertex_correspondence
-from ..core.cr2.name_match import (
-    build_channel_index,
-    display_name_for,
-    match_channel_group,
-    present_name_candidates,
-)
-from ..core.cr2.obj_io import load_obj_vertex_positions
+from ..core.cr2.correspondence_cache import pack_correspondence
+from ..core.cr2.cr2_parser import Figure, read_figure_res_file, resolve_geom_file
+from ..core.cr2.injection_job import InjectionJob
+from ..core.cr2.injection_package import match_dials_to_shape_keys, package_dials
+from ..core.cr2.name_match import display_name_for, present_name_candidates
 from ..core.functionsShapeKeys import is_jcm_shapekey
 from ..core.utils import _write_report
 from ..properties.poserToolsPreferences import get_runtime_roots
@@ -38,6 +27,12 @@ _INJECTED_MORPHS_PROP = "poser_injected_morphs"
 # {"key": <correspondence_key>, "data": <packed bytes>} on the mesh. A group, so the
 # Custom Properties panel shows an "Edit Value" button instead of drawing the blob.
 _CORRESPONDENCE_PROP = "poser_correspondence"
+# The job's stages (core/cr2/injection_job.py) as status-bar text and as their share of the
+# progress percentage. The correspondence share is a guess that fits a first run, when it is
+# built (37 s of 76 s on V3's head package); on a cached mesh it passes in a moment.
+_STAGE_TEXT = {"reading": "reading the package", "correspondence": "matching the reference OBJ to the mesh",
+               "morphs": "building morphs"}
+_STAGE_SPAN = {"reading": (0, 30), "correspondence": (30, 75), "morphs": (75, 100)}
 
 
 def load_injected_morphs_record(obj) -> dict:
@@ -280,7 +275,8 @@ class OT_ApplyMorphInjection_Operator(bpy.types.Operator):
                 return {'CANCELLED'}
         if cr2_item is not None:
             cr2_filepath = cr2_item.filepath
-            figure = CR2Parser.parse_file(cr2_filepath)
+            # Only figureResFile is needed: a full parse of a base figure's CR2 froze this OK for ~6 s.
+            figure = Figure(geom_file=read_figure_res_file(cr2_filepath))
             resolve_geom_file(figure, cr2_filepath, extra_roots=get_runtime_roots(context))
             if not (figure.geom_file and os.path.isfile(figure.geom_file)):
                 say(self,
@@ -324,96 +320,70 @@ class OT_ApplyMorphInjection_Operator(bpy.types.Operator):
             # values (a character preset applied again): set those alone, nothing to parse or match.
             return self._apply_dials_only(context, obj)
 
-        pkg = load_injection_package(
-            self.injection_filepath, extra_roots=get_runtime_roots(context), only_leaves=only_leaves
-        )
-        index = build_channel_index(pkg["figure"])
-        if selected is None:
-            morph_names = list(index["by_internal"].keys())
-            self._missing_selected = []
+        # Everything the job needs from the mesh is read here, on the main thread: the worker
+        # never touches bpy.
+        keys = obj.data.shape_keys
+        if keys is not None:
+            reference = keys.reference_key
+            basis_positions = np.empty((len(reference.data), 3), dtype=np.float64)
+            reference.data.foreach_get('co', basis_positions.ravel())
         else:
-            # The picker's scan and this parse are two readers of one format; a morph the scan
-            # listed but the parser doesn't have must be said, not silently dropped.
-            morph_names = [n for n in selected if n in index["by_internal"]]
-            self._missing_selected = [n for n in selected if n not in index["by_internal"]]
-
-        if not morph_names:
-            if selected is not None:
-                say(self, {'WARNING'}, f"None of the {len(selected)} selected morph(s) could be read from the package's files.")
-            else:
-                say(self, *no_morphs_report(pkg))
-            return {'CANCELLED'}
-        self._selection_count = None if selected is None else len(selected)
-
-        obj_verts = load_obj_vertex_positions(self.reference_obj_filepath)
-        actor_obj_groups = load_obj_actor_vertex_groups(self.reference_obj_filepath)
-
-        if obj.data.shape_keys is None:
-            obj.shape_key_add(name='Basis', from_mix=False)
-        basis_key = obj.data.shape_keys.key_blocks['Basis']
-        basis_positions = np.empty((len(basis_key.data), 3), dtype=np.float64)
-        basis_key.data.foreach_get('co', basis_positions.ravel())
+            # Basis is only created once a morph is actually added (_add_morph), so a package
+            # with nothing to apply leaves the mesh alone. A new Basis copies the vertices.
+            basis_positions = np.empty((len(obj.data.vertices), 3), dtype=np.float64)
+            obj.data.vertices.foreach_get('co', basis_positions.ravel())
+        cached, cache_problem = None, None
+        entry = obj.data.get(_CORRESPONDENCE_PROP)
+        if entry is not None:
+            try:
+                cached = (entry["key"], bytes(entry["data"]))
+            except (KeyError, TypeError, AttributeError, ValueError) as exc:
+                say(self, {'WARNING'}, f"Ignoring the cached vertex correspondence: {exc}")
+                cache_problem = f"the cached copy was unusable: {exc}"
 
         self._obj = obj
-        self._pkg = pkg
-        self._index = index
-        self._morph_names = morph_names
-        self._actor_obj_groups = actor_obj_groups
-        self._basis_positions = basis_positions
-        self._correspondence_key = correspondence_key(obj_verts, basis_positions)
-        self._rebuild_reason = None
-        self._correspondence = self._cached_correspondence(
-            obj, len(obj_verts), len(basis_positions)
+        self._selection_count = None if selected is None else len(selected)
+        self._added = []            # shape keys this run added, removed again if it's cancelled
+        self._created_basis = False
+        self._newly_applied = {}
+        self._report_lines = []
+        self._cache_stored = False
+        self._correspondence_note = "reused from this mesh's cache"
+        self._adding = False
+        self._job = InjectionJob(
+            self.injection_filepath, self.reference_obj_filepath, basis_positions,
+            keys.key_blocks.keys() if keys is not None else [], is_jcm_shapekey,
+            selected=selected, only_leaves=only_leaves, extra_roots=get_runtime_roots(context), cached=cached,
         )
-        self._thread_error = None
-        # Set via progress_callback from the background thread; modal() turns
-        # it into a real wm.progress_update() on the main thread.
-        self._correspondence_progress = 0.0
+        self._job.rebuild_reason = cache_problem
 
         wm = context.window_manager
         wm.progress_begin(0, 100)
-        wm.progress_update(5)
-
-        if self._correspondence is not None:
-            # Same reference OBJ and an untouched mesh: skip the ~30s build.
-            self._correspondence_note = "reused from this mesh's cache"
-            try:
-                return self._apply_morphs(context)
-            finally:
-                wm.progress_end()
 
         if bpy.app.background:
-            # Headless: no event loop to dispatch TIMER events, so going modal
-            # would hang forever. `context.window` isn't a reliable headless
-            # check on its own (see docs/handoff-morph-injection.md Phase 5.1).
+            # Headless: no event loop to dispatch TIMER events, so going modal would hang
+            # forever. `context.window` isn't a reliable headless check on its own (see
+            # docs/handoff-morph-injection.md Phase 5.1). The same job runs inline.
             try:
-                started = time.time()
-                self._correspondence = build_vertex_correspondence(
-                    obj_verts, basis_positions, progress_callback=self._set_correspondence_progress
-                )
-                self._remember_correspondence(obj, time.time() - started)
-                return self._apply_morphs(context)
+                job = self._job
+                job.prepare()
+                if not job.morph_names:
+                    return self._nothing_to_apply()
+                self._store_correspondence()
+                for item in job.morphs():
+                    self._add_morph(item)
+                return self._finish_apply(context)
             finally:
                 wm.progress_end()
 
-        # Interactive: run the correspondence build on a background thread so
-        # a modal timer can keep Blender's UI responsive (see
-        # docs/handoff-morph-injection.md Phase 5.1 for why this is needed).
-        def _worker():
-            try:
-                self._correspondence = build_vertex_correspondence(
-                    obj_verts, basis_positions, progress_callback=self._set_correspondence_progress
-                )
-            except Exception as exc:
-                self._thread_error = exc
-
-        self._start_time = time.time()
-        self._thread = threading.Thread(target=_worker, daemon=True)
+        # Interactive: the whole job runs on a worker thread while a modal timer keeps
+        # Blender's UI live, shows progress and adds each finished morph (Phase 7.7: the
+        # package parse alone froze Blender for 26 s on V3's 259 head morphs).
+        self._queue = queue.Queue(maxsize=4)
+        self._thread = threading.Thread(target=self._job.run, args=(self._queue,), daemon=True)
         self._thread.start()
         self._timer = wm.event_timer_add(0.15, window=context.window)
-        context.workspace.status_text_set(
-            "Poser Morph Injection: building vertex correspondence... 0% 0s (Esc to cancel)"
-        )
+        self._update_status(context)
         # Status text alone was confirmed too easy to miss -- the wait cursor
         # is a harder-to-miss "busy" signal.
         context.window.cursor_set('WAIT')
@@ -479,37 +449,19 @@ class OT_ApplyMorphInjection_Operator(bpy.types.Operator):
                             f"— see the '{_REPORT_TEXT}' text block.")
         return {'FINISHED'}
 
-    def _set_correspondence_progress(self, fraction):
-        self._correspondence_progress = fraction
-
-    def _cached_correspondence(self, obj, n_source, n_target):
-        """The correspondence cached on the mesh if it still applies, else None.
-
-        A key mismatch is the normal "mesh or reference OBJ changed" case. A
-        blob that matches its key but can't be read is reported, then rebuilt.
-        """
-        entry = obj.data.get(_CORRESPONDENCE_PROP)
-        if entry is None:
-            return None
+    def _store_correspondence(self):
+        """Cache a correspondence the job built on the mesh (main thread only: touches bpy data)."""
+        job = self._job
+        if job.built_seconds is None or self._cache_stored:
+            return
+        self._cache_stored = True
+        note = f"built in {job.built_seconds:.1f}s"
+        if job.rebuild_reason:
+            note += f" ({job.rebuild_reason})"
         try:
-            if entry["key"] != self._correspondence_key:
-                self._rebuild_reason = "the mesh or reference OBJ changed since the cached copy"
-                return None
-            return unpack_correspondence(bytes(entry["data"]), n_source, n_target)
-        except (KeyError, TypeError, AttributeError, ValueError) as exc:
-            say(self, {'WARNING'}, f"Ignoring the cached vertex correspondence: {exc}")
-            self._rebuild_reason = f"the cached copy was unusable: {exc}"
-            return None
-
-    def _remember_correspondence(self, obj, seconds):
-        """Cache a freshly built correspondence on the mesh (main thread only: touches bpy data)."""
-        note = f"built in {seconds:.1f}s"
-        if self._rebuild_reason:
-            note += f" ({self._rebuild_reason})"
-        try:
-            obj.data[_CORRESPONDENCE_PROP] = {
-                "key": self._correspondence_key,
-                "data": pack_correspondence(self._correspondence),
+            self._obj.data[_CORRESPONDENCE_PROP] = {
+                "key": job.correspondence_key,
+                "data": pack_correspondence(job.correspondence),
             }
             note += "; cached on the mesh for next time"
         except (ValueError, TypeError, OverflowError, RuntimeError) as exc:
@@ -517,120 +469,146 @@ class OT_ApplyMorphInjection_Operator(bpy.types.Operator):
             note += f"; NOT cached: {exc}"
         self._correspondence_note = note
 
+    def _update_status(self, context):
+        job = self._job
+        low, high = _STAGE_SPAN[job.stage]
+        pct = low + int((high - low) * job.progress)
+        context.window_manager.progress_update(pct)
+        text = _STAGE_TEXT[job.stage]
+        if job.stage == "morphs":
+            text += f" {job.done}/{len(job.morph_names)}"
+        context.workspace.status_text_set(
+            f"Poser Morph Injection: {text}... {pct}% {time.time() - self._op_start_time:.0f}s (Esc to cancel)"
+        )
+
+    def _object_alive(self) -> bool:
+        try:
+            self._obj.name
+        except ReferenceError:
+            return False
+        return True
+
     def modal(self, context, event):
+        job = self._job
         if event.type == 'ESC':
-            self._finish_modal(context)
-            context.window_manager.progress_end()
-            # The thread isn't forcibly killed -- it finishes in the
-            # background and its result is just never picked up. Safe: it
-            # never touches bpy.data.
-            say(self,
-                {'WARNING'},
-                "Apply Morph Injection cancelled -- no shape keys were added.",
-            )
+            # The worker isn't killed: it sees the flag at its next file or morph and stops.
+            # It never touches bpy data, so nothing it is still doing can harm the file.
+            job.cancelled.set()
+            self._roll_back()
+            self._end_modal(context)
+            say(self, {'WARNING'}, "Apply Morph Injection cancelled -- no shape keys were added.")
             return {'CANCELLED'}
 
         if event.type != 'TIMER':
-            return {'PASS_THROUGH'}
+            # While the package is read and the correspondence built, nothing touches the mesh,
+            # so the viewport stays usable. Once shape keys are being added, input is held back
+            # so the mesh can't be edited, or put in Edit Mode, between two of them.
+            return {'RUNNING_MODAL'} if self._adding else {'PASS_THROUGH'}
 
-        elapsed = time.time() - self._start_time
-        # 5-90%: correspondence build; 90-100%: per-morph loop below.
-        pct = 5 + int(85 * self._correspondence_progress)
-        context.window_manager.progress_update(pct)
-        context.workspace.status_text_set(
-            f"Poser Morph Injection: building vertex correspondence... {pct}% {elapsed:.0f}s (Esc to cancel)"
-        )
-
-        if self._thread.is_alive():
-            return {'RUNNING_MODAL'}
-
-        self._finish_modal(context)
-
-        if self._thread_error is not None:
-            context.window_manager.progress_end()
-            say(self, {'ERROR'}, f"Vertex correspondence build failed: {self._thread_error}")
+        if not self._object_alive():
+            job.cancelled.set()
+            self._end_modal(context)
+            say(self, {'ERROR'}, "The mesh was deleted before its morphs were added; nothing was applied.")
             return {'CANCELLED'}
 
-        try:
-            self._remember_correspondence(self._obj, time.time() - self._start_time)
-            return self._apply_morphs(context)
-        finally:
-            context.window_manager.progress_end()
+        self._store_correspondence()
+        # Add finished morphs for at most a tenth of a second per tick, so the window keeps
+        # redrawing while a big package's 2-3 s of shape-key writes go in.
+        deadline = time.time() + 0.1
+        while time.time() < deadline:
+            try:
+                item = self._queue.get_nowait()
+            except queue.Empty:
+                break
+            if not self._adding:
+                if self._obj.mode == 'EDIT':
+                    # Shape keys added from Python while the mesh is in Edit Mode are lost
+                    # when it leaves Edit Mode.
+                    job.cancelled.set()
+                    self._end_modal(context)
+                    say(self, {'ERROR'}, "The mesh was put in Edit Mode while its morphs were being "
+                                         "prepared; nothing was applied. Run it again from Object Mode.")
+                    return {'CANCELLED'}
+                self._adding = True
+            self._add_morph(item)
+        self._update_status(context)
 
-    def _finish_modal(self, context):
+        if self._thread.is_alive() or not self._queue.empty():
+            return {'RUNNING_MODAL'}
+
+        self._end_modal(context)
+        if job.error is not None:
+            self._roll_back()
+            say(self, {'ERROR'}, f"Apply Morph Injection failed while {_STAGE_TEXT[job.stage]}: {job.error}")
+            return {'CANCELLED'}
+        if not job.morph_names:
+            return self._nothing_to_apply()
+        return self._finish_apply(context)
+
+    def _end_modal(self, context):
         context.window_manager.event_timer_remove(self._timer)
+        context.window_manager.progress_end()
         context.workspace.status_text_set(None)
         context.window.cursor_set('DEFAULT')
 
-    def _apply_morphs(self, context):
+    def _nothing_to_apply(self):
+        job = self._job
+        if job.selected is not None:
+            say(self, {'WARNING'}, f"None of the {len(job.selected)} selected morph(s) could be read from the package's files.")
+        else:
+            say(self, *no_morphs_report(job.pkg))
+        return {'CANCELLED'}
+
+    def _add_morph(self, item):
+        internal_name, name, result = item
         obj = self._obj
-        index = self._index
-        morph_names = self._morph_names
-        actor_obj_groups = self._actor_obj_groups
-        basis_positions = self._basis_positions
-        correspondence = self._correspondence
-        pkg = self._pkg
-        n_morphs = len(morph_names)
+        if obj.data.shape_keys is None:
+            obj.shape_key_add(name='Basis', from_mix=False)
+            self._created_basis = True
+        # Checked again here, not only by the job: two morphs of one package can share a label,
+        # and the job only saw the keys the mesh had when it started.
+        if any(n in obj.data.shape_keys.key_blocks for n in present_name_candidates(name, internal_name)):
+            self._job.already_present.append(name)
+            return
+        sk = obj.shape_key_add(name=name, from_mix=False)
+        sk.data.foreach_set('co', result["positions"].ravel())
+        # shape_key_add() defaults value to 1.0 -- rest at 0 like a Poser/DAZ dial instead.
+        sk.value = 0.0
+        self._added.append(sk.name)
+        self._newly_applied[internal_name] = sk.name
+        self._report_lines.append(
+            f"{name}: touched={result['touched_count']} "
+            f"unmapped={result['unmapped_count']} "
+            f"pmd_deltas_skipped={result['pmd_deltas_skipped']} "
+            f"collisions_resolved={result['collisions_resolved']} "
+            f"seam_collisions_skipped={result['seam_collisions_skipped']}"
+        )
 
-        wm = context.window_manager
-        report_lines = []
-        applied = 0
-        jcm_skipped = []
-        already_present = []
-        empty_skipped = []
-        newly_applied = {}
+    def _roll_back(self):
+        """Remove the shape keys this run added (and a Basis it created), for cancel and failure."""
+        if not self._object_alive() or self._obj.data.shape_keys is None:
+            return
+        obj = self._obj
+        for name in reversed(self._added):
+            key = obj.data.shape_keys.key_blocks.get(name)
+            if key is not None:
+                obj.shape_key_remove(key)
+        if self._created_basis and obj.data.shape_keys is not None and len(obj.data.shape_keys.key_blocks) == 1:
+            obj.shape_key_remove(obj.data.shape_keys.key_blocks[0])
+        self._added.clear()
 
-        for i, internal_name in enumerate(morph_names):
-            wm.progress_update(90 + int(10 * i / n_morphs))
+    def _finish_apply(self, context):
+        obj = self._obj
+        job = self._job
+        pkg = job.pkg
+        applied = len(self._added)
+        n_morphs = len(job.morph_names)
 
-            # The channel's own `name` property (e.g. "BrowHeavy") is what the
-            # created shape key is named -- internal_name (e.g. "PBMDC_39") is
-            # only the CR2's lookup key, not fit for a user-facing name.
-            name = display_name_for(index, internal_name)
-
-            if is_jcm_shapekey(name):
-                jcm_skipped.append(name)
-                continue
-            # Not just `name`: the mesh may carry the morph under its old raw
-            # internal name, or (from the FBX) without a leading "p".
-            if any(n in obj.data.shape_keys.key_blocks for n in present_name_candidates(name, internal_name)):
-                already_present.append(name)
-                continue
-
-            group = match_channel_group(index, internal_name)
-            result = build_shape_key_positions(
-                group, actor_obj_groups, basis_positions, correspondence
-            )
-
-            if result["touched_count"] == 0:
-                empty_skipped.append(name)
-                report_lines.append(
-                    f"{name}: skipped, nothing to apply "
-                    f"(pmd_deltas_skipped={result['pmd_deltas_skipped']}, "
-                    f"unmapped={result['unmapped_count']})"
-                )
-                continue
-
-            sk = obj.shape_key_add(name=name, from_mix=False)
-            sk.data.foreach_set('co', result["positions"].ravel())
-            # shape_key_add() defaults value to 1.0 -- rest at 0 like a
-            # Poser/DAZ dial instead.
-            sk.value = 0.0
-            applied += 1
-            newly_applied[internal_name] = sk.name
-            report_lines.append(
-                f"{name}: touched={result['touched_count']} "
-                f"unmapped={result['unmapped_count']} "
-                f"pmd_deltas_skipped={result['pmd_deltas_skipped']} "
-                f"collisions_resolved={result['collisions_resolved']} "
-                f"seam_collisions_skipped={result['seam_collisions_skipped']}"
-            )
-
-        if newly_applied:
+        if self._newly_applied:
             record = load_injected_morphs_record(obj)
-            record.update(newly_applied)
+            record.update(self._newly_applied)
             _save_injected_morphs_record(obj, record)
-        dial_lines, dials_set = self._set_package_dials(context, obj, index)
+        dial_lines, dials_set = self._set_package_dials(context, obj, job.index)
 
         total_elapsed = time.time() - self._op_start_time
         header = [f"Injection file: {self.injection_filepath}",
@@ -640,27 +618,27 @@ class OT_ApplyMorphInjection_Operator(bpy.types.Operator):
                   f"Vertex correspondence: {self._correspondence_note}"]
         if self._selection_count is not None:
             header.append(f"Applied only the {self._selection_count} morph(s) chosen in the morph picker.")
-        if self._missing_selected:
-            header.append(f"{len(self._missing_selected)} chosen morph(s) were not found in the package's files: {self._missing_selected}")
+        if job.missing_selected:
+            header.append(f"{len(job.missing_selected)} chosen morph(s) were not found in the package's files: {job.missing_selected}")
         if pkg["unresolved_paths"]:
             header.append(
                 f"{len(pkg['unresolved_paths'])} readScript reference(s) could not be resolved: "
                 f"{pkg['unresolved_paths']}"
             )
-        if jcm_skipped:
-            header.append(f"{len(jcm_skipped)} joint-corrective (JCM) morph(s) skipped: {jcm_skipped}")
-        if already_present:
-            header.append(f"{len(already_present)} morph(s) already present, skipped: {already_present}")
-        if empty_skipped:
-            header.append(f"{len(empty_skipped)} morph(s) had nothing to apply: {empty_skipped}")
+        if job.jcm_skipped:
+            header.append(f"{len(job.jcm_skipped)} joint-corrective (JCM) morph(s) skipped: {job.jcm_skipped}")
+        if job.already_present:
+            header.append(f"{len(job.already_present)} morph(s) already present, skipped: {job.already_present}")
+        if job.empty_skipped:
+            header.append(f"{len(job.empty_skipped)} morph(s) had nothing to apply: {job.empty_skipped}")
         header.extend(dial_lines)
 
-        _write_report(context, _REPORT_TEXT, header + ["", *report_lines])
+        _write_report(context, _REPORT_TEXT, header + ["", *job.empty_lines, *self._report_lines])
 
         summary = f"Applied {applied}/{n_morphs} morph(s) from {os.path.basename(self.injection_filepath)}"
         if dials_set:
             summary += f", set {dials_set} morph value(s)"
-        has_warning = bool(pkg["unresolved_paths"] or empty_skipped or self._missing_selected)
+        has_warning = bool(pkg["unresolved_paths"] or job.empty_skipped or job.missing_selected)
         say(self,
             {'WARNING'} if has_warning else {'INFO'},
             f"{summary} — see the '{_REPORT_TEXT}' text block.",

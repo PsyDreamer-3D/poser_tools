@@ -1074,6 +1074,41 @@ def resolve_geom_file(figure: Figure, source_path: str,
         figure.geom_file = resolved
 
 
+def read_figure_res_file(filepath: str) -> str:
+    """The CR2's root-level `figureResFile` colon path, without parsing the figure.
+
+    Apply needs only the reference OBJ from a picked figure, and a full parse of a base
+    figure's CR2 (`!Aiko 3.cr2`) takes ~6 s, on the main thread, when its dialog's OK is
+    pressed. This walks lines and tracks brace depth instead of tokenizing, and agrees
+    with `_parse_root()`: the last `figureResFile` outside any actor/figure block wins
+    (CR2s repeat the same one, before the geometry actors and before the posed ones),
+    comments are dropped, a `name` line's rest is a name (its braces aren't structure),
+    and a quoted path keeps its spaces. "" when there is none.
+    """
+    from .poser_io import read_poser_file
+    found = ""
+    depth = 0
+    for line in read_poser_file(filepath).splitlines():
+        comment = line.find('#')
+        if comment >= 0:
+            line = line[:comment]
+        line = line.strip()
+        if not line or (line[:4] == 'name' and line[4:5] in (' ', '\t')):
+            continue
+        if '"' in line:
+            tokens = [m.group(0) for m in CR2Tokenizer.TOKEN_RE.finditer(line)]
+            opened, closed = tokens.count('{'), tokens.count('}')
+        else:
+            tokens = None
+            opened, closed = line.count('{'), line.count('}')
+        if depth <= 1 and line.startswith('figureResFile'):
+            tokens = tokens or [m.group(0) for m in CR2Tokenizer.TOKEN_RE.finditer(line)]
+            if tokens[0] == 'figureResFile' and len(tokens) > 1:
+                found = tokens[1][1:-1] if tokens[1].startswith('"') and tokens[1].endswith('"') else tokens[1]
+        depth += opened - closed
+    return found
+
+
 # ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
