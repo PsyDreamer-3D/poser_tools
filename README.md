@@ -46,11 +46,11 @@ Click **Import Poser FBX** and select your `.fbx` file. The importer is based on
 Two shape-key options in the import dialog:
 
 - **Consolidate Shape Keys** *(on by default)* — untick to import the raw shape keys and run the consolidation later by hand.
-- **Legacy Daz3D Figure** *(off)* — tick for Millennium 3 / 4 figures (Michael 4, Victoria 4, Aiko 3, …), which name their morphs with a `p`/`PBM` prefix instead of Blender's numeric suffix.
+- **Legacy Daz3D Figure** *(Auto-Detect)* — Millennium 3 / 4 figures (Michael 4, Victoria 4, Aiko 3, …) name their morphs with a `p`/`PBM` prefix instead of Blender's numeric suffix. The importer works that out from the imported shape-key names, so you normally leave this alone. Choose **Force On** or **Force Off** only if detection guesses wrong; the decision is logged in the **Poser Shapekey Report**.
 
 ### 2. Fix Poser Shapekeys *(only if needed)*
 
-Consolidation already ran on import. Use this button to **re-run** it, or to consolidate a mesh imported some other way. Set the **Legacy Daz3D Figure** checkbox first for M3/M4 figures.
+Consolidation already ran on import. Use this button to **re-run** it, or to consolidate a mesh imported some other way. The same **Legacy Daz3D Figure** dropdown applies (Auto-Detect by default).
 
 ### 3. Rename Armature Bones
 
@@ -78,7 +78,7 @@ Enter a prefix and click **Prefix Weight Groups** to batch-add it to every verte
 
 - **Custom FBX importer** with Poser-specific post-import corrections baked in
 - **Conforming figure separation** — hair and clothing figures are split into their own armatures automatically, with meshes re-parented to the main figure's armature
-- **Shapekey consolidation** — merges Poser's split parent/child morphs into single shapekeys; supports both standard Poser figures and legacy Daz3D Millennium 3/4 figures
+- **Shapekey consolidation** — merges Poser's split parent/child morphs into single shapekeys; supports both standard Poser figures and legacy Daz3D Millennium 3/4 figures, detected automatically
 - **Bone renaming** — converts Poser naming conventions to Blender's `.L`/`.R` symmetry standard
 - **Weight group renaming** — keeps vertex groups in sync with renamed bones
 - **Batch prefixing** — add a prefix (e.g. `DEF-`) to all bones or vertex groups in one click
