@@ -1940,6 +1940,35 @@ both badges side by side in the Asset Browser, the shelf on Materials, the dialo
 summary, which this matches: a single material is one material for the part you choose; a collection works like a
 MAT pose and only changes the materials whose names the figure has.
 
+#### 8.4 follow-up (2026-11-19): Ambient Occlusion, Clouds and Color Ramp translated
+
+Owner's report: applying `Blue Jeans.mt5` listed `ambient_occlusion, clouds, colorramp, fastscatter x2, granite, s,
+t, toon` as left out, and the first three have Blender equivalents (owner; the last four and fastscatter don't).
+Poser's meaning of each input is from the Poser 11 Reference Manual (chapter 16, on the owner's drive); Blender's
+sockets from the 5.3 manual. Inputs measured across the drive (676 AO, 878 Clouds, 980 Color Ramp node blocks).
+- **ambient_occlusion** -> a colour Mix from white toward Blender's AO colour by Strength (factor unclamped,
+  result clamped: Strength runs to 3 and 5 to darken harder); Samples -> `samples`, MaxDist -> Distance. MaxDist
+  is read as **inches** (x 0.0254): undocumented, inferred because the values found (39.37 = 1 m in inches, 7.74,
+  5.16, 0.74) only make physical sense that way. RayBias dropped (SuperFly ignores it too).
+- **clouds** -> a colour Mix, Sky_Color to Cloud_Color, by a Noise Texture: Scale ("the size of the clouds")
+  inverted into Blender's frequency Scale, Complexity -> Detail, Global_Coordinates on -> world Position.
+  Bottom/Bias/Gain dropped; an approximation, like every procedural translated between renderers.
+- **colorramp** -> a Color Ramp, four stops evenly spaced, Cardinal spline ("a spline color map"; spacing isn't
+  documented). Ramp stops can't take links and 533 colour inputs of 874 ramps are linked, so such a ramp is a chain
+  of three colour mixes, each over a third of Input (`clamp(3 * Input - k)`), linear.
+- Mechanism: `_post_init_node` builds the helper nodes and returns routes ({input: [(node, socket)]}) for inputs
+  that live on them; Phase 1 values and Phase 2 links follow the routes (`_targets`). `_entry_for` picks the
+  ramp's form.
+
+Verified: every material on the drive using one of the three (3,760) translates with no error; after pruning,
+158 AO, 472 Noise and 178 Color Ramp nodes stay connected (plus 204 ramps as mix chains). Blue Jeans now reports
+only `fastscatter x2, granite, s, t, toon`, but still comes out a plain Principled: its Clouds -> ColorRamp feeds
+only fastscatter -> toon, and its AO feeds Color Math nodes on the surface's AlternateDiffuse/AlternateSpecular,
+which the translator folds in only for a scatter or specular node plugged in directly. Still skipped across the
+drive, by materials using them: edge_blend 1,156, toon 738, sphere_map 503, hsv 477, noise 469, fastscatter 432,
+granite 372, diffuse 308, custom_scatter 278, simple_color 248, phong 164, clay 132, cellular 117, spots 114 and
+smaller counts; which of those have equivalents is the owner's call.
+
 #### 8.3 as built (2026-11-19): finding textures the way Poser does
 
 **Measured first** (every texture reference in the owner's 2,643 MAT poses, 24,542 in all). Only 4 distinct

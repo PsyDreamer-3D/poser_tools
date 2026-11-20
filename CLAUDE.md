@@ -328,7 +328,10 @@ don't resume it without a specific reason to.
   and ask first; the dialog is the confirmation (it previews the match), and the first MAT on a material keeps
   a fake-user copy `<name> (original)` (`mat["poser_mat_backup"]`), never overwritten by later MATs. The
   translator now reports node types it has no mapping for (Poser `toon`, `simple_color`) instead of
-  skipping them silently. Parsing needed no port of `cr2_importer`'s `PZ2Parser`; `CR2Parser` reads every
+  skipping them silently. Since 8.4 it also translates `ambient_occlusion`, `clouds` and `colorramp` as
+  compound nodes (`_post_init_node` builds helper nodes and returns routes for the inputs that live on them;
+  a ramp with a linked colour becomes a mix chain, since ramp stops can't take links). Owner: `fastscatter`,
+  `granite`, `s`, `t` and `toon` have no equivalent. Parsing needed no port of `cr2_importer`'s `PZ2Parser`; `CR2Parser` reads every
   MAT on the owner's library after two fixes (spaced material names, a bare `file` line in a shader node).
 - **Package dials** (owner, 2026-11-18): a character package `readScript`s its morphs and then dials them
   (`valueParm PBMTone k 0 0.232` on BODY). `core/cr2/injection_package.package_dials()` reads those values
