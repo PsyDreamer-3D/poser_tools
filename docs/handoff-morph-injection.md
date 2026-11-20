@@ -1742,8 +1742,7 @@ ImageMagick (skipped without the drive or `convert`).
 anything: it only tells the add-on which Poser figure an FBX-imported mesh is, since Poser numbers morph vertices
 against the figure's own `.obj` and an FBX carries no figure identity. Apply asks that once per mesh and saves the
 answer (`poser_reference_cr2` / `poser_reference_obj`), so a shelf would answer a once-per-mesh question, and a
-figure tile that only labels an FBX already in the scene reads as "add this figure", which it isn't. It is also
-shelf functionality, ruled out with 7.6.
+figure tile that only labels an FBX already in the scene reads as "add this figure", which it isn't.
 
 **Owner's reasoning:** the only way a figure picker would make sense is bridged with Poser's own FBX exporter, so
 picking a figure exported and imported it; Poser exposes nothing usable for that, and it would be hard to keep
@@ -1770,10 +1769,11 @@ another name (V3's `! All Head Morphs`, character packages, `DC_39`-style file n
 2. An add-on "Find morph" search (sidebar or the shelf popover) listing packages with Apply buttons. Clean tags,
    but a second search box beside Blender's, and it can't drive the Browser's results (its filter is one string).
 
-Recommended at the time: 1. **Owner tabled 7.6** rather than pick either; nothing is built. **Why** (owner): no
-more functionality is to be added to the Asset Browser or the asset shelf, and Blender's own search is good
-enough for now. That rules out option 2 outright, and option 1 too, since tags written for search are added
-behavior in the Browser all the same.
+Recommended at the time: 1. **Owner tabled 7.6** rather than pick either; nothing is built. **Why** (owner):
+Blender's own search is good enough for now, and both options build a search of the add-on's own beside it,
+reinventing what Blender already does (option 2 openly, option 1 by loading tags with data meant for search).
+The concern is reinventing search, not extending the library: new kinds that reuse what is built (material
+collections, Phase 8.4) are fine.
 
 ### 7.7 as built (2026-11-19): Apply never blocks on a big package
 
