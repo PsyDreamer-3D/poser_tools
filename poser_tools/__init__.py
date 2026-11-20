@@ -26,7 +26,7 @@ bl_info = {
     "author": "Jess G",
     "description": "A set of tools to make working with figures imported from Poser easier.",
     "version": (0, 1, 0),
-    "blender": (5, 0, 1),
+    "blender": (5, 2, 0),
     "location": "View3D",
     "warning": "",
     "category": "Generic",

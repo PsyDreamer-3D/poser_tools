@@ -1,6 +1,6 @@
 # Poser Tools
 
-Blender 5.0.1+ add-on (extension, `id = "poser_tools"`, GPL-3.0-or-later). All source lives in `poser_tools/`.
+Blender 5.2+ add-on (extension, `id = "poser_tools"`, GPL-3.0-or-later). All source lives in `poser_tools/`.
 
 House conventions — no `bpy.ops` for data mutation, bmesh vertex-first deletion, diagnostics via
 `bpy.data.texts` instead of `print()`, the `core/`/`operators/`/`properties/`/`ui/` split with
@@ -106,8 +106,8 @@ Standard scaffold layout. Two things worth knowing:
   crashed. Fixed upstream in PR #156302 for 5.2, not backported. A May 2026 branch tried four
   workarounds (setting the active/render UV map, stripping UV layers, a sentinel UV layer plus
   stripped shape keys); all were dropped once 5.2 shipped, the crash having stopped on 5.2+. Keep
-  `remove_loose_verts()` on plain BMesh; if 5.1.x users report the crash, raise
-  `blender_version_min` to 5.2 rather than reviving the workarounds.
+  `remove_loose_verts()` on plain BMesh. v1.0.2 raised `blender_version_min` to 5.2 (owner,
+  2026-11-20), so no supported Blender has the bug; don't revive the workarounds.
 
 ## Out of scope (permanent)
 
