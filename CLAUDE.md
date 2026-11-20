@@ -357,6 +357,19 @@ don't resume it without a specific reason to.
   `call_nested()` (both in `operators/applyMorphInjection.py`), which re-issue the message from the
   UI-invoked outer operator. Use them for any new operator in this chain (the 7.4 shelf click too).
 
+## Branching
+
+`main` carries finished, releasable work only. A large feature that spans many PRs gets a long-lived
+feature branch: its PRs target that branch (branch new work from it, not from `main`), and the
+branch merges into `main` once the feature is done. Small fixes unrelated to a feature can still go
+to `main` directly.
+
+- `feature/poser-library` holds the CR2 parser, morph injection, the Poser asset library and MAT /
+  material support (PRs #12 onward; its own CLAUDE.md and `docs/handoff-morph-injection.md` describe
+  it). Those PRs had merged straight into `main`; on 2026-11-20 `main` was reset to before #12 (the
+  merge of #11) plus PR #22's release-index commit, the one change from that range that stands on
+  its own, and force-pushed (owner's call). Nothing was lost: the old `main` is that branch's history.
+
 ## Testing
 
 `tests/` has a real `pytest` suite, so far scoped to `core/cr2/` (pure Python, no `bpy`, exactly
