@@ -359,3 +359,10 @@ def test_a_mat_pose_asset_resolves_like_a_package(tmp_path):
     fields = {"poser_root": root, "poser_rel_path": rel, "poser_kind": "material"}
     assert lb.resolve_package_asset(fields, rel, ["material", "poser"], []) == (path, "material", "")
     assert lb.package_kind({}, ["material", "poser"]) == "material"
+
+
+def test_a_single_material_asset_resolves_with_its_own_kind(tmp_path):
+    root, rel, path = _package(tmp_path, "Runtime/libraries/Materials/Glass/Clear.mt5")
+    fields = {"poser_root": root, "poser_rel_path": rel, "poser_kind": "slot_material"}
+    assert lb.resolve_package_asset(fields, rel, [], []) == (path, "slot_material", "")
+    assert lb.package_kind({}, ["slot_material", "poser"]) == "slot_material"

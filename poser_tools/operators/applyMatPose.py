@@ -37,6 +37,41 @@ def _read_cached(path):
     return None if isinstance(cached[1], Exception) else cached[1]
 
 
+def keep_original(bl_mat):
+    """Keep a fake-user copy of `bl_mat` the first time Poser materials replace it; its name, or None.
+
+    Only the first time: a second MAT, collection or material must not overwrite the import's
+    original (owner's call, Phase 8.1).
+    """
+    if _BACKUP_PROP in bl_mat:
+        return None
+    original_name = bl_mat.name
+    backup = bl_mat.copy()
+    backup.name = f"{original_name} (original)"
+    backup.use_fake_user = True          # kept in the file with nothing using it
+    bl_mat[_BACKUP_PROP] = backup.name
+    return backup.name
+
+
+def library_items(context, collection, extensions, given_path=""):
+    """Fill `collection` with the Runtime library's files of `extensions`; the display name of
+    `given_path` if it is among them, else ""."""
+    given = os.path.normcase(given_path) if given_path else ""
+    picked = ""
+    collection.clear()
+    roots = get_runtime_roots(context)
+    if roots:
+        for item in runtime_index.get_all_items(roots):
+            if item.ext not in extensions:
+                continue
+            entry = collection.add()
+            entry.name = _library_item_display_name(item)
+            entry.filepath = item.filepath
+            if given and os.path.normcase(item.filepath) == given:
+                picked = entry.name
+    return picked
+
+
 def _slot_material_names(obj):
     return [slot.material.name for slot in obj.material_slots if slot.material]
 
@@ -52,22 +87,22 @@ def _draw_name_list(layout, heading, names, per_line=5, max_lines=3):
 
 
 class OT_ApplyMatPose_Operator(bpy.types.Operator):
-    """Apply a Poser MAT pose (.pz2) to the active mesh's materials, keeping the originals"""
+    """Apply a Poser MAT pose (.pz2) or material collection (.mc6) to the active mesh's materials, keeping the originals"""
     bl_idname = "poser.apply_mat_pose"
-    bl_label = "Apply MAT Pose"
+    bl_label = "Apply MAT Pose or Collection"
     bl_options = {'REGISTER', 'UNDO'}
 
     mat_filepath: StringProperty(
         name="MAT File",
-        description="A Poser MAT pose (.pz2): material settings only. Used only when nothing is "
-                    "picked from the list above",
+        description="A Poser MAT pose (.pz2/.p2z) or material collection (.mc6/.mcz): materials "
+                    "applied by name. Used only when nothing is picked from the list above",
         subtype='FILE_PATH',
         options={'SKIP_SAVE'},
     )
     library_items: CollectionProperty(type=PoserLibraryItem)
     selected_mat_name: StringProperty(
-        name="MAT Pose",
-        description="Pick the MAT pose from your Poser Runtime library",
+        name="MAT Pose or Collection",
+        description="Pick a MAT pose or material collection from your Poser Runtime library",
         options={'SKIP_SAVE'},
     )
 
@@ -80,19 +115,10 @@ class OT_ApplyMatPose_Operator(bpy.types.Operator):
         return True
 
     def invoke(self, context, event):
-        given = os.path.normcase(self.mat_filepath) if self.mat_filepath else ""
-        self.library_items.clear()
-        self.selected_mat_name = ""
-        roots = get_runtime_roots(context)
-        if roots:
-            for item in runtime_index.get_all_items(roots):
-                if item.ext not in ("pz2", "p2z"):
-                    continue
-                entry = self.library_items.add()
-                entry.name = _library_item_display_name(item)
-                entry.filepath = item.filepath
-                if given and os.path.normcase(item.filepath) == given:
-                    self.selected_mat_name = entry.name
+        # A collection is applied the way a MAT pose is (by name, to the selected object), so it
+        # shares this dialog (Phase 8.4).
+        self.selected_mat_name = library_items(context, self.library_items, ("pz2", "p2z", "mc6", "mcz"),
+                                               self.mat_filepath)
         if self.selected_mat_name:
             self.mat_filepath = ""
         # The dialog is the confirmation (owner's call): it says what will be replaced before OK.
@@ -115,11 +141,11 @@ class OT_ApplyMatPose_Operator(bpy.types.Operator):
         path = self._chosen_path()
         box = layout.box()
         if not path or not os.path.isfile(path):
-            box.label(text="Pick a MAT pose to see what it will change.", icon='INFO')
+            box.label(text="Pick a MAT pose or material collection to see what it will change.", icon='INFO')
             return
         materials = _read_cached(path)
         if not materials:
-            box.label(text="This file has no materials: not a MAT pose.", icon='ERROR')
+            box.label(text="This file has no materials.", icon='ERROR')
             return
         slots = _slot_material_names(obj)
         match = match_materials_to_slots(list(materials), slots, obj.name)
@@ -148,7 +174,7 @@ class OT_ApplyMatPose_Operator(bpy.types.Operator):
             return {'CANCELLED'}
         name = os.path.basename(path)
         if not materials:
-            say(self, {'WARNING'}, f"{name} has no materials: not a MAT pose.")
+            say(self, {'WARNING'}, f"{name} has no materials.")
             return {'CANCELLED'}
         match = match_materials_to_slots(list(materials), _slot_material_names(obj), obj.name)
         if not match["pairs"]:
@@ -165,13 +191,9 @@ class OT_ApplyMatPose_Operator(bpy.types.Operator):
         replaced, backups = [], []
         for mat_name, slot_name in match["pairs"]:
             bl_mat = bpy.data.materials[slot_name]
-            if _BACKUP_PROP not in bl_mat:
-                # Only the first time: a second MAT must not overwrite the import's original.
-                backup = bl_mat.copy()
-                backup.name = f"{slot_name} (original)"
-                backup.use_fake_user = True          # kept in the file with nothing using it
-                bl_mat[_BACKUP_PROP] = backup.name
-                backups.append(backup.name)
+            backup = keep_original(bl_mat)
+            if backup:
+                backups.append(backup)
             kind = build_material_nodes(bl_mat, materials[mat_name], load_image,
                                         reporter=lambda t, msg, m=slot_name: collect(t, f"{m}: {msg}"))
             replaced.append(f"  {slot_name} <- {mat_name} ({kind})")

@@ -227,7 +227,7 @@ don't resume it without a specific reason to.
   `docs/handoff-morph-injection.md`; 7.0 to 7.4 are built (7.2, 7.3 and 7.4 below).
 - Phase 7.4: **using a package from the library** (`poser.use_morph_package`,
   `operators/useMorphPackage.py`; `ui/packageAssets.py`). One operator behind the Asset Browser's
-  right-click entry, a side panel there, and the one Poser Library shelf (All, the default / Injection / Removal / MAT Poses
+  right-click entry, a side panel there, and the one Poser Library shelf (All, the default / Injection / Removal / Materials
   switch, `WindowManager.poser_shelf_kind`: Blender shows one shelf per 3D View and can't switch between
   shelves that poll alike, so kinds share it; opened from
   View → Asset Shelf). It reads the asset's `poser_root`/`poser_rel_path`/`poser_kind` through
@@ -299,13 +299,25 @@ don't resume it without a specific reason to.
   lands). Headless runs the same job inline. Longest main-thread stall measured in a real window: 0.66 s. The
   figure's OBJ comes from `cr2_parser.read_figure_res_file()` (brace-depth line walk, agrees with the parser on all
   1,370 CR2s on the owner's drive) instead of a 6 s full parse on the first dialog's OK.
+- **Phase 8.4: material collections and single materials.** `.mc6`/`.mcz` (a `mtlCollection` of named
+  materials) are kind `"material"`, applied by `poser.apply_mat_pose` like a MAT pose (same matching, preview,
+  backup). `.mt5`/`.mz5` (one material under `actor $CURRENT`, nearly always named `Preview`) are kind
+  `"slot_material"`, applied by `poser.apply_material_to_slot` (`operators/applyMaterialToSlot.py`, label "Apply
+  Single Material") to the mesh material picked in its dialog's searchable **Replace** field (starts on the active
+  slot's; a scripted call without `target_material` uses the active slot), name in the file ignored. Poser applies
+  one to the selected part; Blender has no selected part, so the dialog asks (owner, 2026-11-19). `.mcz`/`.mz5`
+  are gzip (`poser_io.COMPRESSED_EXTENSIONS`); `runtime_index` lists all four (`CACHE_VERSION` 2);
+  `library_index.classify_entry` judges them on `_is_mat_pose` alone (`MANIFEST_VERSION` 7). All 4,301 on the
+  owner's drive parse; 18 hold no material (show/hide toggles, pose resets, 0-byte placeholders) and stay hidden.
+  Owner (2026-11-19): extending the library with kinds that reuse what's built is fine; 7.6 was tabled for
+  reinventing Blender's search, not for touching the Browser.
 - **Phase 8.3: textures found the way Poser does** (`core/cr2/texture_paths.resolve_texture`, used by
   `material_builder.make_image_loader`): as written, then relative to Runtime / Runtime:Textures, a Windows
   path's Runtime tail, a `.bum`'s source image, and the file name across the roots (shared trailing folders,
   then the MAT's own root). NO_MAP is no texture. Every fallback is listed in the MAT report.
 - **Phase 8.2: MAT poses in the library.** Kind `"material"` (`library_index._is_mat_pose`: one file of
   `material` blocks and nothing else, judged on the whole file) is shown, every MAT included, props and
-  clothing too (owner). On the shelf behind its MAT Poses switch; `poser.use_morph_package` (idname kept for its bindings) sends MAT
+  clothing too (owner). On the shelf behind its Materials switch (MAT Poses before 8.4); `poser.use_morph_package` (idname kept for its bindings) sends MAT
   assets to `poser.apply_mat_pose`'s dialog. `read_head()` normalizes `\r` line endings: old Mac files
   slipped past every `^`-anchored pattern.
 - **Phase 8.1: MAT poses** (`poser.apply_mat_pose`, `operators/applyMatPose.py`, `ui/applyMatPose.py`;
@@ -316,7 +328,10 @@ don't resume it without a specific reason to.
   and ask first; the dialog is the confirmation (it previews the match), and the first MAT on a material keeps
   a fake-user copy `<name> (original)` (`mat["poser_mat_backup"]`), never overwritten by later MATs. The
   translator now reports node types it has no mapping for (Poser `toon`, `simple_color`) instead of
-  skipping them silently. Parsing needed no port of `cr2_importer`'s `PZ2Parser`; `CR2Parser` reads every
+  skipping them silently. Since 8.4 it also translates `ambient_occlusion`, `clouds` and `colorramp` as
+  compound nodes (`_post_init_node` builds helper nodes and returns routes for the inputs that live on them;
+  a ramp with a linked colour becomes a mix chain, since ramp stops can't take links). Owner: `fastscatter`,
+  `granite`, `s`, `t` and `toon` have no equivalent. Parsing needed no port of `cr2_importer`'s `PZ2Parser`; `CR2Parser` reads every
   MAT on the owner's library after two fixes (spaced material names, a bare `file` line in a shader node).
 - **Package dials** (owner, 2026-11-18): a character package `readScript`s its morphs and then dials them
   (`valueParm PBMTone k 0 0.232` on BODY). `core/cr2/injection_package.package_dials()` reads those values
@@ -399,19 +414,22 @@ Everything else is manual smoke test only — no `bpy`-dependent code has automa
    one of our packages does the same (a keymap item; other libraries' assets keep Blender's own
    double-click). `Window.event_simulate` can't produce a double-click, so test it by hand. In the 3D
    Viewport, View → Asset Shelf shows the Poser Library shelf in Object Mode; its settings popover (or the
-   sidebar's Poser Library Shelf panel) switches All / Injection / Removal / MAT Poses; every real thumbnail carries
+   sidebar's Poser Library Shelf panel) switches All / Injection / Removal / Materials; every real thumbnail carries
    its kind badge (blue +, amber −, violet swatch); clicking a tile
    does the same.
 6. Same mesh → **Remove Morph Injection**, pick the same package's `RemDeltas.*` file (or the
    original `InjDeltas.*` one — either works) via the same searchable dropdown. Expect: near-instant
    (no correspondence build), the matching shape key(s) gone, a **Poser Morph Removal Report** text
    block. Re-run with the same package → reports 0 removed / already not present, no error.
-7. Aiko3 mesh → **MAT Poses** → **Apply MAT Pose**, pick Lady Xtaci's `! MAT Lady Xtaci !.pz2`: the dialog
+7. Aiko3 mesh → **Materials** → **Apply MAT Pose or Collection**, pick Lady Xtaci's `! MAT Lady Xtaci !.pz2`: the dialog
    says "Replaces 31 of Figure's 34 materials" and lists `SkinLeg` as having no slot; Apply → textured
    materials in Material Preview, 31 `... (original)` materials with fake users, a **Poser MAT Pose Report**.
    Ctrl+Z restores them. A second MAT adds backups only for materials the first didn't touch. With the
-   library index updated, the same MAT in the Asset Browser (double-click, right-click → **Apply MAT Pose to
-   Active Mesh...**) or on the shelf switched to MAT Poses opens that dialog with the file picked.
+   library index updated, the same MAT in the Asset Browser (double-click, right-click → **Apply Materials to
+   Active Mesh...**) or on the shelf switched to Materials opens that dialog with the file picked. A collection
+   (`Aiko3 ToonShade.mc6`) goes through the same dialog. **Apply Single Material**, pick a `.mt5`/`.mz5`
+   (`Blue Jeans.mt5`) and a material in **Replace** (starts on the active slot's): Apply replaces only that material
+   and keeps `<name> (original)`. From the library, a single material (green badge) opens that dialog; searching "single" / "collection" narrows to one type (tags).
 
 For a quick check without Blender: `python -m py_compile` the tree, or import `poser_tools` under a
 stubbed `bpy` and call `register()`/`unregister()` — that catches class-tuple typos and bad import

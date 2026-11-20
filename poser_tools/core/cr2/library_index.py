@@ -10,9 +10,10 @@ manifest this builds.
 Two jobs:
 
 1. Classify every user-facing `.pz2`/`.p2z` under the configured Runtime roots by
-   following `readScript` to its leaf files and sniffing the first 16 KB of each.
+   following `readScript` to its leaf files and sniffing the first 16 KB of each,
+   plus Poser's material files (`.mc6`/`.mcz`/`.mt5`/`.mz5`, Phase 8.4).
    16,405 entries take ~8 s on the owner's 20 roots (warm cache).
-2. Turn the classified entries that should be shown (injection, removal) into a
+2. Turn the classified entries that should be shown (SHOWN_KINDS) into a
    manifest: one group per source folder (one asset `.blend` each), display names,
    catalogs, tags, thumbnails, and a hash per folder so a later build rewrites
    only the folders that changed.
@@ -44,17 +45,26 @@ from .runtime_index import walk_roots
 # 4: a package that moves bones is an "armature" pose and hidden, even if it also injects.
 # 5: `thighLength` marks a pose file too (owner's tip; 70 pose files have it but no bone channel).
 # 6: MAT poses (`material` blocks and nothing else) are entries too, kind "material" (Phase 8.2).
+# 7: material collections (.mc6/.mcz, kind "material") and single materials (.mt5/.mz5, kind
+#    "slot_material") are entries too (Phase 8.4).
 # Entry answers are cached by file stamps alone, so a rule change must invalidate them here; the
 # bump also makes Preferences say the index needs rebuilding.
-MANIFEST_VERSION = 6
+MANIFEST_VERSION = 7
 HEAD_BYTES = 16384
 # Orchestrators nest two or three deep in practice (an entry, an "all" file, the leaves).
 # The cap only stops a pathological tree; hitting it marks the entry incomplete.
 MAX_DEPTH = 8
 PACKAGE_EXTENSIONS = {"pz2", "p2z"}
-# Morph packages, and MAT poses since Phase 8.2 (all of them, props and clothing included: a
-# prop imported through FBX takes a MAT the same way a figure does; owner, 2026-11-18).
-SHOWN_KINDS = ("injection", "removal", "material")
+# Poser's material files (Phase 8.4). A collection is a set of named materials applied by name to
+# the selected object, which is what a MAT pose does, so it shares that kind and that operator. A
+# single material is one material applied to whichever material is selected, so it is its own kind.
+COLLECTION_EXTENSIONS = {"mc6", "mcz"}
+SLOT_MATERIAL_EXTENSIONS = {"mt5", "mz5"}
+ENTRY_EXTENSIONS = PACKAGE_EXTENSIONS | COLLECTION_EXTENSIONS | SLOT_MATERIAL_EXTENSIONS
+# Morph packages, MAT poses since Phase 8.2 (all of them, props and clothing included: a prop
+# imported through FBX takes a MAT the same way a figure does; owner, 2026-11-18), and material
+# files since 8.4.
+SHOWN_KINDS = ("injection", "removal", "material", "slot_material")
 # Blender ID names are 63 bytes of UTF-8.
 ID_NAME_LIMIT = 63
 
@@ -229,14 +239,25 @@ def classify_entry(path: str, roots, dir_cache=None, leaf_cache=None) -> dict:
       even when it also injects the morphs it dials, like V3 Spellcaster, or a "Fit"
       package that moves the hip as well), "injection" (some leaf has deltas), "pmd"
       (binary morphs, unsupported), "removal" (leaves re-declare channels as `name -`),
-      "material" (a MAT pose: one file of `material` blocks and nothing else; Phase 8.2),
+      "material" (a MAT pose: one file of `material` blocks and nothing else, Phase 8.2; or a
+      material collection, .mc6/.mcz, 8.4), "slot_material" (a single material, .mt5/.mz5, 8.4),
       "pose" (dials morph values, no deltas), "missing" (every target unresolved), else
-      "other". Injection, removal and material are shown (SHOWN_KINDS).
+      "other". SHOWN_KINDS are listed in the library.
     - incomplete: some target could not be found, or the tree was too deep.
     - mixed: an injection that also contains removal leaves (it can offer both).
     - stamps: [(path, mtime_ns, size)] of every file read, to tell later whether
       the answer is still valid.
     """
+    ext = os.path.splitext(path)[1].lower().lstrip(".")
+    if ext in COLLECTION_EXTENSIONS or ext in SLOT_MATERIAL_EXTENSIONS:
+        # Material files never readScript; a few hold no material at all (`!Handles on.mc6` only
+        # shows or hides parts) and stay hidden as "other".
+        kind = "other"
+        if _is_mat_pose(path):
+            kind = "material" if ext in COLLECTION_EXTENSIONS else "slot_material"
+        return {"kind": kind, "incomplete": False, "mixed": False, "n_files": 1, "n_missing": 0,
+                "stamps": [s for s in [_stamp(path)] if s is not None]}
+
     state = _Visit(list(roots), {} if dir_cache is None else dir_cache,
                    {} if leaf_cache is None else leaf_cache)
     _visit(path, 0, set(), state)
@@ -437,7 +458,7 @@ def _folder_hash(entries: list) -> str:
 _CATALOG_NAMESPACE = uuid.UUID("5f6c1e3a-0b0e-4a52-9d7e-5b7f3c1f2a10")
 # Bump when what the asset files contain changes (placeholders, tags, payload keys), so
 # existing ones are rebuilt: it goes into the manifest signature.
-ASSET_FORMAT_VERSION = 4   # 2: stand-ins are Scenes (the Asset Browser doesn't list Images); 3: kind badge on thumbnails; 4: .rsr thumbnails decoded
+ASSET_FORMAT_VERSION = 5   # 2: stand-ins are Scenes (the Asset Browser doesn't list Images); 3: kind badge on thumbnails; 4: .rsr thumbnails decoded; 5: single materials badged green, file-type tags
 
 
 def asset_signature(blender_version: str) -> str:
@@ -516,8 +537,17 @@ def make_signature(roots, extra=None) -> dict:
     return {"version": MANIFEST_VERSION, "roots": list(roots), "extra": extra}
 
 
-def _tags(kind: str, mixed: bool, incomplete: bool) -> list:
+# What a material file is, as a tag: the kind alone can't say it, since a collection shares the MAT
+# pose's kind (it applies the same way). Tags are what Blender's own search matches, so typing
+# "collection" or "single" finds them (owner, 2026-11-19: telling .mt5 and .mc6 apart).
+FILE_TYPE_TAGS = {ext: "collection" for ext in COLLECTION_EXTENSIONS}
+FILE_TYPE_TAGS.update({ext: "single material" for ext in SLOT_MATERIAL_EXTENSIONS})
+
+
+def _tags(kind: str, mixed: bool, incomplete: bool, ext: str = "") -> list:
     tags = [kind]
+    if ext in FILE_TYPE_TAGS:
+        tags.append(FILE_TYPE_TAGS[ext])
     if mixed and "removal" not in tags:
         tags.append("removal")
     if incomplete:
@@ -548,7 +578,7 @@ def build_manifest(roots, previous=None, signature_extra=None, progress=None, ca
     every classification and rewrites only the folders whose catalog changed.
 
     Returns {"version", "signature", "classified": {path: record}, "folders": [...],
-    "stats": {...}}. Only injection and removal entries appear in "folders"; "classified"
+    "stats": {...}}. Only SHOWN_KINDS entries appear in "folders"; "classified"
     holds every entry so hidden ones are not re-read next time either.
     """
     roots = [r for r in dict.fromkeys(roots) if r and os.path.isdir(r)]
@@ -560,12 +590,12 @@ def build_manifest(roots, previous=None, signature_extra=None, progress=None, ca
 
     candidates = [
         (root, item) for root, item in walk_roots(roots)
-        if item.ext in PACKAGE_EXTENSIONS and in_poser_library(item.category)
+        if item.ext in ENTRY_EXTENSIONS and in_poser_library(item.category)
         and not is_delta_leaf(item.name, item.category)
     ]
 
     if prefetch and not prior:
-        everything = [item.filepath for _root, item in walk_roots(roots) if item.ext in PACKAGE_EXTENSIONS]
+        everything = [item.filepath for _root, item in walk_roots(roots) if item.ext in ENTRY_EXTENSIONS]
         prefetch_heads(everything, cancelled=cancelled, progress=progress)
 
     dir_cache, leaf_cache, thumb_cache = {}, {}, {}
@@ -601,7 +631,7 @@ def build_manifest(roots, previous=None, signature_extra=None, progress=None, ca
                 "incomplete": rec["incomplete"],
                 "n_files": rec["n_files"],
                 "n_missing": rec["n_missing"],
-                "tags": _tags(rec["kind"], rec["mixed"], rec["incomplete"]),
+                "tags": _tags(rec["kind"], rec["mixed"], rec["incomplete"], item.ext),
                 "description": _describe(rel_path, rec),
                 "thumbnail": thumb,
                 "thumbnail_kind": thumb_kind,

@@ -125,3 +125,12 @@ def test_get_all_items_dedupes_across_roots_by_filepath(tmp_path):
     items = ri.get_all_items([root_a, root_a, str(root_b)])
     names = sorted(i.name for i in items)
     assert names == ["only_in_b", "shared"]
+
+
+def test_material_files_are_listed(tmp_path):
+    libs = tmp_path / "Content" / "Runtime" / "libraries" / "Materials" / "Set"
+    libs.mkdir(parents=True)
+    for name in ("A.mc6", "B.mcz", "C.mt5", "D.mz5", "E.txt"):
+        (libs / name).write_text("{\n}\n")
+    found = sorted(item.ext for _root, item in ri.walk_roots([str(tmp_path / "Content")]))
+    assert found == ["mc6", "mcz", "mt5", "mz5"]

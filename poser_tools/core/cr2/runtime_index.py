@@ -30,11 +30,13 @@ import time
 from dataclasses import asdict, dataclass
 from typing import Dict, List, Optional
 
-CACHE_VERSION = 1
+# 2: material collections and single materials are listed too (Phase 8.4); an older cache
+# would never list them, since unchanged files are reused from it.
+CACHE_VERSION = 2
 
-# Figures (.cr2/.crz) and injection-candidate packages (.pz2/.p2z) only --
-# poser_tools doesn't browse props/hair/lights/poses.
-SUPPORTED_EXTENSIONS = {".cr2", ".crz", ".pz2", ".p2z"}
+# Figures (.cr2/.crz), packages and MAT poses (.pz2/.p2z), material collections (.mc6/.mcz)
+# and single materials (.mt5/.mz5) -- poser_tools doesn't browse props/hair/lights.
+SUPPORTED_EXTENSIONS = {".cr2", ".crz", ".pz2", ".p2z", ".mc6", ".mcz", ".mt5", ".mz5"}
 
 
 @dataclass
@@ -42,7 +44,7 @@ class LibraryItem:
     name: str        # Human-readable display name (filename stem)
     filepath: str    # Absolute OS path to the library file
     category: str    # Relative sub-path within Libraries/, forward slashes
-    ext: str         # Lowercase, no dot: "cr2", "crz", "pz2", "p2z"
+    ext: str         # Lowercase, no dot: one of SUPPORTED_EXTENSIONS
     mtime: float     # os.path.getmtime() value at scan time
 
 

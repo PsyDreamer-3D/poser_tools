@@ -4,9 +4,9 @@ poser_io.py
 -----------
 Shared I/O utilities for reading Poser file formats.
 
-All Poser text-based formats (CR2, PP2, HR2, LT2, CM2, PZ2) share the same
-token-based syntax and can be compressed with gzip into their .z counterparts
-(.crz, .ppz, .hrz, .ltz, .cmz, .p2z).
+All Poser text-based formats (CR2, PP2, HR2, LT2, CM2, PZ2, and the material files
+MC6/MT5) share the same token-based syntax and can be compressed with gzip into
+their .z counterparts (.crz, .ppz, .hrz, .ltz, .cmz, .p2z, .mcz, .mz5).
 
 This module provides a single entry point -- read_poser_file() -- that returns
 decoded text regardless of whether the source file is plain-text or
@@ -21,11 +21,15 @@ import os
 
 COMPRESSED_EXTENSIONS = frozenset({
     '.crz', '.ppz', '.hrz', '.ltz', '.cmz', '.p2z',
+    # Material collection and single material (Phase 8.4): every .mcz on the owner's drive
+    # starts with gzip's 1f 8b.
+    '.mcz', '.mz5',
 })
 
 POSER_EXTENSIONS = frozenset({
     '.cr2', '.crz', '.pp2', '.ppz', '.hr2', '.hrz',
     '.lt2', '.ltz', '.cm2', '.cmz', '.pz2', '.p2z',
+    '.mc6', '.mcz', '.mt5', '.mz5',
 })
 
 POSER_GLOB = "*.cr2;*.crz;*.pp2;*.ppz;*.hr2;*.hrz;*.lt2;*.ltz;*.cm2;*.cmz"
@@ -61,6 +65,7 @@ def plain_equivalent(path: str) -> str:
     _map = {
         '.crz': '.cr2', '.ppz': '.pp2', '.hrz': '.hr2',
         '.ltz': '.lt2', '.cmz': '.cm2', '.p2z': '.pz2',
+        '.mcz': '.mc6', '.mz5': '.mt5',
     }
     base, ext = os.path.splitext(path)
     return base + _map.get(ext.lower(), ext)

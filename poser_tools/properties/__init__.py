@@ -18,7 +18,7 @@ SHELF_KINDS = (
     ('all', "All", "Every package in the library"),
     ('injection', "Injection", "Morph packages that add shape keys"),
     ('removal', "Removal", "Packages that remove a package's shape keys"),
-    ('material', "MAT Poses", "Material presets"),
+    ('material', "Materials", "MAT poses, material collections and single materials"),
 )
 
 

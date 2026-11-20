@@ -564,3 +564,49 @@ def test_old_mac_line_endings_are_read_like_any_other(lib):
     assert li.classify_entry(mat, [lib.path])["kind"] == "material"
     assert li.classify_entry(pose, [lib.path])["kind"] == "armature"
     assert "\r" not in li.read_head(mat)
+
+
+# ---- material files: collections (.mc6/.mcz) and single materials (.mt5/.mz5), Phase 8.4 ------
+
+def _collection(*blocks):
+    return "{\nversion\n\t{\n\tnumber 5\n\t}\nmtlCollection\n\t{\n" + "".join(blocks) + "\t}\n}\n"
+
+
+def _single(block):
+    return "{\nversion\n\t{\n\tnumber 5\n\t}\nactor $CURRENT\n\t{\n" + block + "\t}\n}\n"
+
+
+def test_material_files_are_listed_by_kind_compressed_or_not(lib):
+    lib.write("Materials/City/Default City.mc6", _collection(_MAT_BLOCK, _MAT_BLOCK.replace("SkinTorso", "Lips")))
+    lib.write("Materials/City/Night City.mcz", gzip.compress(_collection(_MAT_BLOCK).encode()), binary=True)
+    lib.write("Materials/Glass/Clear.mt5", _single(_MAT_BLOCK.replace("SkinTorso", "Preview")))
+    lib.write("Materials/Glass/Frosted.mz5",
+              gzip.compress(_single(_MAT_BLOCK.replace("SkinTorso", "Preview")).encode()), binary=True)
+    # `!Handles on.mc6` only shows parts; a material file outside Poser's folders isn't an entry.
+    lib.write("Materials/Medieval/!Handles on.mc6", "{\nversion\n\t{\n\tnumber 5\n\t}\nactor handle:1\n\t{\n\ton\n\t}\n}\n")
+    lib.write("!Vendor/Stash/Loose.mc6", _collection(_MAT_BLOCK))
+    m = li.build_manifest([lib.path])
+    shown = {e["rel_path"].split("libraries/")[1]: (e["kind"], e["tags"], e["catalog"])
+             for f in m["folders"] for e in f["entries"]}
+    assert shown == {
+        # The file-type tag tells a collection from a MAT pose, which shares its kind (owner, 2026-11-19).
+        "Materials/City/Default City.mc6": ("material", ["material", "collection", "poser"], "Content/Materials/City"),
+        "Materials/City/Night City.mcz": ("material", ["material", "collection", "poser"], "Content/Materials/City"),
+        "Materials/Glass/Clear.mt5": ("slot_material", ["slot_material", "single material", "poser"],
+                                      "Content/Materials/Glass"),
+        "Materials/Glass/Frosted.mz5": ("slot_material", ["slot_material", "single material", "poser"],
+                                        "Content/Materials/Glass"),
+    }
+    handles = next(p for p in m["classified"] if p.endswith("!Handles on.mc6"))
+    assert m["classified"][handles]["kind"] == "other"
+
+
+def test_material_files_read_through_the_mat_pose_reader(lib):
+    from core.cr2.mat_pose import read_mat_pose
+    coll = lib.write("Materials/C/Set.mcz", gzip.compress(
+        _collection(_MAT_BLOCK, _MAT_BLOCK.replace("SkinTorso", "Lips")).encode()), binary=True)
+    single = lib.write("Materials/C/One.mz5", gzip.compress(
+        _single(_MAT_BLOCK.replace("SkinTorso", "Preview")).encode()), binary=True)
+    assert list(read_mat_pose(coll)) == ["SkinTorso", "Lips"]
+    assert list(read_mat_pose(single)) == ["Preview"]
+    assert read_poser_file(coll).startswith("{\nversion")

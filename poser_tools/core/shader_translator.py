@@ -69,7 +69,7 @@ _COLOR_MATH_OPS: tuple[str, ...] = (
 #   int  → socket accessed by index (for nodes with duplicate "Value" names)
 #   None → input is explicitly skipped (no Blender equivalent in this phase)
 #
-# Types absent from this dict are silently skipped.
+# Types absent from this dict are skipped and named in a warning (build_shader_tree's `skipped`).
 
 POSER_NODE_MAP: dict[str, tuple[str, dict]] = {
     # Classic Poser surface (Firefly renderer)
@@ -177,7 +177,46 @@ POSER_NODE_MAP: dict[str, tuple[str, dict]] = {
     'comp': ('ShaderNodeSeparateColor', {
         'Color': 'Color',
     }),
+    # Compound translations (_post_init_node builds the helper nodes and routes the inputs that
+    # live on them; the node here is the one whose output the rest of the tree uses). Poser's
+    # meaning of each input is from the Poser 11 Reference Manual, chapter 16.
+    # Ambient Occlusion: white mixed toward Blender's AO colour by Strength ("the degree to which
+    # the node will darken occluded surfaces"); MaxDist -> Distance, Samples -> samples. RayBias
+    # has no counterpart (Poser's own SuperFly ignores it too).
+    'ambient_occlusion': ('ShaderNodeMix', {
+        'Strength': 'Factor',
+    }),
+    # Clouds: Sky_Color mixed toward Cloud_Color by a fractal Noise Texture. Complexity -> Detail;
+    # Scale ("the size of the clouds") inverted into Blender's Scale, which is a frequency. Bottom,
+    # Bias and Gain have no direct counterpart; the pattern is an approximation, as any procedural
+    # noise translated between renderers is.
+    'clouds': ('ShaderNodeMix', {
+        'Sky_Color':   6,   # A (RGBA)
+        'Cloud_Color': 7,   # B (RGBA)
+    }),
+    # Color Ramp: four colours, a "spline color map" looked up by Input. Built as a Blender Color
+    # Ramp, or as a chain of colour mixes when a colour is fed by another node (_colorramp_entry).
+    'colorramp': ('ShaderNodeValToRGB', {
+        'Input': 0,         # Fac
+    }),
 }
+
+# A Color Ramp's stops can't take links, but on the owner's library 533 colour inputs of 874 ramps
+# are fed by another node; such a ramp is built from mixes instead, linear between the colours.
+_RAMP_COLORS = ('Color1', 'Color2', 'Color3', 'Color4')
+_COLORRAMP_CHAIN = ('ShaderNodeMix', {})
+# Poser's AO MaxDist is read as inches: its documented meaning is a distance, and the values found on
+# the owner's library (39.37 = 1 m in inches, 7.74, 5.16, 0.74) only make physical sense in inches;
+# as Poser native units 7.74 would be ~20 m. An inference, not documented by Poser.
+_AO_DISTANCE_PER_UNIT = 0.0254
+
+
+def _entry_for(poser_node):
+    """(bl_idname, input_map) for a Poser node, or None when it has no translation."""
+    if poser_node.node_type == 'colorramp' and any(
+            (inp := poser_node.inputs.get(key)) is not None and inp.node_ref for key in _RAMP_COLORS):
+        return _COLORRAMP_CHAIN
+    return POSER_NODE_MAP.get(poser_node.node_type)
 
 # Inputs whose current value[0] must be inverted before assigning to Blender.
 # Poser transparency: 0 = opaque, 1 = transparent.
@@ -261,6 +300,9 @@ def build_shader_tree(bl_mat, shader_tree, load_image_fn, reporter=None):
 
     # Poser node_name → created Blender node
     bl_nodes: dict = {}
+    # Poser node_name → {input name: [(Blender node, socket key)]} for inputs that live on a compound
+    # translation's helper nodes rather than on the node in bl_nodes (_post_init_node).
+    bl_routes: dict = {}
 
     # Tracks whether any surface node maps transparency so blend_method is set.
     has_transparency_input = False
@@ -280,7 +322,7 @@ def build_shader_tree(bl_mat, shader_tree, load_image_fn, reporter=None):
         if poser_node.node_name in _collapsed:
             continue
 
-        entry = POSER_NODE_MAP.get(poser_node.node_type)
+        entry = _entry_for(poser_node)
         if entry is None:
             # Said, not silent: a skipped node breaks its chain, so the material can come out
             # far plainer than in Poser (Poser's `toon` node: a toon MAT ends up a bare Principled).
@@ -297,8 +339,9 @@ def build_shader_tree(bl_mat, shader_tree, load_image_fn, reporter=None):
         bl_node.label = poser_node.node_name
         bl_nodes[poser_node.node_name] = bl_node
 
-        # Per-type setup before values (sets enums, data_type, loads image)
-        _post_init_node(bl_node, poser_node, load_image_fn, reporter)
+        # Per-type setup before values (sets enums, data_type, loads image, builds helper nodes)
+        bl_routes[poser_node.node_name] = _post_init_node(
+            bl_node, poser_node, load_image_fn, reporter, nodes, links) or {}
 
         # image_map nodes that failed to load must be removed: an empty
         # ShaderNodeTexImage outputs the magenta error colour in Cycles (black
@@ -312,11 +355,9 @@ def build_shader_tree(bl_mat, shader_tree, load_image_fn, reporter=None):
         for inp_name, inp in poser_node.inputs.items():
             if inp.value is None:
                 continue
-            bl_socket_key = input_map.get(inp_name)
-            if bl_socket_key is None:
-                continue
-            _set_socket_value(bl_node, bl_socket_key,
-                              inp.value, poser_node.node_type, inp_name)
+            for target, bl_socket_key in _targets(bl_node, input_map, bl_routes[poser_node.node_name], inp_name):
+                _set_socket_value(target, bl_socket_key,
+                                  inp.value, poser_node.node_type, inp_name)
 
         # Detect whether this node will drive an Alpha input so we can enable
         # transparency blending on the material after the tree is wired.
@@ -396,7 +437,7 @@ def build_shader_tree(bl_mat, shader_tree, load_image_fn, reporter=None):
         bl_target = bl_nodes.get(poser_node.node_name)
         if bl_target is None:
             continue
-        entry = POSER_NODE_MAP.get(poser_node.node_type)
+        entry = _entry_for(poser_node)
         if entry is None:
             continue
         _, input_map = entry
@@ -407,9 +448,6 @@ def build_shader_tree(bl_mat, shader_tree, load_image_fn, reporter=None):
             bl_source = bl_nodes.get(inp.node_ref)
             if bl_source is None:
                 continue  # source type unknown/skipped/collapsed
-            bl_socket_key = input_map.get(inp_name)
-            if bl_socket_key is None:
-                continue
 
             # Prefer the comp/channel output index; for ShaderNodeMix with
             # RGBA data_type the colour result is at index 2, not 0.
@@ -417,7 +455,9 @@ def build_shader_tree(bl_mat, shader_tree, load_image_fn, reporter=None):
             if src_idx >= len(bl_source.outputs):
                 continue
 
-            _make_link(links, bl_source, src_idx, bl_target, bl_socket_key)
+            for target, bl_socket_key in _targets(bl_target, input_map, bl_routes.get(poser_node.node_name, {}),
+                                                  inp_name):
+                _make_link(links, bl_source, src_idx, target, bl_socket_key)
 
     # ------------------------------------------------------------------
     # Phase 3: connect root surface node to material output.
@@ -569,10 +609,99 @@ def _collapse_into_sss(principled, sub_poser_node, bl_nodes, links):
         pass
 
 
-def _post_init_node(bl_node, poser_node, load_image_fn, reporter):
-    """Per-type setup that must run before socket value assignment."""
+def _targets(bl_node, input_map, routes, inp_name):
+    """[(Blender node, socket key)] a Poser input is set or linked on: its route, else the map."""
+    if inp_name in routes:
+        return routes[inp_name]
+    key = input_map.get(inp_name)
+    return [] if key is None else [(bl_node, key)]
+
+
+def _value(inputs, name, default=0.0):
+    inp = inputs.get(name)
+    return float(inp.value[0]) if inp is not None and inp.value else default
+
+
+def _helper(nodes, idname, beside, dx=-260, dy=0):
+    node = nodes.new(idname)
+    node.location = (beside.location[0] + dx, beside.location[1] + dy)
+    return node
+
+
+def _rgba_mix(node):
+    node.data_type = 'RGBA'
+    return node
+
+
+def _post_init_node(bl_node, poser_node, load_image_fn, reporter, nodes=None, links=None):
+    """Per-type setup that must run before socket value assignment.
+
+    Returns {Poser input name: [(Blender node, socket key)]} for inputs a compound translation
+    puts on its helper nodes, or None.
+    """
     nt     = poser_node.node_type
     inputs = poser_node.inputs
+
+    if nt == 'ambient_occlusion':
+        mix = _rgba_mix(bl_node)
+        mix.inputs[6].default_value = (1.0, 1.0, 1.0, 1.0)     # A: unoccluded
+        # Strength runs past 1 (3 and 5 on the owner's library) to darken harder: let the
+        # factor extrapolate and clamp the colour instead.
+        mix.clamp_factor = False
+        mix.clamp_result = True
+        ao = _helper(nodes, 'ShaderNodeAmbientOcclusion', mix)
+        ao.samples = max(1, int(_value(inputs, 'Samples', 16)))
+        max_dist = _value(inputs, 'MaxDist', 0.0)
+        if max_dist > 0:
+            ao.inputs['Distance'].default_value = max_dist * _AO_DISTANCE_PER_UNIT
+        links.new(ao.outputs['Color'], mix.inputs[7])           # B: occluded
+        return None
+
+    if nt == 'clouds':
+        mix = _rgba_mix(bl_node)
+        noise = _helper(nodes, 'ShaderNodeTexNoise', mix)
+        scale = _value(inputs, 'Scale', 0.0)
+        if scale > 0:
+            noise.inputs['Scale'].default_value = 1.0 / scale
+        if _value(inputs, 'Global_Coordinates') >= 0.5:
+            # World space, as Poser's Global_Coordinates on; off is the object's own space.
+            geometry = _helper(nodes, 'ShaderNodeNewGeometry', noise)
+            links.new(geometry.outputs['Position'], noise.inputs['Vector'])
+        links.new(noise.outputs['Fac'], mix.inputs[0])
+        return {'Complexity': [(noise, 'Detail')]}
+
+    if nt == 'colorramp' and bl_node.bl_idname == 'ShaderNodeValToRGB':
+        ramp = bl_node.color_ramp
+        ramp.interpolation = 'CARDINAL'     # a spline through the four colours
+        ramp.elements[0].position, ramp.elements[1].position = 0.0, 1.0
+        ramp.elements.new(1.0 / 3.0)
+        ramp.elements.new(2.0 / 3.0)
+        for element, key in zip(sorted(ramp.elements, key=lambda e: e.position), _RAMP_COLORS):
+            inp = inputs.get(key)
+            if inp is not None and inp.value:
+                element.color = (float(inp.value[0]), float(inp.value[1]), float(inp.value[2]), 1.0)
+        return None
+
+    if nt == 'colorramp':
+        # A colour is fed by another node: Color1 -> Color4 through three mixes, each taking the
+        # Input's third of the range (factor = clamp(3 * Input - k)). Linear, not a spline.
+        final = _rgba_mix(bl_node)
+        first = _rgba_mix(_helper(nodes, 'ShaderNodeMix', final, dx=-520))
+        second = _rgba_mix(_helper(nodes, 'ShaderNodeMix', final, dx=-260))
+        factors = []
+        for k, mix in enumerate((first, second, final)):
+            math = _helper(nodes, 'ShaderNodeMath', mix, dy=-220)
+            math.operation = 'MULTIPLY_ADD'
+            math.use_clamp = True
+            math.inputs[1].default_value = 3.0
+            math.inputs[2].default_value = -float(k)
+            links.new(math.outputs[0], mix.inputs[0])
+            factors.append((math, 0))
+        links.new(first.outputs[2], second.inputs[6])
+        links.new(second.outputs[2], final.inputs[6])
+        return {'Input': factors,
+                'Color1': [(first, 6)], 'Color2': [(first, 7)],
+                'Color3': [(second, 7)], 'Color4': [(final, 7)]}
 
     if nt == 'image_map':
         src = inputs.get('Image_Source')

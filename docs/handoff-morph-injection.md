@@ -1936,6 +1936,80 @@ Toon BSDF (Cycles only) for `toon` and an RGB/Color node for `simple_color`, but
 reproducing them isn't worth the work. The translator keeps reporting these nodes as left out, so a toon
 MAT still applies its other settings and says what it skipped.
 
+#### 8.4 as built (2026-11-19): material collections and single materials
+
+**What's on the drive**: `.mc6` 1,362, `.mcz` 1,374 (gzip: all 400 checked start `1f 8b`), `.mt5` 435, `.mz5`
+1,130; no `.mc5` (owner's guess; Poser 6+ writes `.mc6`). A collection is `version` plus one `mtlCollection` block
+of named `material` blocks, no figure or actor named, almost all under `Materials`; a single material is one
+`material` (nearly always `Preview`) under `actor $CURRENT`. `CR2Parser` reads every one of the 4,301 with no
+error and no change; every single material holds exactly one material. 18 hold none: show/hide toggles (`!Handles
+on`, `! Toes off`), `_MT_reset` files that carry `thighLength`, an empty collection, and 0-byte `.mt5` folder
+placeholders.
+
+**How they apply** (owner, 2026-11-19): a collection the way Poser applies one to the selected object, by
+material name, which is exactly a MAT pose, so it goes through `poser.apply_mat_pose` (dropdown and file field
+take `.mc6`/`.mcz`; label now "Apply MAT Pose or Collection"). A single material to **one material the user picks**,
+its name ignored: new `poser.apply_material_to_slot` ("Apply Single Material"), same reader, builder, texture lookup
+and first-time backup (`applyMatPose.keep_original`, shared). Built first as "to the active material slot"; owner's
+correction (2026-11-19): Poser applies one to whichever part is selected, which Blender has no equivalent of, so
+the dialog has a searchable **Replace** field over the mesh's materials, starting on the active slot's. A scripted
+call without `target_material` still uses the active slot; a name that isn't one of the mesh's materials is
+refused.
+
+**Library**: kinds `"material"` (collections join MAT poses) and new `"slot_material"`, listed and badged (an
+outlined swatch with one filled quarter, it changes one of an object's materials, in **green**). Telling `.mt5`
+from `.mc6` apart (owner, 2026-11-19): first built violet like the MAT badge, which made the glyph the only
+difference and too subtle at shelf size, so single materials got their own colour (blue, amber and violet are
+taken). A collection keeps the MAT pose's badge, since it applies the same way; what it is goes into a tag
+instead: `collection` on `.mc6`/`.mcz`, `single material` on `.mt5`/`.mz5` (`library_index.FILE_TYPE_TAGS`), which
+Blender's own search matches (measured for 7.6), and the Browser's side panel names the exact type.
+`ASSET_FORMAT_VERSION` 5. Checked on the real library: in `LM Shadow Dancer` (20 files) "single" finds the 5
+`.mt5`, "collection" the 15 `.mc6`; screenshot shows green and violet badges side by side. The shelf's MAT Poses
+switch is "Materials" and lists both. Applying from the Browser or shelf routes `slot_material` to that
+operator's dialog; a mesh with no materials is refused up front. Owner's scope note: listing new kinds that reuse built code
+is fine; what 7.6 ruled out was reinventing Blender's search.
+
+**Verified**: pytest (classification of all four extensions, compressed and plain; the toggle file hidden; a
+material file outside Poser's folders not an entry; reading through the MAT reader; the runtime walk; asset kind
+resolution). Real library on 5.3, 14 top-level roots: 10,145 assets, 0 failures; 2,545 collections and 1,259
+single materials; every material file left out is explained (377 sit in two roots nested a level deeper than the
+test registered, 18 hold no material). Headless on Aiko3: `Aiko3 ToonShade.mc6` replaced 34/34 and named its 5
+unmatched; `Blue Jeans.mt5` replaced slot 4 and kept the original from the first replacement. After the Replace field:
+picking `Figure_SkinTorso` while slot 4 is active replaces SkinTorso only; a name not on the mesh is refused; a
+scripted call with no pick uses the active slot; poll refuses a mesh with no materials. Looked at in a real window:
+both badges side by side in the Asset Browser, the shelf on Materials, the dialog with its Replace field. Owner's
+summary, which this matches: a single material is one material for the part you choose; a collection works like a
+MAT pose and only changes the materials whose names the figure has.
+
+#### 8.4 follow-up (2026-11-19): Ambient Occlusion, Clouds and Color Ramp translated
+
+Owner's report: applying `Blue Jeans.mt5` listed `ambient_occlusion, clouds, colorramp, fastscatter x2, granite, s,
+t, toon` as left out, and the first three have Blender equivalents (owner; the last four and fastscatter don't).
+Poser's meaning of each input is from the Poser 11 Reference Manual (chapter 16, on the owner's drive); Blender's
+sockets from the 5.3 manual. Inputs measured across the drive (676 AO, 878 Clouds, 980 Color Ramp node blocks).
+- **ambient_occlusion** -> a colour Mix from white toward Blender's AO colour by Strength (factor unclamped,
+  result clamped: Strength runs to 3 and 5 to darken harder); Samples -> `samples`, MaxDist -> Distance. MaxDist
+  is read as **inches** (x 0.0254): undocumented, inferred because the values found (39.37 = 1 m in inches, 7.74,
+  5.16, 0.74) only make physical sense that way. RayBias dropped (SuperFly ignores it too).
+- **clouds** -> a colour Mix, Sky_Color to Cloud_Color, by a Noise Texture: Scale ("the size of the clouds")
+  inverted into Blender's frequency Scale, Complexity -> Detail, Global_Coordinates on -> world Position.
+  Bottom/Bias/Gain dropped; an approximation, like every procedural translated between renderers.
+- **colorramp** -> a Color Ramp, four stops evenly spaced, Cardinal spline ("a spline color map"; spacing isn't
+  documented). Ramp stops can't take links and 533 colour inputs of 874 ramps are linked, so such a ramp is a chain
+  of three colour mixes, each over a third of Input (`clamp(3 * Input - k)`), linear.
+- Mechanism: `_post_init_node` builds the helper nodes and returns routes ({input: [(node, socket)]}) for inputs
+  that live on them; Phase 1 values and Phase 2 links follow the routes (`_targets`). `_entry_for` picks the
+  ramp's form.
+
+Verified: every material on the drive using one of the three (3,760) translates with no error; after pruning,
+158 AO, 472 Noise and 178 Color Ramp nodes stay connected (plus 204 ramps as mix chains). Blue Jeans now reports
+only `fastscatter x2, granite, s, t, toon`, but still comes out a plain Principled: its Clouds -> ColorRamp feeds
+only fastscatter -> toon, and its AO feeds Color Math nodes on the surface's AlternateDiffuse/AlternateSpecular,
+which the translator folds in only for a scatter or specular node plugged in directly. Still skipped across the
+drive, by materials using them: edge_blend 1,156, toon 738, sphere_map 503, hsv 477, noise 469, fastscatter 432,
+granite 372, diffuse 308, custom_scatter 278, simple_color 248, phong 164, clay 132, cellular 117, spots 114 and
+smaller counts; which of those have equivalents is the owner's call.
+
 #### 8.3 as built (2026-11-19): finding textures the way Poser does
 
 **Measured first** (every texture reference in the owner's 2,643 MAT poses, 24,542 in all). Only 4 distinct
