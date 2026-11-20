@@ -654,7 +654,7 @@ Verified headless on the real Aiko3: applied EarFeline, EarDeer and BrowHeavy, t
 via its `RemDeltas.*`; all three gone, the record empty, and a repeat run reports "not present"
 with no error.
 
-## Phase 7 — Thumbnail library for picking packages (scoping, 2026-11-14; 7.0 to 7.4 done; 7.5+ not started)
+## Phase 7 — Thumbnail library for picking packages (scoping, 2026-11-14; 7.0 to 7.4 and 7.7 done; 7.5, 7.6 not started)
 
 **Goal.** Replace the two `prop_search()` dropdowns with a thumbnail grid for choosing injection and
 removal packages from the owner's Poser Runtime libraries, using Blender's Asset Shelf. The
@@ -876,6 +876,7 @@ The cache and the picker fix today's pain and don't depend on the library, so th
   Dropdowns stay for setups with no Runtime roots or no index built yet.
 - **7.5** Figure shelf: pick a CR2 with a thumbnail, sets `poser_reference_cr2`.
 - **7.6** Phase 5 tie-in: resolved morph names in the asset description, searchable in the browser.
+- **7.7** Built 2026-11-19: Apply's package parse and per-morph positions moved off the main thread (below).
 
 ### 7.2 design (reviewed and built 2026-11-15)
 
@@ -930,7 +931,7 @@ Corrections to the original plan this produced:
 - **The existing 11-15 s main-thread freeze is a separate problem.** Parsing the package happens in
   `execute()` before the modal starts, so a big package freezes Blender with no feedback. 7.2 shrinks
   it for partial selections but Select All brings it back. Moving the parse into the worker thread
-  is a follow-up, not part of 7.2 (decision 10 below).
+  is a follow-up, not part of 7.2 (decision 10 below). Done in 7.7.
 
 **Flow.** The package is picked *inside* the current popup, so the scan can't run at `invoke`: two
 dialogs. Dialog 1 (figure + package, as today) scans on OK and opens dialog 2 (the morph list), whose
@@ -1670,7 +1671,7 @@ confirmed by the owner's test, for the injection shelf only (8.2 shelf correctio
    Built first as "exactly one *choosable* morph skips the list", which applied `pRubenesque` from
    the 95-morph `!All Body.pz2` with no dialog (owner UAT, 2026-11-15). Corrected to the decision's
    own wording: judged on the package, so a long package with one new morph still shows its list.
-10. **Off-thread package parsing is a follow-up**, not folded into 7.2.
+10. **Off-thread package parsing is a follow-up**, not folded into 7.2. Built as 7.7 (2026-11-19).
 
 **Deferred idea.** Expressions act on morph channels only, so they could in principle be applied as
 shape-key *values* on a figure, unlike poses. A separate feature (it touches `targetGeom` *value*
@@ -1732,6 +1733,54 @@ all); the child takes 8.6 s instead of 4.8 (pure-Python decoding). Looked at in 
 `Clothing/Pose/MAT 3 Piece Suit` and the A3-H3 REM packages show their pictures. pytest builds real PICTs in all
 four formats inside a resource fork and checks exact pixels, plus PackBits, refusals and real files against
 ImageMagick (skipped without the drive or `convert`).
+
+### 7.7 as built (2026-11-19): Apply never blocks on a big package
+
+**Measured first** (Aiko3, V3's `! All Head Morphs.pz2`, all 259 selected, profiled headless on 5.3): 76 s in
+all, of which the correspondence build (37 s) was already on Phase 5.1's worker thread, but **reading the package
+(26 s)**, **building each morph's positions (10 s)** and writing 176 shape keys (2-3 s) ran on the main thread, so
+Blender froze for over half a minute with no feedback. The 11-15 s noted in 7.2 was a smaller selection. One more
+freeze on the way in: the first dialog's OK parsed the whole figure CR2 (6.2 s for `!Aiko 3.cr2`) only to read
+`figureResFile`.
+
+**Design.** `core/cr2/injection_job.py` (GPL, no bpy) holds one Apply run's work as an `InjectionJob`: `prepare()`
+parses the package (`load_injection_package` now takes a per-file `progress_callback`), picks the morphs, loads
+the OBJ and either unpacks the cached correspondence (the operator passes the stored key and bytes in) or
+builds it; `morphs()` yields each morph's positions, skipping JCM / already present / empty ones into lists for
+the report. Stages are `reading`, `correspondence`, `morphs`, each with a 0-1 progress the timer reads.
+- **The main thread reads the mesh before the job starts** (reference key positions, or the vertices when the mesh
+  has no keys, its key names, the cache blob) and touches nothing else until morphs arrive. Basis is now created
+  only when the first morph is added, so a package with nothing to apply leaves a key-less mesh alone. The basis is
+  `shape_keys.reference_key`, not the key named `Basis` (a renamed reference key raised `KeyError` before).
+- **A bounded queue (4) between worker and timer**: a morph's positions are a full mesh copy (1.7 MB float64 on
+  Aiko3), 300 MB for 176 if held at once. The timer adds finished morphs for at most 0.1 s per tick, and re-checks
+  presence against the live keys (two morphs of one package can share a label; the job saw only the start state).
+- **Input**: passed through while reading and matching (nothing touches the mesh; the viewport stays usable, as in
+  5.1), held once keys are being added so the mesh can't be edited or put in Edit Mode between two of them. If the
+  mesh was deleted or put in Edit Mode before the first key, the run stops with a message (keys added from Python
+  in Edit Mode are lost when it is left).
+- **Esc and failures roll back**: the keys this run added are removed, and the Basis if it created one. A
+  correspondence built before the cancel stays cached on the mesh (it is still right, and cost 30+ s).
+- **Headless** (`bpy.app.background`) runs the same `prepare()`/`morphs()` inline, as before.
+- **The figure's OBJ**: `cr2_parser.read_figure_res_file()` walks lines tracking brace depth (comments dropped, a
+  `name` line's braces ignored, quoted paths kept) and returns the last root-level `figureResFile`, which is what
+  `_parse_root()` keeps. Checked against the full parse on **all 1,370 CR2s** on the owner's drive: 0 differ, 141 s
+  vs 1,011 s in total.
+
+**Verified in a real Blender 5.3 window** (throwaway config, `--enable-event-simulate`, a 20 ms heartbeat timer
+measuring how long the main thread went without running): first run (correspondence built) 54 s, **longest stall
+0.66 s**, 176/259 added, the report as before; Esc pressed after 26 keys were added: keys back to 201, nothing
+left; cached run 22 s, longest stall 0.55 s. The status bar reads e.g. "building morphs 10/259... 75% 41s (Esc to
+cancel)". Headless on the same package: same counts (176 applied, 80 present, 3 empty), 57 s. pytest: the job's
+stages, cache reuse/stale/broken, selection, the queue hand-over, cancel and errors on a synthetic figure, and
+`read_figure_res_file` against the parser on synthetic and real CR2s.
+
+(The probe's two later runs also logged a 1.35 s gap at their start: the probe's own package scan, run on the
+main thread just before it invoked Apply, the same scan the picker does.)
+
+**Not done**: the picker's own scan (~1 s for this package) still runs in its `invoke()`. The remaining
+0.5-0.66 s stalls weren't attributed; candidates are the cache write (`np.savez_compressed`), the end-of-run
+report and dials, and GIL contention with the worker's pure-Python parse.
 
 ## Phase 8 — MAT pose support (plan, 2026-11-17; not started)
 

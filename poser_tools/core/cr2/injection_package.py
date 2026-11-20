@@ -26,7 +26,7 @@ from .poser_io import read_poser_file
 from .poser_paths import resolve_poser_path
 
 
-def load_injection_package(path: str, extra_roots=None, only_leaves=None) -> dict:
+def load_injection_package(path: str, extra_roots=None, only_leaves=None, progress_callback=None) -> dict:
     """Load one morph-package file, resolving it fully into a single Figure.
 
     A plain inline-delta file is parsed and returned as-is. An orchestrator
@@ -53,6 +53,10 @@ def load_injection_package(path: str, extra_roots=None, only_leaves=None) -> dic
     those are parsed. Parsing is the expensive part (~15s for a 259-morph
     package), so the morph picker loads just the files of the morphs chosen.
 
+    `progress_callback`, if given, is called with the fraction of files parsed
+    after each one. It runs on whatever thread called this; an exception it
+    raises stops the load (core/cr2/injection_job.py cancels that way).
+
     Returns:
         {
             "figure": Figure,           -- combined actors from every file parsed
@@ -69,9 +73,8 @@ def load_injection_package(path: str, extra_roots=None, only_leaves=None) -> dic
 
     figure = Figure(source_file=path)
     parsed = []
-    for leaf in files["leaf_paths"]:
-        if wanted is not None and leaf not in wanted:
-            continue
+    to_parse = [leaf for leaf in files["leaf_paths"] if wanted is None or leaf in wanted]
+    for leaf in to_parse:
         parsed.append(leaf)
         # Deliberately not deduplicating actor names across files here
         # -- Phase 3 only ever iterates combined.actors (via name_match.py),
@@ -82,6 +85,8 @@ def load_injection_package(path: str, extra_roots=None, only_leaves=None) -> dic
         figure.actors.extend(sub_figure.actors)
         for actor in sub_figure.actors:
             figure.actor_map[actor.name] = actor
+        if progress_callback:
+            progress_callback(len(parsed) / len(to_parse))
     return {"figure": figure, "unresolved_paths": files["unresolved_paths"], "leaf_paths": parsed}
 
 

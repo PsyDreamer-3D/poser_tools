@@ -28,7 +28,7 @@ Standard scaffold layout. Two things worth knowing:
   `core/cr2/injection_scan.py` (a cheap brace-walking listing of a package's morphs for the picker;
   must agree with `CR2Parser`, see its tests), `core/cr2/library_index.py` (Phase 7.3a: classifies
   the owner's whole Poser library into injection/removal entries and builds the asset-index
-  manifest; same rule, its sniff is tested against the parser), `core/cr2/mat_pose.py` (Phase 8: MAT pose reading and slot matching), and `core/cr2/apply_injection.py` (morph-injection Phases 1 and 3, see below) live in the same package
+  manifest; same rule, its sniff is tested against the parser), `core/cr2/mat_pose.py` (Phase 8: MAT pose reading and slot matching), `core/cr2/injection_job.py` (7.7: Apply's off-thread job), and `core/cr2/apply_injection.py` (morph-injection Phases 1 and 3, see below) live in the same package
   but are original `poser_tools` code, not adapted from `cr2_importer` — GPL-3.0-or-later, not MIT.
   Same no-`bpy` / plain-`pytest` discipline (`tests/test_mesh_correspondence.py`,
   `tests/test_injection_package.py`, `tests/test_apply_injection.py`).
@@ -289,6 +289,16 @@ don't resume it without a specific reason to.
   decoded, anything else refused. Checked against ImageMagick on all 8,560 PICTs (identical except the 16-bit
   ones' 5-to-8-bit widening, which here replicates bits). All 1,644 `.rsr`-only library entries now have their
   picture.
+- **7.7: Apply never blocks on a big package** (`core/cr2/injection_job.py`, no bpy). The package parse (26 s on V3's
+  259 head morphs) and each morph's positions (10 s) ran on the main thread around the 5.1 threaded correspondence;
+  an `InjectionJob` now does parse, OBJ load, cache check/build and positions on the worker. The operator reads the
+  mesh first (reference key or vertices, key names, the cache blob), then its timer drains a bounded queue of
+  finished morphs into shape keys for at most 0.1 s per tick (a morph's positions are a full mesh copy, so never all
+  held at once). Input passes through until keys are being added, then is held so the mesh can't be edited between
+  two; Esc and failures remove the keys that run added (and a Basis it created; Basis is only made when a morph
+  lands). Headless runs the same job inline. Longest main-thread stall measured in a real window: 0.66 s. The
+  figure's OBJ comes from `cr2_parser.read_figure_res_file()` (brace-depth line walk, agrees with the parser on all
+  1,370 CR2s on the owner's drive) instead of a 6 s full parse on the first dialog's OK.
 - **Phase 8.3: textures found the way Poser does** (`core/cr2/texture_paths.resolve_texture`, used by
   `material_builder.make_image_loader`): as written, then relative to Runtime / Runtime:Textures, a Windows
   path's Runtime tail, a `.bum`'s source image, and the file name across the roots (shared trailing folders,
