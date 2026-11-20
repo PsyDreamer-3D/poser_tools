@@ -654,7 +654,7 @@ Verified headless on the real Aiko3: applied EarFeline, EarDeer and BrowHeavy, t
 via its `RemDeltas.*`; all three gone, the record empty, and a repeat run reports "not present"
 with no error.
 
-## Phase 7 — Thumbnail library for picking packages (scoping, 2026-11-14; 7.0 to 7.4 and 7.7 done; 7.5, 7.6 not started)
+## Phase 7 — Thumbnail library for picking packages (scoping, 2026-11-14; 7.0 to 7.4 and 7.7 done; 7.5 and 7.6 tabled)
 
 **Goal.** Replace the two `prop_search()` dropdowns with a thumbnail grid for choosing injection and
 removal packages from the owner's Poser Runtime libraries, using Blender's Asset Shelf. The
@@ -874,8 +874,10 @@ The cache and the picker fix today's pain and don't depend on the library, so th
 - **7.4** Built 2026-11-17 (details below): using a package from the Asset Browser (right-click,
   side panel) and from two shelves; injection opens the (7.2) dialog pre-filled, removal runs.
   Dropdowns stay for setups with no Runtime roots or no index built yet.
-- **7.5** Figure shelf: pick a CR2 with a thumbnail, sets `poser_reference_cr2`.
-- **7.6** Phase 5 tie-in: resolved morph names in the asset description, searchable in the browser.
+- **7.5** Figure shelf: pick a CR2 with a thumbnail, sets `poser_reference_cr2`. **Tabled** (owner,
+  2026-11-19), see "7.5 tabled" below.
+- **7.6** Phase 5 tie-in: search packages by the morphs they contain. **Tabled** (owner, 2026-11-19); the
+  plan as first written doesn't work, see "7.6 tabled" below.
 - **7.7** Built 2026-11-19: Apply's package parse and per-morph positions moved off the main thread (below).
 
 ### 7.2 design (reviewed and built 2026-11-15)
@@ -1733,6 +1735,45 @@ all); the child takes 8.6 s instead of 4.8 (pure-Python decoding). Looked at in 
 `Clothing/Pose/MAT 3 Piece Suit` and the A3-H3 REM packages show their pictures. pytest builds real PICTs in all
 four formats inside a resource fork and checks exact pixels, plus PackBits, refusals and real files against
 ImageMagick (skipped without the drive or `convert`).
+
+### 7.5 tabled (2026-11-19): the figure shelf
+
+7.5 would have replaced Apply's **Figure (CR2)** dropdown with a shelf of figure thumbnails. It never imports
+anything: it only tells the add-on which Poser figure an FBX-imported mesh is, since Poser numbers morph vertices
+against the figure's own `.obj` and an FBX carries no figure identity. Apply asks that once per mesh and saves the
+answer (`poser_reference_cr2` / `poser_reference_obj`), so a shelf would answer a once-per-mesh question, and a
+figure tile that only labels an FBX already in the scene reads as "add this figure", which it isn't.
+
+**Owner's reasoning:** the only way a figure picker would make sense is bridged with Poser's own FBX exporter, so
+picking a figure exported and imported it; Poser exposes nothing usable for that, and it would be hard to keep
+cross-platform. Figures (anything in the library as a CR2) come over as FBX, full stop. If naming the figure ever
+becomes a chore, the place to ask is **Import Poser FBX**, which knows a figure is being imported, not a shelf.
+
+### 7.6 tabled (2026-11-19): searching packages by the morphs they contain
+
+**What Blender's own search matches**, measured on 5.3 with five Scene assets each carrying "BrowHeavy" in one
+place only: the Asset Browser's search matches the **asset name and tags** (case-insensitive substring, "brow"
+finds both) and **not the description or custom metadata**. The shelf's search box filters by name (seen on the
+real library); whether it also matches tags wasn't checked. So the original 7.6 plan, morph names "in the asset
+description, searchable in the browser", wouldn't be searchable.
+
+**What it would add**: today an asset is named after its package file and tagged with its kind, so searching
+"BrowHeavy" finds the 9 packages whose file name contains it and misses every package that holds it under
+another name (V3's `! All Head Morphs`, character packages, `DC_39`-style file names).
+
+**Two ways it could be built**, if picked up again:
+1. Morph names as asset tags. Blender's search then finds them with no new UI; the cost is a cluttered tag list
+   (259 tags on the big orchestrators, where tags normally hold a few categories) and listing every package's
+   morphs at build time (the picker's scan is ~1 s for the biggest; the whole library is unmeasured). Same-named
+   morphs from different products come up together, which is the point.
+2. An add-on "Find morph" search (sidebar or the shelf popover) listing packages with Apply buttons. Clean tags,
+   but a second search box beside Blender's, and it can't drive the Browser's results (its filter is one string).
+
+Recommended at the time: 1. **Owner tabled 7.6** rather than pick either; nothing is built. **Why** (owner):
+Blender's own search is good enough for now, and both options build a search of the add-on's own beside it,
+reinventing what Blender already does (option 2 openly, option 1 by loading tags with data meant for search).
+The concern is reinventing search, not extending the library: new kinds that reuse what is built (material
+collections, Phase 8.4) are fine.
 
 ### 7.7 as built (2026-11-19): Apply never blocks on a big package
 
