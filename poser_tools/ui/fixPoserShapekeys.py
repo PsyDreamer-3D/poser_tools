@@ -26,11 +26,11 @@ class FixPoserShapekeys_Panel(FixPoserShapekeys, bpy.types.Panel):
         layout.label(text="Runs automatically on import — use this to re-run", icon='INFO')
 
         row = layout.row(align=True)
-        row.prop(options, "is_daz")
+        row.prop(options, "legacy_daz_mode")
         text = """
-        Example of legacy Daz figures:
-        Millennium 4, Millennium 3, etc.,
-        but not Genesis or newer.
+        Legacy Daz figure naming (Millennium 3/4, but not Genesis or
+        newer) is auto-detected from the imported shape-key names.
+        Override only if detection guessed wrong.
         """
         for line in text.splitlines():
             line = line.strip()

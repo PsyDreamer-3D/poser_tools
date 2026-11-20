@@ -3,6 +3,8 @@
 import bpy
 from bpy.props import BoolProperty, EnumProperty, StringProperty
 
+from ..properties.poserToolsAddonSettings import _LEGACY_DAZ_MODE_ITEMS
+
 
 _BONE_AXES = (
     ('X',  "X Axis",  ""),
@@ -70,11 +72,13 @@ class OT_ImportPoserFBX(bpy.types.Operator):
                     "joint-corrective (JCM) morphs, right after import",
         default=True,
     )
-    legacy_daz_figure: BoolProperty(
+    legacy_daz_mode: EnumProperty(
         name="Legacy Daz3D Figure",
-        description="Millennium 3/4 figures (Michael 4, Victoria 4, Aiko 3, …) — their morphs use a "
-                    "'p'/'PBM' name prefix instead of Blender's numeric suffix",
-        default=False,
+        description="Millennium 3/4 figures (Michael 4, Victoria 4, Aiko 3, …) use a 'p'/'PBM' "
+                    "name prefix instead of Blender's numeric suffix -- auto-detected from the "
+                    "imported shape-key names, override only if detection guessed wrong",
+        items=_LEGACY_DAZ_MODE_ITEMS,
+        default='AUTO',
     )
 
     def draw(self, context):
@@ -99,7 +103,7 @@ class OT_ImportPoserFBX(bpy.types.Operator):
         col.prop(self, "consolidate_shapekeys")
         sub = col.row()
         sub.enabled = self.consolidate_shapekeys
-        sub.prop(self, "legacy_daz_figure")
+        sub.prop(self, "legacy_daz_mode")
 
     def invoke(self, context, event):
         context.window_manager.fileselect_add(self)
@@ -255,7 +259,7 @@ class OT_ImportPoserFBX(bpy.types.Operator):
                 if obj.data.shape_keys is None or obj.get("morphs_consolidated"):
                     continue
                 rep = consolidate_poser_shapekeys(
-                    obj, obj.data.shape_keys.key_blocks, self.legacy_daz_figure
+                    obj, obj.data.shape_keys.key_blocks, self.legacy_daz_mode
                 )
                 obj["morphs_consolidated"] = True
                 done += 1

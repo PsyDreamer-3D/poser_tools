@@ -16,6 +16,19 @@ _MERGE_RECORD_VERSION = 1
 _TRAILING_DIGITS_RE = re.compile(r'\.[0-9]{3}')
 _PBM_RE = re.compile(r'^PBM')
 
+# Tighter than is_child_shapekey's sh_name[0] == 'p' check (which assumes the
+# figure is already known to be legacy Daz) -- this one is used to detect
+# that in the first place, so it needs to reject a coincidental lowercase-p
+# morph name on a modern figure. Real M3/M4 exports always follow p+PascalCase
+# ("pStylized", "pNavelRaise"); see docs/handoff-shapekey-improvements.md for
+# the LaFemme/Aiko3 numbers this was validated against.
+_P_PREFIX_RE = re.compile(r'^p[A-Z]')
+
+# Real data shows no gray zone (0 matches on modern figures, hundreds on
+# legacy Daz ones) -- this floor just guards against a single coincidental
+# name tripping detection, not a tuned cutoff.
+_LEGACY_DAZ_MIN_MATCHES = 3
+
 # Per-vertex displacement (world units) above which a child morph is considered
 # to actually move a vertex. Below this is float32 noise. Used only for overlap
 # detection — Poser's per-actor morph split is disjoint in every figure tested,
@@ -169,6 +182,37 @@ def get_parent_name(sh_name, _is_daz=False):
         return _TRAILING_DIGITS_RE.sub('', sh_name)
 
 
+def detect_legacy_daz(shapekeys):
+    """Sniff the raw (pre-consolidation) shape-key names for the M3/M4-era
+    Daz 'p'/'PBM' naming convention, instead of requiring the user to know
+    which figure an FBX came from -- the FBX carries no figure identity, but
+    the morph names themselves are a reliable enough signal.
+    """
+    matches = sum(
+        1 for sh in shapekeys
+        if sh.name != "Basis" and (_P_PREFIX_RE.match(sh.name) or _PBM_RE.match(sh.name))
+    )
+    return matches >= _LEGACY_DAZ_MIN_MATCHES
+
+
+def resolve_legacy_daz(mode, shapekeys, log=None):
+    """Resolve an 'AUTO'/'ON'/'OFF' mode to the bool consolidate_poser_shapekeys()
+    and friends expect, logging how the decision was reached."""
+    if mode == 'ON':
+        if log is not None:
+            log.append("Legacy Daz3D naming: forced on.")
+        return True
+    if mode == 'OFF':
+        if log is not None:
+            log.append("Legacy Daz3D naming: forced off.")
+        return False
+
+    is_daz = detect_legacy_daz(shapekeys)
+    if log is not None:
+        log.append(f"Legacy Daz3D naming: auto-detected {'yes' if is_daz else 'no'}.")
+    return is_daz
+
+
 def remove_shapekey(obj, key_block):
     obj.shape_key_remove(key_block)
 
@@ -236,8 +280,11 @@ def accumulate_fbm_shapekey(master_shapekeys, morph, shapekeys, basis_co, child_
     return overlap
 
 
-def consolidate_poser_shapekeys(obj, shapekeys, _is_daz=False):
+def consolidate_poser_shapekeys(obj, shapekeys, legacy_daz_mode='AUTO'):
     """Merge Poser's split parent/child morphs into single shape keys.
+
+    legacy_daz_mode is 'AUTO' (detect from the raw shape-key names -- see
+    detect_legacy_daz()), 'ON', or 'OFF'.
 
     Returns a summary dict:
         consolidated      – FBM names that absorbed one or more children
@@ -264,6 +311,8 @@ def consolidate_poser_shapekeys(obj, shapekeys, _is_daz=False):
         "merge_record": {},
         "log": log,
     }
+
+    _is_daz = resolve_legacy_daz(legacy_daz_mode, shapekeys, log)
 
     # JCM morphs are pose-driven joint correctives. FBX export bakes the shape
     # but discards the ERC/driver relationship that fires it, so the key can

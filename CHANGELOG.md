@@ -7,12 +7,18 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+---
+
+## [1.0.2] - 2026-11-20
+
 ### Added
 
+- **Legacy Daz3D Figure** is detected automatically. Millennium 3 / 4 figures (Michael 4, Victoria 4, Aiko 3, …) name their morphs with a `p`/`PBM` prefix; the importer now spots that in the imported shape-key names, so the option (in the Import Poser FBX dialog and on **Fix Poser Shapekeys**) is a dropdown defaulting to **Auto-Detect**, with **Force On** / **Force Off** for when it guesses wrong. The decision is logged in the **Poser Shapekey Report** (`Legacy Daz3D naming: auto-detected yes/no`).
 - Releases include an `index.json`, so the add-on can be added in Blender as a remote repository (`https://github.com/PsyDreamer-3D/poser_tools/releases/latest/download/index.json`) and Blender offers updates. Replaces `scripts/generate_index.py`, whose index Blender refused to sync (no `schema_version` or `archive_size`); the release workflow now uses Blender's own `extension server-generate`.
 
 ### Changed
-- Shape-key consolidation now runs **automatically on import** (new **Consolidate Shape Keys** option in the Import Poser FBX dialog, on by default; **Legacy Daz3D Figure** checkbox alongside it). The standalone **Fix Poser Shapekeys** button is now for re-running or for meshes imported another way.
+- **Requires Blender 5.2 or later** (was 4.4). Blender 5.1.2 crashes when importing an FBX with several figures (Blender bug #156097, fixed in 5.2 and not backported), and 4.4 to 5.1 haven't been tested with this release. Stay on 1.0.1 for older Blender versions.
+- Shape-key consolidation now runs **automatically on import** (new **Consolidate Shape Keys** option in the Import Poser FBX dialog, on by default). The standalone **Fix Poser Shapekeys** button is now for re-running or for meshes imported another way.
 - **Fix Poser Shapekeys** now deletes joint-corrective morphs (JCMs, `JCM…`). FBX export bakes the shape but drops the bone-driven relationship that fires it, so a JCM shape key on the imported mesh can't function — it was only cluttering the list (156 of 196 keys on LaFemme). The report lists every one removed.
 - **Fix Poser Shapekeys** now flags morphs whose split child deltas overlap on the same vertex (they get summed, which can over-shoot). Poser's exports haven't shown this in practice, but a malformed one is now reported instead of silently baked in.
 - **Fix Poser Shapekeys** now records what it merged as JSON on the mesh (`mesh["poser_shapekey_merges"]`) — which shape keys absorbed which children, and any renames — so a later tool can map a pre-merge morph name back to the surviving one.
