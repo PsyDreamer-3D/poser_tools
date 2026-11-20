@@ -1916,7 +1916,14 @@ call without `target_material` still uses the active slot; a name that isn't one
 refused.
 
 **Library**: kinds `"material"` (collections join MAT poses) and new `"slot_material"`, listed and badged (an
-outlined violet swatch with one filled quarter: it changes one of an object's materials). The shelf's MAT Poses
+outlined swatch with one filled quarter, it changes one of an object's materials, in **green**). Telling `.mt5`
+from `.mc6` apart (owner, 2026-11-19): first built violet like the MAT badge, which made the glyph the only
+difference and too subtle at shelf size, so single materials got their own colour (blue, amber and violet are
+taken). A collection keeps the MAT pose's badge, since it applies the same way; what it is goes into a tag
+instead: `collection` on `.mc6`/`.mcz`, `single material` on `.mt5`/`.mz5` (`library_index.FILE_TYPE_TAGS`), which
+Blender's own search matches (measured for 7.6), and the Browser's side panel names the exact type.
+`ASSET_FORMAT_VERSION` 5. Checked on the real library: in `LM Shadow Dancer` (20 files) "single" finds the 5
+`.mt5`, "collection" the 15 `.mc6`; screenshot shows green and violet badges side by side. The shelf's MAT Poses
 switch is "Materials" and lists both. Applying from the Browser or shelf routes `slot_material` to that
 operator's dialog; a mesh with no materials is refused up front. Owner's scope note: listing new kinds that reuse built code
 is fine; what 7.6 ruled out was reinventing Blender's search.

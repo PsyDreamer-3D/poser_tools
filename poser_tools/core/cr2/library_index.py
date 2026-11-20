@@ -458,7 +458,7 @@ def _folder_hash(entries: list) -> str:
 _CATALOG_NAMESPACE = uuid.UUID("5f6c1e3a-0b0e-4a52-9d7e-5b7f3c1f2a10")
 # Bump when what the asset files contain changes (placeholders, tags, payload keys), so
 # existing ones are rebuilt: it goes into the manifest signature.
-ASSET_FORMAT_VERSION = 4   # 2: stand-ins are Scenes (the Asset Browser doesn't list Images); 3: kind badge on thumbnails; 4: .rsr thumbnails decoded
+ASSET_FORMAT_VERSION = 5   # 2: stand-ins are Scenes (the Asset Browser doesn't list Images); 3: kind badge on thumbnails; 4: .rsr thumbnails decoded; 5: single materials badged green, file-type tags
 
 
 def asset_signature(blender_version: str) -> str:
@@ -537,8 +537,17 @@ def make_signature(roots, extra=None) -> dict:
     return {"version": MANIFEST_VERSION, "roots": list(roots), "extra": extra}
 
 
-def _tags(kind: str, mixed: bool, incomplete: bool) -> list:
+# What a material file is, as a tag: the kind alone can't say it, since a collection shares the MAT
+# pose's kind (it applies the same way). Tags are what Blender's own search matches, so typing
+# "collection" or "single" finds them (owner, 2026-11-19: telling .mt5 and .mc6 apart).
+FILE_TYPE_TAGS = {ext: "collection" for ext in COLLECTION_EXTENSIONS}
+FILE_TYPE_TAGS.update({ext: "single material" for ext in SLOT_MATERIAL_EXTENSIONS})
+
+
+def _tags(kind: str, mixed: bool, incomplete: bool, ext: str = "") -> list:
     tags = [kind]
+    if ext in FILE_TYPE_TAGS:
+        tags.append(FILE_TYPE_TAGS[ext])
     if mixed and "removal" not in tags:
         tags.append("removal")
     if incomplete:
@@ -622,7 +631,7 @@ def build_manifest(roots, previous=None, signature_extra=None, progress=None, ca
                 "incomplete": rec["incomplete"],
                 "n_files": rec["n_files"],
                 "n_missing": rec["n_missing"],
-                "tags": _tags(rec["kind"], rec["mixed"], rec["incomplete"]),
+                "tags": _tags(rec["kind"], rec["mixed"], rec["incomplete"], item.ext),
                 "description": _describe(rel_path, rec),
                 "thumbnail": thumb,
                 "thumbnail_kind": thumb_kind,

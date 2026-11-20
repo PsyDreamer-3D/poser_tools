@@ -589,10 +589,13 @@ def test_material_files_are_listed_by_kind_compressed_or_not(lib):
     shown = {e["rel_path"].split("libraries/")[1]: (e["kind"], e["tags"], e["catalog"])
              for f in m["folders"] for e in f["entries"]}
     assert shown == {
-        "Materials/City/Default City.mc6": ("material", ["material", "poser"], "Content/Materials/City"),
-        "Materials/City/Night City.mcz": ("material", ["material", "poser"], "Content/Materials/City"),
-        "Materials/Glass/Clear.mt5": ("slot_material", ["slot_material", "poser"], "Content/Materials/Glass"),
-        "Materials/Glass/Frosted.mz5": ("slot_material", ["slot_material", "poser"], "Content/Materials/Glass"),
+        # The file-type tag tells a collection from a MAT pose, which shares its kind (owner, 2026-11-19).
+        "Materials/City/Default City.mc6": ("material", ["material", "collection", "poser"], "Content/Materials/City"),
+        "Materials/City/Night City.mcz": ("material", ["material", "collection", "poser"], "Content/Materials/City"),
+        "Materials/Glass/Clear.mt5": ("slot_material", ["slot_material", "single material", "poser"],
+                                      "Content/Materials/Glass"),
+        "Materials/Glass/Frosted.mz5": ("slot_material", ["slot_material", "single material", "poser"],
+                                        "Content/Materials/Glass"),
     }
     handles = next(p for p in m["classified"] if p.endswith("!Handles on.mc6"))
     assert m["classified"][handles]["kind"] == "other"

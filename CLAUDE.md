@@ -426,7 +426,7 @@ Everything else is manual smoke test only — no `bpy`-dependent code has automa
    Active Mesh...**) or on the shelf switched to Materials opens that dialog with the file picked. A collection
    (`Aiko3 ToonShade.mc6`) goes through the same dialog. **Apply Single Material**, pick a `.mt5`/`.mz5`
    (`Blue Jeans.mt5`) and a material in **Replace** (starts on the active slot's): Apply replaces only that material
-   and keeps `<name> (original)`. From the library, a single material (quarter-filled badge) opens that dialog.
+   and keeps `<name> (original)`. From the library, a single material (green badge) opens that dialog; searching "single" / "collection" narrows to one type (tags).
 
 For a quick check without Blender: `python -m py_compile` the tree, or import `poser_tools` under a
 stubbed `bpy` and call `register()`/`unregister()` — that catches class-tuple typos and bad import

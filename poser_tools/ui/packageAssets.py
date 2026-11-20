@@ -9,12 +9,14 @@ chosen, docs/handoff-morph-injection.md "7.3 correction"), the Asset Browser has
 for a custom drop, and a shelf drag operator would only repeat the click.
 """
 
+import os
+
 import bpy
 from bpy_extras import asset_utils
 
 from ..core.utils import _TAB
 
-from ..operators.useMorphPackage import package_asset_kind
+from ..operators.useMorphPackage import asset_fields, package_asset_kind
 
 _OPERATOR = "poser.use_morph_package"
 _ACTIONS = {
@@ -25,6 +27,18 @@ _ACTIONS = {
 }
 _KIND_LABELS = {"injection": "Injection package", "removal": "Removal package",
                 "material": "MAT pose or material collection", "slot_material": "Single material"}
+# A collection shares the MAT pose's kind (it applies the same way), so its label comes from the file type.
+_FILE_TYPE_LABELS = {".mc6": "Material collection", ".mcz": "Material collection",
+                     ".pz2": "MAT pose", ".p2z": "MAT pose"}
+
+
+def _kind_label(kind, asset):
+    if kind == "material":
+        rel_path = asset_fields(asset).get("poser_rel_path", "")
+        return _FILE_TYPE_LABELS.get(os.path.splitext(rel_path)[1].lower(), _KIND_LABELS[kind])
+    return _KIND_LABELS[kind]
+
+
 # The shelf's Materials switch lists every material kind.
 _SHELF_GROUPS = {"material": ("material", "slot_material")}
 
@@ -54,7 +68,7 @@ class POSER_PT_package_asset(asset_utils.AssetBrowserPanel, bpy.types.Panel):
     def draw(self, context):
         layout = self.layout
         kind = package_asset_kind(context.asset)
-        layout.label(text=_KIND_LABELS[kind])
+        layout.label(text=_kind_label(kind, context.asset))
         obj = context.active_object
         if obj is not None and obj.type == 'MESH':
             layout.label(text=f"Mesh: {obj.name}", icon='MESH_DATA')

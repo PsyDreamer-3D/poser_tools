@@ -46,13 +46,14 @@ import mac_pict  # noqa: E402  (beside this file; see the module docstring)
 PREVIEW_MAX = 256
 PLACEHOLDER_SIZE = 128
 # Flat tiles by kind, with a glyph so they read apart even without colour: a plus for
-# injection, a minus for removal, a filled swatch for a MAT pose or material collection, an outlined swatch
-# with one filled quarter for a single material. Blender can't draw text onto an
+# injection, a minus for removal, a filled swatch for a MAT pose or material collection (violet), an outlined
+# swatch with one filled quarter for a single material (green: the glyph alone was too subtle at shelf size to
+# tell an .mt5 from an .mc6, owner 2026-11-19). Blender can't draw text onto an
 # image in a background process, and the shelf prints the name under the tile anyway. The same
 # tile, small, is the badge on every real thumbnail (owner, 2026-11-18): an INJ, its REM and a
 # character's MAT often ship the same picture, and the shelf lists every kind together by default.
 _TILE_COLORS = {"injection": (0.17, 0.36, 0.58), "removal": (0.58, 0.38, 0.17),
-                "material": (0.42, 0.24, 0.55), "slot_material": (0.42, 0.24, 0.55)}
+                "material": (0.42, 0.24, 0.55), "slot_material": (0.20, 0.48, 0.28)}
 _DEFAULT_TILE = (0.35, 0.35, 0.35)
 # Badge edge as a share of the thumbnail's shorter side; Poser thumbnails are ~91 px, so ~29 px.
 _BADGE_SHARE = 0.32
