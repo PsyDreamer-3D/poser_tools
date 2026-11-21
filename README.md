@@ -126,5 +126,3 @@ add-on stays focused on cleaning up FBX-imported figures (bones, weight groups, 
 ## Notes
 
 This add-on is still in active development — use at your own risk.
-
-For auto-rigging Poser figures in Blender, see the companion add-on [Poser Autorigger](https://github.com/jesgs/poser_autorigger).
