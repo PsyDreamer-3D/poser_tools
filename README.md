@@ -13,7 +13,7 @@ A collection of tools to make working with rigged figures exported from Poser as
 
 ## Installation
 
-To get updates inside Blender, add `https://github.com/PsyDreamer-3D/poser_tools/releases/latest/download/index.json` as a remote repository (**Preferences → Get Extensions → Repositories → + → Add Remote Repository**) and turn on **Check for Updates on Startup**. Releases carry the `index.json` that URL points at, so each new version shows up as an update.
+To install and get updates inside Blender, add `https://psydreamer-3d.github.io/extensions/index.json` as a remote repository (**Preferences → Get Extensions → Repositories → + → Add Remote Repository**) and turn on **Check for Updates on Startup**. That's the [PsyDreamer-3D extensions repository](https://github.com/PsyDreamer-3D/extensions): it lists the other PsyDreamer-3D add-ons too, and each new Poser Tools release shows up as an update within a day. If you added the older `https://github.com/PsyDreamer-3D/poser_tools/releases/latest/download/index.json`, remove it, or Poser Tools is listed twice.
 
 1. Download the latest release `.zip` from the Releases page.
 2. In Blender, go to **Edit → Preferences → Add-ons**.
