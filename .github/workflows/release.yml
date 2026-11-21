@@ -81,3 +81,18 @@ jobs:
           files: |
             dist/*.zip
             dist/index.json
+
+      # List this release in the PsyDreamer-3D extensions repository
+      # (https://github.com/PsyDreamer-3D/extensions) right away, instead of at
+      # that repo's daily run. Needs the org secret EXTENSIONS_DISPATCH_TOKEN, a
+      # token allowed to write to PsyDreamer-3D/extensions; until it exists this
+      # step does nothing and the daily run lists the release.
+      - name: Republish the PsyDreamer-3D extensions index
+        env:
+          GH_TOKEN: ${{ secrets.EXTENSIONS_DISPATCH_TOKEN }}
+        run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::notice::EXTENSIONS_DISPATCH_TOKEN isn't set; the extensions index lists this release at its next daily run."
+            exit 0
+          fi
+          gh api repos/PsyDreamer-3D/extensions/dispatches -f event_type=extension-released
